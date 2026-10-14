@@ -17,7 +17,7 @@ Opdeling: goedgekeurd.
 | WP-10 | Evaluatie- en alertjobs plus beheer-CLI | todo | |
 | WP-11 | Orkestratie: uurlijkse workflow, logging, foutmeldingen | todo | |
 | WP-12 | Marine-ingest (golven) | todo | |
-| WP-13 | PWA-basis | approved | |
+| WP-13 | PWA-basis | building | |
 | WP-14 | Spotlijst en spotpagina | todo | |
 | WP-15 | Kaart | todo | |
 | WP-16 | Profiel, favorieten en alertinstellingen | todo | |
