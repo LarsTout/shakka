@@ -172,7 +172,7 @@ Het root-bestand `.env.example` bevat alleen de ingest-variabelen. `web/.env.exa
 - `/ingest` als uv-project met Python 3.12 en src-layout (`ingest/src/shakka`), console-script `shakka`, dev-dependencies `pytest` en `ruff`, en een ruff-config voor lint en format.
 - `shakka.config` met `Settings` en `get_settings()`. Leest de omgeving en een optioneel `.env` in de repo-root.
 - `shakka.http.make_client()`: een httpx-client met een expliciete timeout en een herkenbare User-Agent zonder persoonsgegevens.
-- `shakka.cli` met het commando `shakka doctor`. Het controleert of de verplichte variabelen er zijn (zonder waarden te tonen) en doet één GET op `{SUPABASE_URL}/rest/v1/` met de publishable key. Exitcode 0 bij succes, 1 bij een fout.
+- `shakka.cli` met het commando `shakka doctor`. Het controleert of de verplichte variabelen er zijn (zonder waarden te tonen) en doet één GET op `{SUPABASE_URL}/rest/v1/` met de **secret key** (header `apikey`). Bij de nieuwe `sb_`-sleutels weigert dit endpoint de publishable key met 401 "Secret API key required"; gecontroleerd op 14 oktober 2026 tegen Lars' project. Exitcode 0 bij succes, 1 bij een fout.
 - `ingest/src/shakka/domain/__init__.py` en `ingest/tests/test_domain_purity.py` met de regels uit "Code-indeling".
 - `/supabase` aangemaakt met `supabase init` (`config.toml`). In `.gitignore` komen `supabase/.temp/` en `supabase/.branches/`.
 - `.github/workflows/ci.yml` met job `ingest`: `uv sync`, `ruff check`, `ruff format --check` en `pytest`. Draait op `push` en `pull_request`.
