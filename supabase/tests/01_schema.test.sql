@@ -2,7 +2,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(70);
+select plan(71);
 
 select tables_are('public'::name, array['spots', 'forecast_hours', 'tide_extremes', 'evaluations', 'profiles', 'favorites', 'alert_rules', 'alert_state', 'api_usage', 'ingest_runs']::name[], 'public has exactly the M1 tables');
 
@@ -136,6 +136,11 @@ select set_eq(
     ('alert_state', 'auth.users', 'c'), ('alert_state', 'spots', 'c')
   $q$,
   'foreign keys cascade on delete');
+
+select is_empty(
+  $q$select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
+      where n.nspname = 'public' and c.relkind = 'r' and not c.relrowsecurity$q$,
+  'row level security is enabled on every public table');
 
 select has_trigger('public'::name, 'spots'::name, 'spots_set_updated_at'::name, 'spots_set_updated_at exists');
 select has_trigger('public'::name, 'profiles'::name, 'profiles_set_updated_at'::name, 'profiles_set_updated_at exists');
