@@ -114,3 +114,11 @@ curl -sS --fail -o ingest/tests/fixtures/openmeteo/forecast_2loc_4models.json \
 ```
 
 Pas daarna `CAPTURE_URL` en `CAPTURE_DATE` in `ingest/tests/test_openmeteo_forecast.py` aan. `ingest/tests/fixtures/openmeteo/README.md` bevat de CC BY 4.0-vermelding van Open-Meteo; werk de opnamedatum (en URL) daar ook bij.
+
+## 10. Getij (Rijkswaterstaat, vanaf WP-04)
+1. `cd ingest && uv run shakka tides stations --search hoek` toont stations met astronomische hoog- en laagwaters (code, naam, lat, lon). Zet de `code` als `rws_station` in `data/spots.yaml`. Neem het dichtstbijzijnde station aan dezelfde kust of hetzelfde zeegat. Dit commando heeft geen `.env` nodig.
+2. `uv run shakka tides fetch` haalt per station eens per 20 uur op; `--force` negeert die regel. Exitcode 1 betekent dat minstens één station faalde (zie de regels onder `failed`).
+3. Hoek van Holland kent een dubbel laagwater. Dat wordt opgeslagen als twee laagwaters; de topagger ertussen wordt niet opgeslagen.
+4. Een onbekend extreemtype (bijv. bij dubbel hoogwater) laat het station falen in plaats van iets te raden. Meld het dan als issue.
+5. Bron: Rijkswaterstaat WaterWebservices (DDAPI20), CC0. Geen uptimegarantie. Een storing van een paar dagen is geen probleem, want er staat 8 dagen vooruit in de database.
+6. Fixtures opnieuw vastleggen: `uv run python scripts/capture_rws_fixtures.py`. Daarna de tests bijwerken: `EXPECTED_EXTREMES` in `tests/test_rws_tides.py`.
