@@ -1,9 +1,9 @@
 """Forecast ingest job: spots -> Open-Meteo (budget guarded) -> forecast_hours."""
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Final, Protocol
 
 import httpx
@@ -15,8 +15,10 @@ from shakka.budget import (
     BudgetUsage,
     estimate_call_weight,
 )
-from shakka.db import SupabaseRest, iso_utc
+from shakka.config import Settings, get_settings
+from shakka.db import DatabaseError, SupabaseRest, iso_utc
 from shakka.domain.forecast import ForecastHour, SpotLocation
+from shakka.http import make_client
 from shakka.openmeteo.forecast import (
     DEFAULT_FORECAST_DAYS,
     HOURLY_VARIABLES,
@@ -172,3 +174,71 @@ def run_forecast_ingest(
         errors=errors,
         deleted=deleted,
     )
+
+
+def _open_resources(settings: Settings) -> tuple[SupabaseRest, httpx.Client]:
+    """Test seam: create the database client and the HTTP client."""
+    return SupabaseRest.from_settings(settings), make_client(timeout=30.0)
+
+
+def _utcnow() -> datetime:
+    """Test seam: the current time."""
+    return datetime.now(UTC)
+
+
+def _run_dry(
+    db: SupabaseRest, budget: BudgetGuard, *, now: datetime, echo: Callable[[str], None]
+) -> int:
+    plan = plan_forecast_ingest(db, budget, now=now)
+    echo("forecast: dry run, no requests to Open-Meteo and no database writes")
+    echo(f"spots with coordinates: {plan.spots}, without coordinates: {len(plan.without_coords)}")
+    echo(f"requests: {plan.requests}, estimated weight: {plan.weight:.2f}")
+    echo(
+        f"usage today: {plan.usage.daily:.2f} / {budget.daily_limit:.0f}, "
+        f"this month: {plan.usage.monthly:.2f} / {budget.monthly_limit:.0f}"
+    )
+    echo("budget: ok" if plan.within_budget else "budget: exceeded")
+    return 0
+
+
+def _run_real(
+    db: SupabaseRest,
+    http: httpx.Client,
+    budget: BudgetGuard,
+    *,
+    now: datetime,
+    echo: Callable[[str], None],
+) -> int:
+    result = run_forecast_ingest(db, http, budget, now=now)
+    echo(
+        f"forecast: spots={result.spots} rows={result.rows} calls={result.calls:.2f} "
+        f"deleted={result.deleted} skipped_budget={'yes' if result.skipped_budget else 'no'} "
+        f"errors={len(result.errors)}"
+    )
+    for line in result.errors:
+        echo(f"error   {line}")
+    failed = bool(result.errors) or result.skipped_budget
+    echo("forecast: failed" if failed else "forecast: ok")
+    return 1 if failed else 0
+
+
+def run_forecast_cli(*, dry_run: bool, echo: Callable[[str], None]) -> int:
+    """Run `shakka forecast fetch`. Returns the exit code. Never prints environment values."""
+    try:
+        settings = get_settings()
+    except ValidationError:
+        echo("forecast: configuration incomplete; run shakka doctor")
+        return 1
+    db, http = _open_resources(settings)
+    try:
+        budget = BudgetGuard(db)
+        now = _utcnow()
+        if dry_run:
+            return _run_dry(db, budget, now=now, echo=echo)
+        return _run_real(db, http, budget, now=now, echo=echo)
+    except DatabaseError as exc:
+        echo(f"forecast: database error: {exc}")
+        return 1
+    finally:
+        http.close()
+        db.close()

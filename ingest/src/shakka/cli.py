@@ -52,5 +52,19 @@ def spots_sync(path: Path | None) -> None:
     raise SystemExit(run_sync(path, echo=click.echo))
 
 
+@cli.group()
+def forecast() -> None:
+    """Wind forecast ingest (Open-Meteo, server-side)."""
+
+
+@forecast.command("fetch")
+@click.option("--dry-run", is_flag=True, help="Show the plan; no Open-Meteo requests, no writes.")
+def forecast_fetch(dry_run: bool) -> None:
+    """Fetch wind forecasts for all spots with coordinates."""
+    from shakka.jobs.forecast import run_forecast_cli
+
+    raise SystemExit(run_forecast_cli(dry_run=dry_run, echo=click.echo))
+
+
 def main() -> None:
     cli()
