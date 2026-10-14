@@ -64,8 +64,23 @@ De Supabase access token en het database-wachtwoord blijven bij Lars en komen ne
 - `supabase start` start de lokale stack, `supabase stop` stopt hem.
 - `supabase status` toont de lokale URL (`http://127.0.0.1:54321`) en de lokale publishable en secret key.
 - Om `.env` tijdelijk naar de lokale stack te laten wijzen: bewaar je echte waarden elders, zet `SUPABASE_URL` op de lokale URL en de sleutels op de lokale waarden uit `supabase status`. Zet de echte waarden daarna terug.
+- `supabase start` past de migraties uit `supabase/migrations/` toe.
+- `supabase db reset` bouwt de lokale database opnieuw op uit `supabase/migrations/`.
+- `supabase test db` draait de pgTAP-tests in `supabase/tests/`.
+- Optionele pariteitstest van `FakeSupabase` tegen echt PostgREST: neem de lokale secret key over uit `supabase status` en draai vanuit `ingest/`: `SHAKKA_TEST_SUPABASE_URL=http://127.0.0.1:54321 SHAKKA_TEST_SUPABASE_SECRET_KEY=<lokale secret key> uv run pytest tests/test_fake_parity.py`. Die test werkt alleen tegen localhost en wordt anders overgeslagen.
 
 ## 7. CI
-De workflow `.github/workflows/ci.yml` draait op `push` en `pull_request`. Job `ingest` doet `uv sync`, `uv run ruff check .`, `uv run ruff format --check .` en `uv run pytest`. CI gebruikt geen secrets.
+De workflow `.github/workflows/ci.yml` draait op `push` en `pull_request`. Job `ingest` doet `uv sync`, `uv run ruff check .`, `uv run ruff format --check .` en `uv run pytest`. Job `db` draait `supabase start` (zonder de diensten die de tests niet nodig hebben) en `supabase test db`. CI gebruikt geen secrets.
 
 Laatste run bekijken: `gh run list --workflow ci.yml --limit 1`.
+
+## 8. Database en migraties
+1. Migraties staan in `supabase/migrations/` en worden nooit achteraf gewijzigd. Een wijziging is altijd een nieuw bestand.
+2. Elke nieuwe tabel krijgt in dezelfde migratie `enable row level security`, `revoke all ... from public, anon, authenticated, service_role`, expliciete grants (ook aan `service_role`, anders kan de ingest er niet bij) en policies. De tabel komt ook in `TABLE_KEYS` in `ingest/src/shakka/db.py`; `test_table_keys_match_migrations` bewaakt dat.
+3. Naar het remote project, na de merge naar `develop` (Lars):
+   - `supabase link --project-ref <ref>` (eenmalig);
+   - `supabase db push --dry-run` om te zien welke migraties meegaan;
+   - `supabase db push`;
+   - `supabase migration list --linked`: alle migraties staan als toegepast.
+4. Laat "Max rows" van de Data API op 1000. `SupabaseRest` vraagt pagina's van 1000; bij een lagere waarde blijft het resultaat compleet, maar kost het meer requests.
+5. `auto_expose_new_tables = false` in `config.toml` spiegelt de instelling van het remote project. Weigert een nieuwere CLI die sleutel, haal de regel dan weg. De migraties werken ook zonder, omdat ze zelf revoken en granten.
