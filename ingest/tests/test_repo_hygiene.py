@@ -73,6 +73,8 @@ def test_ci_workflow_contract():
         "- run: uv run ruff check .",
         "- run: uv run ruff format --check .",
         "- run: uv run pytest",
+        "db:",
+        "- run: supabase test db",
     ):
         assert expected in lines, expected
 
