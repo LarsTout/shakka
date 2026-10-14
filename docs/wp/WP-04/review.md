@@ -1,0 +1,33 @@
+# Review WP-04, ronde 1
+Oordeel: APPROVED
+
+## Blokkerend
+Geen.
+
+## Niet-blokkerend
+N-1: De afwijking van `ddlpy` (A1) is voldoende onderbouwd, maar Lars moet er expliciet mee akkoord gaan. Waar: Aannames A1, Risico R2. Waarom: `WORK_PACKAGES.md` (WP-04 In scope en Fixture) en de stacktabel in `PROJECT_PLAN.md` noemen `ddlpy` letterlijk. De onderbouwing klopt wel: `rws-ddlpy` 0.10.0 (23-12-2025) roept `catalog()` en `_measurements_slice()` aan met `timeout=None` en gebruikt `requests`. Dat botst met de projectregel "elke `httpx.Client` uit `make_client()` met een expliciete timeout" en met WP-22 ("alle externe calls via `shakka.http.make_client`"). De request-vorm in de blueprint komt overeen met `ddlpy` (`_get_request_dicts`, `_measurements_slice`, `endpoints.json`) en met de DDAPI20-OpenAPI. Alle AC's blijven haalbaar: de fixture wordt een ruwe DDAPI20-respons, en daaruit bouwt `ddlpy` zelf ook zijn DataFrame. Voorstel: laat de orchestrator dit als beslispunt in de PR-tekst zetten. Keurt Lars het goed, pas dan bij gelegenheid de stackregel in het plan aan ("Rijkswaterstaat DDAPI20 via httpx").
+
+N-2: AC-1 "`kind` wisselt af" wordt versoepeld (een `low`→`low`-paar mag alleen bij `laagwater 1` gevolgd door `laagwater 2`). Waar: A3, `test_fixture_kinds_alternate`. Waarom: inhoudelijk klopt dit (agger bij Hoek van Holland), en een topagger opslaan als `high` zou misleidend zijn. Het wijkt wel af van de letterlijke AC. Voorstel: neem het samen met N-1 op als beslispunt voor Lars.
+
+N-3: Een fetcher die een lege lijst teruggeeft, wist in de job het hele venster van dat station. Waar: `run_tide_ingest` stap 5. Waarom: de upsert is dan een no-op (`check_rows`/`_batches` sturen niets). Daarna verwijdert de venster-delete alle rijen met `fetched_at < now` in `[start, end]`. De echte `fetch_tide_extremes` geeft nooit leeg terug (A6), maar `TideFetcher` is een open contract (WP-11 en tests). Voorstel: maak in de job van een lege `deduped` een `ValueError("fetch returned no extremes")`, zodat het station in `failed` komt. Dat is één regel en een test.
+
+N-4: Een ongeldige `rws_station` kan de hele stap laten falen in plaats van alleen dat station. Waar: `run_tide_ingest` stap 2 en 4. Waarom: `in_filter` geeft `ValueError` op `"` of `\`. Stap 4 vangt niets af, dus alle stations falen en de CLI toont een traceback (geen `DatabaseError`). Met `--force` wordt stap 4 overgeslagen en komt hetzelfde station netjes in `failed`. Dat gedrag is inconsistent. WP-02 valideert het formaat van `rws_station` niet. Voorstel: filter in stap 2 op `STATION_CODE_RE`. Ongeldige codes gaan direct naar `failed`/`errors`, zonder fetch en zonder `in_filter`.
+
+N-5: De parsers vangen een structureel afwijkende respons niet overal af als `TideFetchError`. Waar: `parse_extremes_response` stap 4–7 en `parse_stations` stap 2–4. Waarom: een ontbrekende `Tijdstip`-sleutel, een `MetingenLijst` die geen lijst is, of een lijstitem dat geen dict is, geeft `KeyError`/`TypeError`/`AttributeError`. In de job wordt dat afgevangen, maar `tides stations` vangt alleen `TideFetchError` en toont dan een traceback. Voorstel: laat beide parsers onverwachte vormen expliciet omzetten naar `TideFetchError("<label>: unexpected response")`, en test dat met één synthetische case.
+
+N-6: Typemetingen met `Kwaliteitswaardecode == "99"` worden niet overgeslagen. Waar: `parse_extremes_response` stap 7. Waarom: een ongeldige typemeting met een lege of rare tekst laat het hele station falen, ook als de bijbehorende niveaumeting zelf al was overgeslagen (een gat). Voorstel: sla in stap 7 ook typemetingen met code `99` over. Een niveau zonder geldig type blijft via stap 8 gewoon een fout.
+
+N-7: De timeouts in R5 zijn geen totaalduur. Waar: R5 en R6. Waarom: `httpx.Timeout(30)` geldt per fase (connect/read/write/pool), niet voor de hele request. Een trage, druppelende respons kan dus langer duren dan 30 s per station, en de catalogus langer dan 60 s. Voor de uurlijkse run met een handvol stations is dat acceptabel. Voorstel: noem het in R5 als bekend risico voor WP-22 (totaalbudget per stap).
+
+N-8: Sectienummer in de RUNBOOK. Waar: Bestanden, `docs/RUNBOOK.md` sectie 9. Waarom: WP-02 en WP-03 lopen parallel en voegen waarschijnlijk ook een "sectie 9" toe. Voorstel: neem dit op in R7 (bij een conflict hernummeren, en alles behouden).
+
+N-9: De zin "Faalt dit bij > 500 kB, dan is het inkorten mislukt" in de beschrijving van het capturescript is dubbelzinnig. Voorstel: "Is de subset groter dan 500 kB, dan exit 1 zonder bestanden te schrijven."
+
+## Gecontroleerde bronnen
+- https://rijkswaterstaatdata.nl/waterdata/ : endpoints `METADATASERVICES/OphalenCatalogus` en `ONLINEWAARNEMINGENSERVICES/OphalenWaarnemingen`; voorbeeldbody voor extremen met alleen `Groepering.Code` `GETETBRKD2`, die ook het getijextreemtype oplevert; ISO 8601 met offset; antwoorden in `+01:00`; CC0; `Groeperingen` als catalogusfilter.
+- https://ddapi20-waterwebservices.rijkswaterstaat.nl/webservices-api-docs : `ProcesType` is een string-enum (`meting`/`verwachting`/`astronomisch`) in zowel request als respons; `Groepering`/`Typering` zijn `{Code}`; respons `Succesvol`, `Foutmelding`, `WaarnemingenLijst[].MetingenLijst[].{Tijdstip, Meetwaarde.{Waarde_Numeriek, Waarde_Alfanumeriek}, WaarnemingMetadata.Kwaliteitswaardecode}`; 204 = "Geen waarnemingen gevonden". Catalogus: metadata-items met `AquoMetadata_MessageID`, koppelitems met `AquoMetaData_MessageID` en `Locatie_MessageID`, locaties met `Code`, `Naam`, `Lat`, `Lon`. Dit klopt met `parse_stations` stap 2–3.
+- https://raw.githubusercontent.com/Deltares/ddlpy/main/ddlpy/ddlpy.py : `timeout=None` bij `catalog()` en `_measurements_slice()`; join `Locatie_MessageID`/`AquoMetaData_MessageID` ↔ `AquoMetadata_MessageID`; `ProcesType` als platte string in `AquoMetadata`; `isoformat(timespec="milliseconds")`; code `99` betekent ongeldig; 204 geeft `NoDataError`.
+- https://raw.githubusercontent.com/Deltares/ddlpy/main/ddlpy/endpoints.json : URL's en de standaard-`CatalogusFilter` (inclusief `Groeperingen`, `ProcesTypes`, `Typeringen`).
+- https://pypi.org/pypi/rws-ddlpy/json : laatste versie 0.10.0 (23-12-2025); dependencies numpy, pandas, python-dateutil, pytz, tqdm, click, requests, platformdirs.
+- https://deltares.github.io/hatyan/_modules/hatyan/ddlpy_helpers.html : `convert_exttype_str2num` met `hoogwater`, `laagwater`, `laagwater 1`, `topagger`, `laagwater 2`; typekanaal via `Typering.Code == "GETETTPE"` en `Waarde_Alfanumeriek`.
+- https://github.com/Deltares-research/kenmerkendewaarden/issues/4 : de extreemtypereeks heeft `Hoedanigheid.Code` `NVT`. Dat onderbouwt waarom `Hoedanigheid` niet in de request staat (A2).

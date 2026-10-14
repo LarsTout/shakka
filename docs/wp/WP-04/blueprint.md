@@ -1,5 +1,5 @@
 # Blueprint WP-04: Getij-ingest (Rijkswaterstaat)
-Status: DRAFT
+Status: APPROVED
 Revisie: 1
 
 ## Doel
