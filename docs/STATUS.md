@@ -5,7 +5,7 @@ Opdeling: goedgekeurd.
 | WP | Naam | Status | Notitie |
 |---|---|---|---|
 | WP-00 | Repo, tooling, CI en Supabase-koppeling | done | |
-| WP-01 | Datamodel M1, RLS en database-client | approved | |
+| WP-01 | Datamodel M1, RLS en database-client | building | |
 | WP-02 | Spotprofielen: schema, validatie, sync en startset | todo | |
 | WP-03 | Forecast-ingest wind (Open-Meteo multi-model) met call-budget | todo | |
 | WP-04 | Getij-ingest (Rijkswaterstaat) | todo | |
