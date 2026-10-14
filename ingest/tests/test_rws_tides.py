@@ -3,12 +3,18 @@ import math
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import httpx
 import pytest
 
+import shakka.rws.tides as rws
 from shakka.rws.tides import (
+    CATALOGUE_URL,
+    OBSERVATIONS_URL,
     TideFetchError,
     build_catalogue_request,
     build_extremes_request,
+    fetch_tide_extremes,
+    list_tide_stations,
     parse_extremes_response,
     parse_stations,
 )
@@ -361,3 +367,131 @@ def test_parse_stations_errors():
     broken = catalogue(locs=["nope"])
     with pytest.raises(TideFetchError):
         parse_stations(broken)
+
+
+# -- fetch -------------------------------------------------------------------------------------
+
+START, END = NOW - timedelta(days=1), NOW + timedelta(days=8)
+
+
+def mock_client(handler):
+    requests = []
+
+    def wrapped(request):
+        requests.append(request)
+        return handler(request)
+
+    return httpx.Client(transport=httpx.MockTransport(wrapped)), requests
+
+
+def test_fetch_request_and_result():
+    raw = (FIXTURES / "waarnemingen_hoekvanholland.json").read_bytes()
+    client, requests = mock_client(
+        lambda r: httpx.Response(200, content=raw, headers={"content-type": "application/json"})
+    )
+    result = fetch_tide_extremes("hoekvanholland", START, END, http=client)
+    (request,) = requests
+    assert request.method == "POST"
+    assert str(request.url) == OBSERVATIONS_URL
+    assert json.loads(request.content) == build_extremes_request("hoekvanholland", START, END)
+    assert request.headers["content-type"] == "application/json"
+    assert result == parse_extremes_response(json.loads(raw), "hoekvanholland")
+    assert not client.is_closed
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(204),
+        httpx.Response(500, json={"Foutmelding": "kapot"}),
+        httpx.Response(500, text="plain"),
+        httpx.Response(302, headers={"location": "https://elsewhere.example"}),
+        httpx.Response(200, text="not json"),
+        httpx.ConnectError("boom secret-ish"),
+        httpx.ReadTimeout("boom secret-ish"),
+    ],
+)
+def test_fetch_errors(response):
+    def handler(request):
+        if isinstance(response, Exception):
+            raise response
+        return response
+
+    client, _ = mock_client(handler)
+    with pytest.raises(TideFetchError) as info:
+        fetch_tide_extremes("hoekvanholland", START, END, http=client)
+    assert "boom" not in str(info.value)
+    assert info.value.__cause__ is None
+
+
+def test_fetch_500_message_contains_foutmelding():
+    client, _ = mock_client(lambda r: httpx.Response(500, json={"Foutmelding": "x" * 500}))
+    with pytest.raises(TideFetchError) as info:
+        fetch_tide_extremes("hoekvanholland", START, END, http=client)
+    assert "HTTP 500" in str(info.value)
+    assert len(str(info.value)) < 260
+
+
+@pytest.mark.parametrize("code", ["", "a b", "a/b", "x" * 65, "../x", "-x"])
+def test_fetch_invalid_station(code):
+    client, requests = mock_client(lambda r: httpx.Response(200, json={}))
+    with pytest.raises(TideFetchError):
+        fetch_tide_extremes(code, START, END, http=client)
+    assert requests == []
+
+
+def test_fetch_invalid_window():
+    client, requests = mock_client(lambda r: httpx.Response(200, json={}))
+    with pytest.raises(ValueError):
+        fetch_tide_extremes("x", END, START, http=client)
+    assert requests == []
+
+
+def test_own_client_is_closed_with_timeout(monkeypatch):
+    made = []
+    raw = (FIXTURES / "waarnemingen_hoekvanholland.json").read_bytes()
+
+    def factory(*, timeout):
+        client = httpx.Client(
+            transport=httpx.MockTransport(lambda r: httpx.Response(200, content=raw))
+        )
+        made.append((client, timeout))
+        return client
+
+    monkeypatch.setattr(rws, "make_client", factory)
+    fetch_tide_extremes("hoekvanholland", START, END)
+    catalogue_raw = (FIXTURES / "catalogus_subset.json").read_bytes()
+
+    def catalogue_factory(*, timeout):
+        client = httpx.Client(
+            transport=httpx.MockTransport(lambda r: httpx.Response(200, content=catalogue_raw))
+        )
+        made.append((client, timeout))
+        return client
+
+    monkeypatch.setattr(rws, "make_client", catalogue_factory)
+    list_tide_stations()
+    assert [t for _, t in made] == [30.0, 60.0]
+    assert all(c.is_closed for c, _ in made)
+
+
+def test_list_tide_stations():
+    raw = (FIXTURES / "catalogus_subset.json").read_bytes()
+    client, requests = mock_client(lambda r: httpx.Response(200, content=raw))
+    result = list_tide_stations(http=client)
+    (request,) = requests
+    assert str(request.url) == CATALOGUE_URL
+    assert json.loads(request.content) == build_catalogue_request()
+    assert result == parse_stations(json.loads(raw))
+    assert not client.is_closed
+
+
+def test_rws_hosts_only_in_rws_package():
+    src = Path(__file__).parent.parent / "src"
+    rws_dir = src / "shakka" / "rws"
+    offenders = [
+        p
+        for p in src.rglob("*.py")
+        if "rijkswaterstaat.nl" in p.read_text(encoding="utf-8") and rws_dir not in p.parents
+    ]
+    assert offenders == []

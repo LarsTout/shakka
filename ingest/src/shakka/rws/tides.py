@@ -10,7 +10,10 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any, Final
 
+import httpx
+
 from shakka.domain.tide import MAX_ABS_LEVEL_CM, TideExtreme, TideKind
+from shakka.http import make_client
 
 RWS_BASE_URL: Final = "https://ddapi20-waterwebservices.rijkswaterstaat.nl"
 OBSERVATIONS_URL: Final = f"{RWS_BASE_URL}/ONLINEWAARNEMINGENSERVICES/OphalenWaarnemingen"
@@ -266,3 +269,52 @@ def _coordinate(value: Any) -> float | None:
     except ValueError:
         return None
     return number if math.isfinite(number) else None
+
+
+def _post_json(client: httpx.Client, url: str, body: dict[str, Any], *, label: str) -> Any:
+    try:
+        response = client.post(url, json=body)
+    except httpx.HTTPError as exc:
+        raise TideFetchError(f"{label}: {type(exc).__name__}") from None
+    status = response.status_code
+    if status == 204:
+        raise TideFetchError(f"{label}: no data (HTTP 204)")
+    if not 200 <= status < 300:
+        text = f"{label}: HTTP {status}"
+        try:
+            data = response.json()
+        except ValueError:
+            data = None
+        if isinstance(data, dict) and data.get("Foutmelding") is not None:
+            text += f": {str(data['Foutmelding'])[:MAX_ERROR_TEXT]}"
+        raise TideFetchError(text)
+    try:
+        return response.json()
+    except ValueError:
+        raise TideFetchError(f"{label}: invalid JSON") from None
+
+
+def fetch_tide_extremes(
+    station: str, start: datetime, end: datetime, *, http: httpx.Client | None = None
+) -> list[TideExtreme]:
+    """Fetch and parse the astronomical extremes of one station for [start, end]."""
+    if not STATION_CODE_RE.fullmatch(station):
+        raise TideFetchError(f"invalid station code {station!r}"[:70])
+    body = build_extremes_request(station, start, end)  # ValueError on naive or start >= end
+    if http is None:
+        with make_client(timeout=OBSERVATIONS_TIMEOUT_S) as client:
+            payload = _post_json(client, OBSERVATIONS_URL, body, label=station)
+    else:
+        payload = _post_json(http, OBSERVATIONS_URL, body, label=station)
+    return parse_extremes_response(payload, station)
+
+
+def list_tide_stations(*, http: httpx.Client | None = None) -> list[StationInfo]:
+    """All stations with astronomical high/low water, from the RWS catalogue."""
+    body = build_catalogue_request()
+    if http is None:
+        with make_client(timeout=CATALOGUE_TIMEOUT_S) as client:
+            payload = _post_json(client, CATALOGUE_URL, body, label="catalogue")
+    else:
+        payload = _post_json(http, CATALOGUE_URL, body, label="catalogue")
+    return parse_stations(payload)
