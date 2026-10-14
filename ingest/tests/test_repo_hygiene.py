@@ -73,5 +73,19 @@ def test_ci_workflow_contract():
         "- run: uv run ruff check .",
         "- run: uv run ruff format --check .",
         "- run: uv run pytest",
+        "db:",
+        "- run: supabase test db",
     ):
         assert expected in lines, expected
+
+
+def test_supabase_config_disables_auto_expose():
+    text = (REPO_ROOT / "supabase" / "config.toml").read_text(encoding="utf-8")
+    lines = [line.strip() for line in text.splitlines()]
+    start = lines.index("[api]")
+    section: list[str] = []
+    for line in lines[start + 1 :]:
+        if line.startswith("["):
+            break
+        section.append(line)
+    assert "auto_expose_new_tables = false" in section
