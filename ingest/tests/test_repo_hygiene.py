@@ -55,3 +55,23 @@ def test_gitignore_has_supabase_entries():
     lines = (REPO_ROOT / ".gitignore").read_text(encoding="utf-8").splitlines()
     assert "supabase/.temp/" in lines
     assert "supabase/.branches/" in lines
+
+
+def test_ci_workflow_contract():
+    lines = {
+        line.strip()
+        for line in (REPO_ROOT / ".github" / "workflows" / "ci.yml")
+        .read_text(encoding="utf-8")
+        .splitlines()
+    }
+    for expected in (
+        "push:",
+        "pull_request:",
+        "ingest:",
+        "working-directory: ingest",
+        "- run: uv sync",
+        "- run: uv run ruff check .",
+        "- run: uv run ruff format --check .",
+        "- run: uv run pytest",
+    ):
+        assert expected in lines, expected
