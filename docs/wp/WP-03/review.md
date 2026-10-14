@@ -1,42 +1,49 @@
-# Review WP-03, ronde 1
-Oordeel: CHANGES_REQUIRED
+# Review WP-03, ronde 2
+Oordeel: APPROVED
 
-De blueprint is grondig en grotendeels uitvoerbaar zoals hij er staat. Ik heb de model-id's, de parameters, de responsvorm (lijst bij 2 locaties met `location_id` alleen vanaf element 1, object bij 1 locatie, achtervoegsels `_<model-id>`, eenheden `kn` en `°`, `utc_offset_seconds = 0`, `time` als Unix-seconden) en de gewichtsformule zelf gecontroleerd. Dat klopt allemaal. Er is één blokkerend punt: de tijdsemantiek van de vlagen.
+Ronde 2 (revisie 2). B-1 uit ronde 1 is echt en consistent opgelost. De keuze (optie a: vlaag op T = ruwe waarde van T+1h, laatste uur `None`) staat op alle plekken die ertoe doen, en die plekken spreken elkaar niet tegen:
+- aanname A14;
+- Ontwerp/Parser;
+- parserregels 3 en 6, met de expliciete opmerking dat regel 5 ook voor `gust[0]` geldt;
+- de docstrings van `ForecastHour` en `parse_forecast_response`;
+- "Gevolgen voor latere WP's" (bindend voor WP-05, plus WP-07);
+- RUNBOOK-stap 9;
+- R10 (terugdraaipad).
+
+De tests volgen dezelfde regel. `test_fixture_values_match_raw_json` en `test_fixture_sample_per_model` vergelijken met `raw_gust[i + 1]`. De KNMI-horizontest leidt zijn verwachting af met dezelfde verschoven regel. Nieuw zijn E33 tot en met E36 met concrete synthetische invoer. Ik heb de verwachte uitkomsten van E35, E36, `test_parse_all_none_after_shift_dropped` en `test_parse_partial_null_is_none` nagerekend, en ze kloppen met parserregel 6.
+
+De nieuwe structuurregel (`time` oplopend in stappen van exact 3600 s) is veilig:
+- met `timezone=GMT` en `timeformat=unixtime` bestaat er geen zomer- of wintertijdsprong;
+- een live-call op 14-10-2026 met exact de capture-URL gaf 168 tijdstappen, allemaal van 3600 s, van 1791936000 (2026-10-14 00:00Z) tot 1792537200 (2026-10-20 23:00Z), wat ook de horizon in "Gevolgen voor WP-05" bevestigt;
+- KNMI levert `null`-waarden, maar die zitten in de waardearrays, niet in `time`, dus de regel raakt KNMI niet;
+- een lege `time` is expliciet geldig;
+- de dedup-test (E19) is terecht omgezet naar een geïnjecteerde `fetch=`, omdat een dubbel tijdstip nu al een parsefout is.
+
+De punten N-1 tot en met N-9 zijn verwerkt zoals beschreven in "Verwerking review". Er zijn geen nieuwe blokkerende punten gevonden.
 
 ## Blokkerend
-
-B-1: De tijdsemantiek van `gust_kn` is niet vastgelegd en wijkt stilzwijgend af van de projectconventie. Waar: Ontwerp/Parser (regel 6: `valid_at = datetime.fromtimestamp(t, tz=UTC)` voor alle drie de variabelen), contract `ForecastHour`, "Gevolgen voor latere WP's" (WP-05). Waarom: volgens de Open-Meteo-documentatie zijn `wind_speed_10m` en `wind_direction_10m` momentane waarden op tijdstip T, maar `wind_gusts_10m` is "Preceding hour max", het maximum over [T-1h, T). De projectafspraak in `WORK_PACKAGES.md` is: "Uurwaarden horen bij het uur dat begint op `valid_at`" ([T, T+1h)). Met de huidige parser hoort de vlaag die bij `valid_at = T` wordt opgeslagen dus bij het vorige uur. Dat verschuift `too_gusty`/`gusty` in WP-05 en de windows in WP-07 een uur, en WP-05 kan dat niet zien, omdat het contract er niets over zegt. Voorstel: maak hier een expliciete keuze (eventueel als **[keuze Lars]**) en leg die vast in een aanname, in de docstring van `ForecastHour` en onder "Gevolgen voor latere WP's". Er zijn twee opties:
-  (a) Vlagen een uur terugschuiven, zodat `gust_kn` bij T de ruwe waarde van T+1h is. Dat is conform de conventie. Het laatste uur van de horizon krijgt dan `gust_kn = None`. Pas regel 6 van de parser en `test_fixture_values_match_raw_json`/`test_fixture_sample_per_model` aan (vlaag op index i+1), en voeg een edge case toe voor het laatste uur.
-  (b) De ruwe mapping houden en als bewuste afwijking documenteren ("`gust_kn` op `valid_at` T = max over [T-1h, T), zoals Open-Meteo die levert"), met een expliciete regel voor WP-05.
-  Optie (a) is correcter. Optie (b) is ook acceptabel, mits vastgelegd.
+Geen.
 
 ## Niet-blokkerend
+N-1: `test_fixture_values_match_raw_json` eist "exact die drie waarden" uit de ruwe JSON, terwijl de parser negatieve en niet-eindige waarden omzet naar `None`. In de huidige fixture komt dat niet voor, maar na een nieuwe capture faalt de test dan zonder dat de parser fout zit. Advies: pas in de test op de verwachte waarden dezelfde opschoning toe als parserregel 5 (niet-eindig of `< 0` → `None`, richting `int(round(x)) % 360`), via een eigen kleine helper in de test en niet via de parser.
 
-N-1: De volgorde in Job stap 3 is dubbelzinnig. "`ForecastFetchError` → een regel in `errors` en door naar de volgende chunk" staat vóór "boek het gewicht (ook na een fout)". Een letterlijke `continue` slaat de boeking over, terwijl A5 het tegendeel wil. Formuleer het als: fetch in try → bij een fout errors aanvullen → altijd boeken → alleen bij succes dedupliceren en upserten. Laat `test_job_three_500_reports_error` ook asserten dat `api_usage` na de fout `calls == 1,2` en `requests == 1` heeft.
+N-2: Ter informatie voor WP-05. ECMWF IFS en GFS zijn na enkele dagen niet meer uurlijks (ECMWF na ca. 90 h 3-uurlijks, later 6-uurlijks; GFS na 120 h 3-uurlijks). Open-Meteo interpoleert die waarden naar uren. Daar is "Preceding hour max" voor `wind_gusts_10m` in feite een benadering. De verschuiving van een uur is dan onschadelijk, maar de vlaag per uur is verder vooruit minder scherp. Dit verandert niets aan het ontwerp. Een korte zin hierover onder "Gevolgen voor latere WP's" (WP-05) kan helpen bij het kiezen van de drempels voor `gusty` en `too_gusty`.
 
-N-2: `test_fixture_knmi_horizon` eist "168 rijen per locatie" voor ICON, ECMWF en GFS. Dat hangt af van de toevallige inhoud van de capture: één `null`-uur en de test faalt, waarna de builder zelf moet kiezen. Leid het verwachte aantal liever af uit de ruwe JSON (aantal indexen waarop niet alle drie de waarden `null` zijn), of eis `== len(time)` alleen als de builder na de capture heeft gecontroleerd dat er geen `null` in zit (stap 2).
+N-3: A14 is "beslist door de orchestrator namens Lars; Lars beoordeelt dit nog" (R10). Dat is geen akkoord van Lars. Zorg dat Lars de keuze bevestigt vóórdat WP-05 wordt gebouwd. Daarna is terugdraaien niet meer goedkoop, omdat WP-05 de semantiek bindend overneemt.
 
-N-3: De fixture bevat Open-Meteo-data (CC BY 4.0) en komt in een publieke repo. Zet de bronvermelding erbij, bijvoorbeeld "Weather data by Open-Meteo.com, CC BY 4.0" in de docstring van `test_openmeteo_forecast.py` of in een korte `README.md` in `tests/fixtures/openmeteo/`. De JSON zelf blijft onbewerkt.
-
-N-4: `forecast_days=7` met `timezone=GMT` levert data van vandaag 00:00Z tot vandaag+7 00:00Z. Een lokale dag "vandaag+7" (`days_ahead = 7` in `alert_rules`, toegestaan door de CHECK 0–7) heeft dus nooit data. A10 noemt dit al. Maak expliciet dat `days_ahead = 7` zonder wijziging leeg blijft, zodat Lars dit in WP-10/WP-16 kan besluiten (8 dagen kost hetzelfde gewicht, maar vergt een AC-2-wijziging).
-
-N-5: `run_forecast_cli` en `_open_resources`: leg vast dat `SupabaseRest` en de `httpx.Client` altijd worden gesloten (`with` of `try/finally`), ook bij `DatabaseError`.
-
-N-6: CLI-tests: door de autouse-fixture in `conftest.py` is de env leeg. `test_fetch_success_output`, `test_fetch_errors_exit_1`, `test_dry_run_...` en `test_database_error_exit_1` moeten dus `SUPABASE_URL` en `SUPABASE_SECRET_KEY` met `monkeypatch.setenv` zetten (zoals WP-02 doet). Noem dat in het Testplan.
-
-N-7: Leg vast dat de job `fetch(http, chunk)` zonder `forecast_days` aanroept en het gewicht schat met `DEFAULT_FORECAST_DAYS`, zodat schatting en request niet uit elkaar kunnen lopen.
-
-N-8: `shakka/cli.py` wordt ook door WP-02 gewijzigd (groep `spots`). Bij de merge geeft dat een triviaal conflict; even melden aan de builder.
-
-N-9: In `test_weight_matches_open_meteo_up_to_14_days` is `v` het product variabelen × modellen, terwijl de functie die als twee argumenten krijgt. Schrijf voor wat er wordt aangeroepen, bijvoorbeeld `estimate_call_weight(1, v, 1, d)`.
+N-4: Bij `test_parse_rejects_non_hour_time` (E17) kan de builder de verstoring op twee manieren aanbrengen. Verschuift hij één element met 1800 s, dan vangt regel 3 (tijdstap) de fout op in plaats van regel 7. De test assert alleen `ForecastParseError`, dus beide werken. Wil je echt regel 7 raken, verschuif dan `start` met 1800 s, zodat de stappen 3600 s blijven. Dit is optioneel.
 
 ## Gecontroleerde bronnen
-- https://open-meteo.com/en/docs (`cell_selection` land/sea/nearest, `timeformat=unixtime`, `wind_speed_unit=kn`, `forecast_days` 0–16 standaard 7, `timezone` standaard GMT, lijstuitvoer bij meerdere locaties, foutformaat 400 `error`/`reason`; variabeletabel: `wind_gusts_10m` = "Preceding hour max", `wind_speed_10m`/`wind_direction_10m` = "Instant")
-- https://open-meteo.com/en/docs/knmi-api (`knmi_harmonie_arome_netherlands`, 2 km, elk uur, 2,5 dag; `knmi_seamless` vult aan met ECMWF IFS)
-- https://open-meteo.com/en/docs/dwd-api (`dwd_icon_seamless`)
-- https://open-meteo.com/en/docs/ecmwf-api (`ecmwf_ifs` = IFS HRES 9 km, open data sinds 1-10-2025; `ecmwf_ifs025`)
-- https://open-meteo.com/en/pricing (600/min, 5.000/uur, 10.000/dag, 300.000/maand; fractionele telling)
-- https://github.com/open-meteo/open-meteo/blob/main/Sources/App/Helper/Writer/ForecastApiResult.swift (`calculateQueryWeight`: per locatie `max(1, max(v/10, d/14·v/10))`, `v` = variabelen × domeinen)
-- Live: https://api.open-meteo.com/v1/forecast?latitude=52.4700,52.1000&longitude=4.5700,4.2700&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m&models=knmi_harmonie_arome_netherlands,dwd_icon_seamless,ecmwf_ifs,ncep_gfs_seamless&wind_speed_unit=kn&timezone=GMT&timeformat=unixtime&forecast_days=1&cell_selection=sea (lijst van 2; `location_id` ontbreekt bij element 0 en is 1 bij element 1; sleutels `<var>_<model-id>`; eenheden `kn`/`°`; `utc_offset_seconds` 0)
-- Live: dezelfde query met één locatie en `forecast_days=7` (object, geen `location_id`; KNMI-arrays eindigen in `null`, de andere modellen niet)
-- Bestaande code: `ingest/src/shakka/db.py`, `http.py`, `cli.py`, `config.py`, `doctor.py`; `ingest/tests/fakes.py`, `conftest.py`, `test_domain_purity.py`, `test_repo_hygiene.py`; `supabase/migrations/20261015090000_m1_schema.sql`; `docs/wp/WP-01/blueprint.md` en `deviations.md`
+- https://open-meteo.com/en/docs (opnieuw gecontroleerd op 14-10-2026):
+  - kolom "Valid time": `wind_speed_10m` en `wind_direction_10m` "Instant", `wind_gusts_10m` "Preceding hour max";
+  - de zin "Most weather variables are given as an instantaneous value for the indicated hour. Some variables like precipitation are calculated from the preceding hour as an average or sum.";
+  - standaardtijdzone GMT en de unixtime-semantiek.
+- Live-call: https://api.open-meteo.com/v1/forecast?latitude=52.4700,52.1000&longitude=4.5700,4.2700&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m&models=knmi_harmonie_arome_netherlands,dwd_icon_seamless,ecmwf_ifs,ncep_gfs_seamless&wind_speed_unit=kn&timezone=GMT&timeformat=unixtime&forecast_days=7&cell_selection=sea
+  - de respons is een lijst van 2;
+  - `location_id` ontbreekt bij element 0 en is 1 bij element 1;
+  - `utc_offset_seconds` is 0 en `hourly_units.time` is `unixtime`;
+  - `time` loopt van 1791936000 tot 1792537200 in stappen van 3600 s;
+  - de KNMI-snelheid is `null` vanaf ongeveer index 77; ECMWF en GFS zijn gevuld tot het laatste uur.
+- `docs/WORK_PACKAGES.md`: conventie "Uurwaarden horen bij het uur dat begint op `valid_at`" (r. 103), WP-03-sectie (AC-1 t/m AC-8, contracten) en WP-05-contracten (`compute_consensus`, `gusty`/`too_gusty`).
+- `docs/wp/WP-03/review.md` ronde 1 (B-1 en N-1 t/m N-9) tegenover "Verwerking review" in revisie 2.
+- Er is nog geen blueprint voor WP-05 of WP-07, dus er is geen contractconflict mogelijk. De gevolgen staan als bindende afspraak in deze blueprint.

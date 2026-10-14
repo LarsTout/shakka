@@ -1,5 +1,5 @@
 # Blueprint WP-03: Forecast-ingest wind (Open-Meteo multi-model) met call-budget
-Status: DRAFT
+Status: APPROVED
 Revisie: 2
 
 ## Doel
