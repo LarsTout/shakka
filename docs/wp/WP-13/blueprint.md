@@ -1,5 +1,5 @@
 # Blueprint WP-13: PWA-basis
-Status: DRAFT
+Status: APPROVED
 Revisie: 1
 
 ## Doel
