@@ -22,7 +22,8 @@ from shakka.domain.spot import (
     TideSensitivity,
     spot_rule_violations,
 )
-from spot_fixtures import FULL_SPOT_ROW, FULL_SPOT_YAML, MIN_SPOT_YAML
+from shakka.spots.loader import load_spots
+from spot_fixtures import FULL_SPOT_ROW, FULL_SPOT_YAML, MIN_SPOT_YAML, write_spots
 
 MIGRATION = Path(__file__).resolve().parents[2] / "supabase/migrations/20261015090000_m1_schema.sql"
 
@@ -53,6 +54,12 @@ def full() -> SpotProfile:
 
 def minimal() -> SpotProfile:
     return SpotProfile.model_validate(yaml.safe_load(MIN_SPOT_YAML)["spots"][0])
+
+
+def test_full_fixture_loads(tmp_path: Path):
+    spots = load_spots(write_spots(tmp_path, FULL_SPOT_YAML))
+    assert len(spots) == 1
+    assert spots[0].to_row() == FULL_SPOT_ROW
 
 
 def test_full_fixture_row():
