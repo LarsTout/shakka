@@ -5,7 +5,8 @@ Gratis PWA voor Nederlandse kiters: per spot een oordeel of je kunt kiten, alert
 ## Werkwijze
 - Werk per work package (WP) via `/ship WP-XX`. Status staat in `docs/STATUS.md`; lees die eerst in elke nieuwe sessie.
 - Bouw alleen op basis van een blueprint met status `APPROVED` in `docs/wp/WP-XX/blueprint.md`.
-- Eén WP per sessie. Na `done`: nieuwe sessie.
+- Eén WP per sessie. Na `done`: nieuwe sessie. Meerdere WP's parallel mag, elk in een eigen sessie.
+- Branches: `main` is stabiel en wordt per mijlpaal door Lars bijgewerkt vanaf `develop`. Elke WP werkt op `wp/WP-XX` (afgetakt van `develop`, in een eigen worktree) en gaat via een PR met groene CI naar `develop`. Nooit direct op `main` of `develop` committen. (WP-00 is de uitzondering: die is onder de oude regels op `main` gestart.)
 - Documentatie in het Nederlands. Code, comments, identifiers, commit messages in het Engels.
 
 ## Stack

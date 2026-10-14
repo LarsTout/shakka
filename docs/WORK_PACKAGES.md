@@ -83,6 +83,14 @@ Aantallen: M1 12, M2 7, M3 3, M4 2. Totaal 24.
 - Gevolg: alles in de repo is openbaar, ook `data/spots.yaml`. Secrets staan uitsluitend in `.env` en GitHub Secrets.
 - Schedules in publieke repo's worden na 60 dagen zonder commits uitgeschakeld; WP-11 neemt hier een maatregel voor op.
 
+### Git en branches (besluit Lars, 14 oktober 2026; geldt vanaf WP-01)
+- `main` is stabiel. Lars promoot `develop` naar `main` per mijlpaal (`git merge --ff-only develop` op `main`), na een week gebruik.
+- `develop` is de integratiebranch en de default branch op GitHub. Elke WP werkt op `wp/WP-XX`, afgetakt van `origin/develop`, in een eigen git-worktree onder `.claude/worktrees/`. Zo kunnen meerdere WP's tegelijk draaien.
+- Een WP komt via een pull request naar `develop`, na groene CI. De orchestrator van `/ship` maakt en merget de PR (`gh`). Nooit direct committen op `main` of `develop`.
+- Ook `docs/STATUS.md` wordt op de WP-branch bijgewerkt; de stand op `develop` is dus de stand van wat gemerged is. Afhankelijkheden worden gecheckt tegen `origin/develop`.
+- WP-00 is de uitzondering: die is onder de oude regels op `main` gestart en wordt na `done` naar `develop` gefast-forward.
+- Gevolgen voor latere WP's: CI (WP-00) draait op `push` en `pull_request` voor alle branches. De uurlijkse cron (WP-11) draait alleen op `main`. Cloudflare Pages (WP-13) bouwt production vanaf `main` en previews vanaf `develop` en PR-branches. Er is één Supabase-project; Lars doet `supabase db push` na de merge van een WP met migraties naar `develop` (zie "Nodig van Lars" per WP).
+
 ### Supabase-project
 - Aangemaakt op 14 oktober 2026 met: **Data API aan**, **"Automatically expose new tables" uit**, **automatische RLS aan**.
 - Gevolg voor elke migratie die een tabel aanmaakt (WP-01, WP-12, WP-17, WP-19): tabellen zijn niet vanzelf bereikbaar via de REST-API. Elke migratie bevat expliciete `grant`-statements per tabel en per rol (`anon`, `authenticated`), naast de RLS-policies. Een tabel zonder grant is onzichtbaar, ook met een geldige policy.

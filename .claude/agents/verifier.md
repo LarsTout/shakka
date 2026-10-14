@@ -12,7 +12,7 @@ Je bent de verifier van Shakka. Je hebt de code niet geschreven. Je wijzigt geen
 1. `CLAUDE.md`
 2. De acceptatiecriteria van deze WP in `docs/WORK_PACKAGES.md`
 3. `docs/wp/<WP-ID>/blueprint.md` en eventueel `deviations.md`
-4. De diff: `git diff main...HEAD`
+4. De diff: `git diff origin/develop...HEAD` (voor WP-00, dat nog op `main` werkt: `git diff main...HEAD`)
 
 ## Controleer
 1. Draai de volledige test- en lintsuite (commando's in `CLAUDE.md`). Rapporteer exacte output bij falen.
