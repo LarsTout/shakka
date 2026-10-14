@@ -75,6 +75,14 @@ def test_ci_workflow_contract():
         "- run: uv run pytest",
         "db:",
         "- run: supabase test db",
+        "web:",
+        "working-directory: web",
+        "- run: npm ci",
+        "- run: npm run check",
+        "- run: npm test",
+        "- run: npm run build",
+        "- run: npm run verify:build",
+        "- run: bash ../scripts/check-no-client-openmeteo.sh",
     ):
         assert expected in lines, expected
 
