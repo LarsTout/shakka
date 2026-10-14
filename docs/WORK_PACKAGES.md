@@ -78,6 +78,11 @@ Aantallen: M1 12, M2 7, M3 3, M4 2. Totaal 24.
 
 ## Afspraken die voor alle WP's gelden
 
+### Repository
+- De repo is **publiek**: https://github.com/LarsTout/shakka (besluit Lars, 14 oktober 2026). GitHub Actions-minuten zijn daardoor onbeperkt; het runtijdbudget per run is geen acceptatiecriterium.
+- Gevolg: alles in de repo is openbaar, ook `data/spots.yaml`. Secrets staan uitsluitend in `.env` en GitHub Secrets.
+- Schedules in publieke repo's worden na 60 dagen zonder commits uitgeschakeld; WP-11 neemt hier een maatregel voor op.
+
 ### Tijd en eenheden
 - Alle tijden in de database en in Python zijn tz-aware UTC (`timestamptz`, `datetime` met `tzinfo=UTC`). Naive datetimes zijn een fout.
 - Lokale logica gebruikt `Europe/Amsterdam`: seizoenssluitingen, weekdagen, tijdvensters, berichten en UI. De constante is `shakka.domain.defaults.LOCAL_TZ`.
