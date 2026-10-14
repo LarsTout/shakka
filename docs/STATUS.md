@@ -6,7 +6,7 @@ Opdeling: goedgekeurd.
 |---|---|---|---|
 | WP-00 | Repo, tooling, CI en Supabase-koppeling | done | |
 | WP-01 | Datamodel M1, RLS en database-client | done | AC-7: `supabase db push` door Lars na merge |
-| WP-02 | Spotprofielen: schema, validatie, sync en startset | todo | |
+| WP-02 | Spotprofielen: schema, validatie, sync en startset | blueprint | |
 | WP-03 | Forecast-ingest wind (Open-Meteo multi-model) met call-budget | todo | |
 | WP-04 | Getij-ingest (Rijkswaterstaat) | todo | |
 | WP-05 | Evaluatie-engine (puur) | todo | |
