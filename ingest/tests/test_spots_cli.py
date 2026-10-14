@@ -1,5 +1,6 @@
 """CLI tests for `shakka spots validate` and `shakka spots sync` (AC-1, AC-3, AC-5)."""
 
+import re
 from pathlib import Path
 from typing import Any
 
@@ -137,3 +138,10 @@ def test_help_lists_spots():
     assert "spots" in run("--help").output
     out = run("spots", "--help").output
     assert "validate" in out and "sync" in out
+
+
+def test_validate_default_path():
+    r = run("spots", "validate")
+    assert r.exit_code == 0
+    assert re.search(r"^ok      \d+ spots valid \(\d+ verified\)$", r.output, re.MULTILINE)
+    assert "spots validate: ok" in r.output
