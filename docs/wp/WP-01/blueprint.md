@@ -1,5 +1,5 @@
 # Blueprint WP-01: Datamodel M1, RLS en database-client
-Status: DRAFT
+Status: APPROVED
 Revisie: 2
 
 ## Doel
