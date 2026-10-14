@@ -1,13 +1,16 @@
 """Open-Meteo forecast API: request parameters, response parser and fetch."""
 
 import math
-from collections.abc import Sequence
+import time
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
 from typing import Any, Final
 
+import httpx
 from pydantic import ValidationError
 
 from shakka.domain.forecast import ForecastHour, SpotLocation
+from shakka.openmeteo.client import OpenMeteoRequestError, request_json
 from shakka.openmeteo.models import OPEN_METEO_MODELS
 
 FORECAST_URL: Final = "https://api.open-meteo.com/v1/forecast"
@@ -161,3 +164,22 @@ def parse_forecast_response(payload: Any, locations: Sequence[SpotLocation]) -> 
                 except (ValidationError, OverflowError, OSError, ValueError) as exc:
                     raise ForecastParseError(f"{mwhere}: invalid hour at index {i}") from exc
     return result
+
+
+def fetch_forecast(
+    http: httpx.Client,
+    locations: Sequence[SpotLocation],
+    *,
+    forecast_days: int = DEFAULT_FORECAST_DAYS,
+    sleep: Callable[[float], None] = time.sleep,
+) -> list[ForecastHour]:
+    """[] without a request for empty locations. OpenMeteoRequestError -> ForecastFetchError
+    (same message, prefixed "open-meteo forecast: "). ForecastParseError propagates."""
+    if not locations:
+        return []
+    params = build_forecast_params(locations, forecast_days=forecast_days)
+    try:
+        payload = request_json(http, FORECAST_URL, params, sleep=sleep)
+    except OpenMeteoRequestError as exc:
+        raise ForecastFetchError(f"open-meteo forecast: {exc}") from None
+    return parse_forecast_response(payload, locations)

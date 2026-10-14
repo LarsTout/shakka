@@ -25,6 +25,7 @@ from shakka.openmeteo.forecast import (
     ForecastFetchError,
     ForecastParseError,
     build_forecast_params,
+    fetch_forecast,
     parse_forecast_response,
 )
 from shakka.openmeteo.models import OPEN_METEO_MODELS
@@ -478,3 +479,43 @@ def test_parse_does_not_mutate_payload() -> None:
 
 def test_fetch_error_hierarchy() -> None:
     assert issubclass(ForecastParseError, ForecastFetchError)
+
+
+# -- fetch_forecast ----------------------------------------------------------------------------
+
+
+def test_fetch_forecast_parses_mocked_response() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(200, json=make_forecast_payload(2, start=T0))
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    rows = fetch_forecast(http, loc(2), sleep=lambda s: None)
+    assert len(rows) == 2 * len(OPEN_METEO_MODELS) * 3
+    assert len(seen) == 1
+    assert dict(seen[0].url.params) == build_forecast_params(loc(2))
+    assert seen[0].url.host == "api.open-meteo.com"
+
+
+def test_fetch_forecast_empty_locations_no_request() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:  # pragma: no cover
+        raise AssertionError("no request expected")
+
+    http = httpx.Client(transport=httpx.MockTransport(handler))
+    assert fetch_forecast(http, []) == []
+
+
+def test_fetch_forecast_wraps_request_errors() -> None:
+    http = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(500)))
+    with pytest.raises(ForecastFetchError) as info:
+        fetch_forecast(http, loc(1), sleep=lambda s: None)
+    assert str(info.value) == "open-meteo forecast: failed after 3 attempts: HTTP 500"
+    assert not isinstance(info.value, ForecastParseError)
+
+
+def test_fetch_forecast_parse_error_propagates() -> None:
+    http = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200, json={})))
+    with pytest.raises(ForecastParseError):
+        fetch_forecast(http, loc(1), sleep=lambda s: None)
