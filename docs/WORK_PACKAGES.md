@@ -83,7 +83,11 @@ Aantallen: M1 12, M2 7, M3 3, M4 2. Totaal 24.
 - Gevolg: alles in de repo is openbaar, ook `data/spots.yaml`. Secrets staan uitsluitend in `.env` en GitHub Secrets.
 - Schedules in publieke repo's worden na 60 dagen zonder commits uitgeschakeld; WP-11 neemt hier een maatregel voor op.
 
-### Tijd en eenheden
+### Supabase-project
+- Aangemaakt op 14 oktober 2026 met: **Data API aan**, **"Automatically expose new tables" uit**, **automatische RLS aan**.
+- Gevolg voor elke migratie die een tabel aanmaakt (WP-01, WP-12, WP-17, WP-19): tabellen zijn niet vanzelf bereikbaar via de REST-API. Elke migratie bevat expliciete `grant`-statements per tabel en per rol (`anon`, `authenticated`), naast de RLS-policies. Een tabel zonder grant is onzichtbaar, ook met een geldige policy.
+- `supabase/config.toml` en de pgTAP-tests gebruiken dezelfde instelling, zodat de lokale stack het productiegedrag test. De planner van WP-01 controleert hoe dit in `config.toml` wordt vastgelegd.
+- Automatische RLS is een vangnet; elke migratie zet `enable row level security` toch expliciet.
 - Alle tijden in de database en in Python zijn tz-aware UTC (`timestamptz`, `datetime` met `tzinfo=UTC`). Naive datetimes zijn een fout.
 - Lokale logica gebruikt `Europe/Amsterdam`: seizoenssluitingen, weekdagen, tijdvensters, berichten en UI. De constante is `shakka.domain.defaults.LOCAL_TZ`.
 - Domein- en jobfuncties krijgen `now: datetime` als parameter. Domeincode roept nooit `datetime.now()`, `date.today()` of `time.time()` aan.
