@@ -1,0 +1,40 @@
+[project]
+name = "shakka"
+version = "0.1.0"
+description = "Shakka ingest, evaluation and alerting"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "click>=8.2,<9",
+    "httpx>=0.28,<0.29",
+    "pydantic>=2.11,<3",
+    "pydantic-settings>=2.11,<3",
+]
+
+[project.scripts]
+shakka = "shakka.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0,<10",
+    "ruff>=0.17,<0.18",
+]
+
+[build-system]
+requires = ["uv_build>=0.13.1,<0.14"]
+build-backend = "uv_build"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "SIM", "DTZ"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["shakka"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["-ra", "--strict-markers", "--strict-config"]
+xfail_strict = true
