@@ -1,46 +1,35 @@
-# Review WP-02, ronde 1
-Oordeel: CHANGES_REQUIRED
+# Review WP-02, ronde 2
+Oordeel: APPROVED
 
-De blueprint is sterk: scope en acceptatiecriteria zijn volledig gedekt, de contracten met WP-01 kloppen (17 kolommen, jsonb-vorm van `ridable_dirs` en `season`, CHECK-constraints, `SupabaseRest`/`FakeSupabase`-API, `writes`/`upserts`, `seed`, context manager), en de YAML 1.1-valkuilen zijn correct geanalyseerd. Er is één blokkerend punt, met een kleine fix.
+Ronde 2 toetst revisie 2 van de blueprint. B-1 uit ronde 1 is echt opgelost. N-1 t/m N-8 zijn verwerkt op een manier die klopt met de bestaande code. De revisie brengt geen nieuwe blokkerende punten mee.
+
+## Controle B-1 (ronde 1)
+- `test_validate_default_path` (Testplan AC-1) controleert nu alleen drie dingen: exitcode 0, de regel `spots validate: ok` en `re.search(r"^ok      \d+ spots valid \(\d+ verified\)$", ..., re.MULTILINE)`. Er is geen exacte telling meer. Het patroon past op de uitvoertabel: `ok` gevolgd door zes spaties, net zo breed als `error   ` en `warn    `.
+- De exacte telling `25 spots valid (0 verified)` staat alleen nog in de eenmalige AC-2-controle (Testplan AC-2, stap 6 en stap 9). Daar hoort hij, volgens de WP.
+- De vaste aantallen worden getest op tijdelijke bestanden via `--path` (`test_validate_counts_on_tmp_file`: `MIN_SPOT_YAML` geeft 1/0 en `FULL_SPOT_YAML` geeft 1/1). Die test hangt niet af van `data/spots.yaml`.
+- De permanente datatests (`test_data_file_is_valid`, `test_contract_ids_present`) eisen alleen geldigheid en een superset van de 25 contract-id's. Lars kan dus velden invullen, spots verifiëren en spots toevoegen zonder dat CI rood wordt. Alleen een id hernoemen of verwijderen faalt, en dat is bewust (A9, R8).
 
 ## Blokkerend
-
-B-1: `test_validate_default_path` maakt van AC-2 toch een permanente test. Waar: Testplan, AC-1 (`test_spots_cli.py::test_validate_default_path` eist letterlijk `25 spots valid (0 verified)`). Waarom: AC-2 zegt expliciet "eenmalige controle op de diff van deze WP, geen permanente test", en A9 zegt zelf dat extra spots mogen en dat Lars velden invult. Zodra Lars (zoals "Nodig van Lars" vraagt) één spot op `verified: true` zet of een spot toevoegt, wordt deze test rood. CI faalt dan op precies de bewerking die de WP mogelijk moet maken. Een builder kan dit niet zien, want de test is groen op de startset. Voorstel: laat de test alleen exitcode 0, `spots validate: ok` en een regel die matcht op `^ok      \d+ spots valid \(\d+ verified\)$` controleren. De exacte telling `25 ... (0 verified)` hoort alleen in de eenmalige AC-2-controle door de verifier, of in een test op een tijdelijk bestand via `--path`.
+Geen.
 
 ## Niet-blokkerend
+N-1: In de tabel Hulptypes en in "Verwerking review" staat de regex van `_LocalTime` als `([01][0-9]\|2[0-3]):[0-5][0-9]`. De `\|` is alleen de markdown-escape voor een `|` binnen een tabelcel. In de code hoort `re.fullmatch(r"([01][0-9]|2[0-3]):[0-5][0-9]", v)` te staan. Wie de tekst letterlijk overneemt, krijgt een letterlijk `|`-teken in het patroon en daarmee een regex die nooit matcht. De tests vangen dat direct af (E2 en `FULL_SPOT_YAML` worden rood), dus het risico is klein.
 
-N-1: `_MonthDay` is tegenstrijdig gespecificeerd. Er staat "Strikte `str`", maar E4 (`start: 2026-05-01` wordt een YAML-`date`) verwacht de melding "expected a quoted 'MM-DD' date". Een strikte `str` geeft dan de pydantic-melding "Input should be a valid string". Maak `_MonthDay` net als `_LocalTime` een before-validator die elke niet-`str` met dezelfde `ValueError` weigert. Zo hoeft de builder niet zelf te kiezen.
+N-2: Bij `_MonthDay` staat "faalt `date(2000, int(v[:2]), int(v[3:]))`". Bedoeld is: vang de `ValueError` van `date(...)` af en geef dan de eigen melding. Dat volgt al uit de beschrijving en E3 test het (`"00-10"`, `"13-01"`, `"02-30"`). Dit is alleen een leesbaarheidspunt.
 
-N-2: De regex `^\d{2}-\d{2}$` van `_MonthDay` laat met `re.match`/`re.search` een afsluitende newline door (`"05-01\n"`, want `$` matcht vóór een slot-`\n`). Ook accepteert `\d` Unicode-cijfers. `to_row` geeft de string ongewijzigd door, dus vuile waarden komen in de database en bij WP-05. Schrijf voor: `re.fullmatch(r"[0-9]{2}-[0-9]{2}", v)`. Doe hetzelfde bij `_LocalTime` (`[0-9]` in plaats van `\d`).
-
-N-3: `test_only_changed_upserted` eist dat "de laatste upsert alleen die rij bevat". `FakeSupabase` legt geen payloads vast (alleen `writes` en `upserts`), dus de builder moet zelf een spy bedenken. Schrijf er een voor (bijv. een subklasse van `FakeSupabase` die `upsert` doorgeeft en `rows` vastlegt), of laat de eis vallen. `upserted == 1` en één extra `("upsert", "spots")` bewijzen het al grotendeels.
-
-N-4: `UniqueKeySafeLoader.construct_mapping` voert `key in seen` uit vóór `super().construct_mapping`. Die controleert pas daarna of de sleutel hashbaar is. Een complexe sleutel (`? [a, b]: x`) geeft dan een `TypeError` in plaats van een `ConstructorError`, en `load_spots` crasht met een traceback. Controleer eerst `isinstance(key, collections.abc.Hashable)` en sla die sleutel anders over (de superklasse geeft dan de nette `ConstructorError` "found unhashable key").
-
-N-5: R5 ("een upsert kan niet op een CHECK falen") klopt voor de CHECKs. Postgres weigert echter ook NUL-tekens (`\0`, of `\u0000` in jsonb) in `text`. In YAML kan dat met `"a\0b"`. Een sync faalt dan met een `DatabaseError`. Het risico is klein; overweeg in `_NonBlankStr` en `_MonthDay` een weigering van `"\x00"`.
-
-N-6: Bij A7: `spots validate` negeert `SPOTS_PATH`, `spots sync` gebruikt het wel. Als Lars `SPOTS_PATH` zet, valideren en syncen ze verschillende bestanden. Dat is acceptabel, maar noem het in `SPOT_DATA.md` of in de help-tekst.
-
-N-7: In de Edge cases staat E17 als één fout "met regel en kolom". Die regel bevat geen spot-id of index. Dat is in orde, want AC-3 noemt dubbele YAML-sleutels niet. Wees wel bewust dat het formaat afwijkt van "Elke fout bevat de spot-id (of de index)" in het WP-contract. Eventueel in `SPOT_DATA.md` §10 als voorbeeld opnemen.
-
-N-8: In het Testplan bij AC-5 staat `seed("spots", [{"id": "zz-orphan", "name": "Orphan"}])`. Dat werkt omdat de projectie van de fake ontbrekende kolommen als `None` teruggeeft. Bij E29 (`test_invalid_db_row_overwritten`) moet de geseede rij ook een `name` hebben. Zet dat expliciet in de tekst.
+N-3: `UniqueKeySafeLoader` roept `construct_object(key_node)` aan vóór `super().construct_mapping`. Dat werkt correct, omdat `construct_object` het resultaat cachet in `constructed_objects`: de superklasse krijgt hetzelfde object terug, ook bij een sequence-sleutel die als generator wordt opgebouwd. Daardoor doet E39 wat de blueprint belooft: een lijst is geen `Hashable`, de lus slaat die sleutel over en de basisklasse geeft "found unhashable key". Geen actie nodig.
 
 ## Gecontroleerd zonder bevinding
-- Slug-regex, `btrim(name)`, lat/lon samen, de bereiken en enums in `20261015090000_m1_schema.sql`: Python is overal minstens zo streng (R5).
-- De regex van `test_to_row_columns_match_migration` matcht precies de 18 kolomregels van `create table public.spots`, en geen constraint-regels.
-- PyYAML-resolvers: `10:00` wordt int 600 (sexagesimaal, eerste cijfer 1–9); `09:30` blijft str (octaal vereist `[0-7_]+` zonder `:`, float-sexagesimaal vereist `.`). E1, E2, E4, E10 kloppen.
-- `construct_yaml_map` roept `self.construct_mapping(node)` aan, dus de override in de subklasse werkt; `SafeConstructor.construct_mapping` roept `flatten_mapping` aan vóór de basisversie. Daarom ziet de dubbele-sleutelcontrole merge-sleutels niet (E38 klopt).
-- pydantic 2.14.1 (lock) ondersteunt `validate_by_name`/`validate_by_alias` (pyproject eist ≥2.11). `StringConstraints(strict=..., pattern=...)` bestaat. In de conversietabel: lax `int` accepteert `bool`, lax `time` accepteert `int` als seconden, en strict `float` accepteert `int` maar weigert `bool`. De keuze voor eigen before-validators is terecht.
-- De `conftest.py` isoleert env en `.env`, dus `test_sync_missing_config` en `test_validate_default_path` lezen geen echte configuratie.
-- De puurheidstest staat de imports van `spot.py` toe. `from datetime import time` met `time(h, m)` valt niet onder de `time.time`-regel.
-- Harde regels: geen kosten, geen externe API's, geen scraping, geen verzonnen spotdata (alleen `id`, `name` uit het plan en `verified: false`). Offshore blijft `no_go` ongeacht `ridable_dirs` (A4). Geen secrets in uitvoer.
-- Rekenvoorbeeld `shore_normal_deg`: kust NNO–ZZW met water aan de westkant geeft 290. Dat klopt. Wind uit `shore_normal_deg` is onshore (meteorologische conventie).
+- `RecordingFake` (Testplan AC-5): `FakeSupabase.__init__` heeft alleen een keyword-only `clock` met een default, en de signatuur van `upsert(self, table, rows, *, on_conflict) -> int` komt exact overeen met `ingest/tests/fakes.py`. `seed` registreert niets in `writes`, dus "writes groeit met precies één `("upsert", "spots")`" en "writes en upsert_payloads groeien niet" (tweede sync) kloppen.
+- E29: `seed` met `lat: 10.0` laat `from_row` falen, waarna `_normalized` `None` geeft. De rij geldt dan als gewijzigd en de upsert schrijft alle 17 kolommen. `existing.update(given)` in de fake zet daarbij `lat` en `lon` op `None`. Klopt.
+- Testplan AC-5 (N-8): elke `seed` heeft nu `id` en `name`. De `select`-projectie van de fake vult ontbrekende kolommen met `None`.
+- `_SpotId`, `_MonthDay` en `_LocalTime` als before-validators met `re.fullmatch` en `[0-9]`: een afsluitende newline en fullwidth-cijfers worden geweigerd (E40), en een NUL-teken ook. `_NonBlankStr` controleert eerst op NUL en pas daarna of de string leeg is. `"\x00".strip()` laat de NUL staan, dus E41 krijgt de NUL-melding.
+- Het label gebruikt alleen `id.isprintable()`, en `errors(include_input=False)` neemt geen invoer op in de melding. Daardoor zijn alle foutregels voor E40 en E41 één regel (`test_error_lines_are_single_line`).
+- PyYAML vertaalt `\0` in een double-quoted scalar naar U+0000. De reader-controle op niet-afdrukbare tekens kijkt naar de ruwe stream, en daar staat de escape, niet het teken zelf. E41 is dus via YAML te maken. Fullwidth-cijfers (U+FF10–FF19) vallen binnen het toegestane bereik van de reader.
+- AC-3-tabel na de revisie: bij `Bad_Id` is de id afdrukbaar, dus het label bevat `Bad_Id`. In het geval `from_time` zonder `to_time` bevat de regel `season[0]` en `to_time` (de melding van de after-validator). `test_three_errors_in_one_exception` geeft in deze volgorde 2 veldfouten (`id`, `status`) en 1 regelovertreding (`lon`).
+- Harde regels: geen kosten, geen externe API's, geen scraping, geen verzonnen spotdata, offshore blijft `no_go` (A4), geen secrets in de uitvoer (`test_sync_output_has_no_secrets`).
+- Scope: er zijn geen nieuwe bestanden of functies buiten de WP bijgekomen. `tests/fakes.py` blijft ongewijzigd.
 
 ## Gecontroleerde bronnen
-- https://pypi.org/pypi/PyYAML/json (6.0.3 is de laatste versie, `requires_python >=3.8`)
-- https://raw.githubusercontent.com/yaml/pyyaml/main/lib/yaml/constructor.py
-- https://raw.githubusercontent.com/yaml/pyyaml/main/lib/yaml/resolver.py
-- https://pydantic.dev/docs/validation/latest/concepts/conversion_table/
-- https://pydantic.dev/docs/validation/latest/concepts/alias/
-- https://pydantic.dev/docs/validation/latest/api/pydantic/types/ (`StringConstraints`)
-- Lokaal: `supabase/migrations/20261015090000_m1_schema.sql`, `ingest/src/shakka/{db,config,cli,doctor}.py`, `ingest/tests/{fakes,conftest,test_domain_purity,test_fake_parity,test_cli}.py`, `ingest/uv.lock`
+- https://raw.githubusercontent.com/yaml/pyyaml/main/lib/yaml/constructor.py (`construct_object` met caching in `constructed_objects`, controle "found unhashable key" in `BaseConstructor.construct_mapping`, `SafeConstructor.construct_mapping` met `flatten_mapping`, generator `construct_yaml_seq`)
+- Lokaal: `ingest/tests/fakes.py` (`FakeSupabase.__init__`, `seed`, `select`, `upsert`, `_defaults`), `docs/wp/WP-02/review.md` (ronde 1)

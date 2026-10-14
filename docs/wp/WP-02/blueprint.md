@@ -1,5 +1,5 @@
 # Blueprint WP-02: Spotprofielen: schema, validatie, sync en startset
-Status: DRAFT
+Status: APPROVED
 Revisie: 2
 
 ## Doel
