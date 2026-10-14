@@ -1,6 +1,6 @@
 # Blueprint WP-02: Spotprofielen: schema, validatie, sync en startset
 Status: DRAFT
-Revisie: 1
+Revisie: 2
 
 ## Doel
 `data/spots.yaml` wordt streng gevalideerd en idempotent naar de tabel `spots` (WP-01) gesynchroniseerd. Concreet levert deze WP:
@@ -10,6 +10,21 @@ Revisie: 1
 - de CLI-groep `shakka spots` met `validate` en `sync`;
 - `data/spots.yaml` met de 25 spots uit het plan, elk alleen `id`, `name` en `verified: false`;
 - `docs/SPOT_DATA.md`: de handleiding voor Lars om de profielen in te vullen.
+
+## Verwerking review
+Ronde 1 (`review.md`, CHANGES_REQUIRED).
+
+| Punt | Verwerking |
+|---|---|
+| **B-1** (blokkerend) `test_validate_default_path` maakte AC-2 permanent | Opgelost. De test controleert nu alleen exitcode 0, de regel `spots validate: ok` en een regel die volledig matcht op `^ok      \d+ spots valid \(\d+ verified\)$` (met `re.MULTILINE`). De exacte telling `25 spots valid (0 verified)` zit alleen nog in de eenmalige AC-2-controle door de verifier (Testplan AC-2, Stappenplan stap 6 en 9). De exacte uitvoertekst met vaste aantallen wordt getest op tijdelijke bestanden via `--path` (`test_validate_counts_on_tmp_file`). A9 vermeldt dit expliciet. |
+| N-1 `_MonthDay` tegenstrijdig | Verwerkt. `_MonthDay` is nu net als `_LocalTime` een before-validator die elke niet-`str` (ook `date`) weigert met dezelfde melding "expected a quoted 'MM-DD' date". E4 klopt daarmee. |
+| N-2 `$` en `\d` | Verwerkt. `_MonthDay` gebruikt `re.fullmatch(r"[0-9]{2}-[0-9]{2}", v)`, `_LocalTime` gebruikt `re.fullmatch(r"([01][0-9]\|2[0-3]):[0-5][0-9]", v)`. Nieuwe edge case E40 (afsluitende newline, fullwidth-cijfers) met tests. Hetzelfde voor `id`: `_SpotId` is nu een before-validator met `re.fullmatch(SPOT_ID_PATTERN, v)` in plaats van `StringConstraints(pattern=...)`, en `SPOT_ID_PATTERN` heeft geen `^`/`$` meer. Daardoor hangt niets af van het gedrag van `$` in de regex-engine van pydantic. E40 test ook `"zz-a\n"` als id; een niet-afdrukbare id komt niet in het foutlabel (loader stap 4). |
+| N-3 payload van de laatste upsert | Verwerkt. `test_spots_sync.py` krijgt een spy `RecordingFake(FakeSupabase)` die per `upsert` een kopie van de rijen in `upsert_payloads` vastlegt en daarna `super().upsert(...)` aanroept (zie Testplan AC-5). `FakeSupabase` zelf wijzigt niet. |
+| N-4 onhashbare sleutel | Verwerkt. `UniqueKeySafeLoader.construct_mapping` slaat een sleutel die niet `collections.abc.Hashable` is over; de superklasse geeft dan de `ConstructorError` "found unhashable key". Nieuwe edge case E39 met test. |
+| N-5 NUL-tekens | Verwerkt. `_NonBlankStr` weigert `"\x00"` met "must not contain NUL characters". `_MonthDay`, `_LocalTime` en `id` weigeren het al via hun patroon. Nieuwe edge case E41 met test; R5 aangevuld. |
+| N-6 `SPOTS_PATH` alleen bij `sync` | Verwerkt. Het gedrag blijft (A7), maar de help-teksten van beide `--path`-opties noemen het verschil, en `SPOT_DATA.md` §1 legt het uit. |
+| N-7 formaat van YAML-fouten | Verwerkt als documentatie. E17, E20 en E39 hebben bewust het formaat `spots.yaml: line L, column C: ...` zonder spot-id (YAML-fouten ontstaan vóór er spots zijn). `SPOT_DATA.md` §10 neemt "found duplicate key" als voorbeeld op. Geen codewijziging. |
+| N-8 `name` in geseede rijen | Verwerkt. Testplan AC-5 noemt nu voor elke `seed` expliciet `id` en `name`, ook bij `test_invalid_db_row_overwritten` (E29). |
 
 ## Aannames
 Dit zijn voorstellen voor de open keuzes. Lars beoordeelt ze; de reviewer toetst ze tegen het plan.
@@ -36,8 +51,9 @@ Dit zijn voorstellen voor de open keuzes. Lars beoordeelt ze; de reviewer toetst
 - **A7. Pad voor de CLI.**
   - `spots validate` gebruikt `--path`, of anders `shakka.config.DEFAULT_SPOTS_PATH`. Het leest geen settings en heeft dus geen `.env` of Supabase-variabelen nodig; het werkt ook in CI.
   - `spots sync` gebruikt `--path`, of anders `get_settings().spots_path` (env `SPOTS_PATH`, standaard hetzelfde bestand).
+  - Gevolg: met `SPOTS_PATH` gezet valideren en syncen beide commando's zonder `--path` verschillende bestanden. Dat is acceptabel (sync valideert zelf ook volledig vóór het schrijven), en staat in de help-teksten en in `SPOT_DATA.md` §1 (review N-6).
 - **A8. `rws_station` wordt niet tegen een stationslijst gecontroleerd.** Alleen "niet leeg". De stationslijst komt uit WP-04 (`shakka tides stations`). WP-04 mag een controle toevoegen.
-- **A9. Permanente datatest.** AC-2 is een eenmalige controle (Lars vult later velden in). Wel komt er een permanente test die eist dat `data/spots.yaml` foutloos valideert en minstens de 25 contract-id's bevat. Extra spots mogen. Zo vangt CI elke ongeldige bewerking door Lars af, en kan een id die favorieten vasthouden niet stil verdwijnen of hernoemd worden.
+- **A9. Permanente datatest.** AC-2 is een eenmalige controle (Lars vult later velden in). Wel komt er een permanente test die eist dat `data/spots.yaml` foutloos valideert en minstens de 25 contract-id's bevat. Extra spots mogen. Zo vangt CI elke ongeldige bewerking door Lars af, en kan een id die favorieten vasthouden niet stil verdwijnen of hernoemd worden. Geen enkele permanente test op `data/spots.yaml` eist een exact aantal spots, exacte namen, een aantal `verified`-spots of de afwezigheid van velden: elke bewerking die Lars volgens `SPOT_DATA.md` doet, houdt CI groen (review B-1).
 - **A10. `from_row` is streng.** Alle 17 kolommen moeten in de rij staan; extra sleutels (zoals `updated_at` of kolommen die een latere WP toevoegt) worden genegeerd. Een rij die niet aan de validatie voldoet, geeft een `ValueError` (pydantic `ValidationError` is daar een subklasse van). De database is losser dan de Python-validatie (lat/lon wereldwijd, geen `verified`-eisen). WP-10 moet die fout dus per spot afvangen, zodat één kapotte rij niet de hele run stopt. `sync_spots` overschrijft zo'n rij.
 - **A11. Docker voor AC-6.** Net als bij WP-01 kan het zijn dat de builder geen toegang heeft tot Docker. Dan levert de builder de optionele lokale test en de commando's op, en toont de verifier AC-6 met de lokale stack, of markeert hij het als `NEEDS_LARS`.
 
@@ -101,7 +117,7 @@ class SpotStatus(StrEnum):
 class TideSensitivity(StrEnum):
     NONE = "none"; PREFER_LOW = "prefer_low"; PREFER_HIGH = "prefer_high"; AVOID_LOW = "avoid_low"
 
-SPOT_ID_PATTERN: Final = r"^[a-z0-9]+(-[a-z0-9]+)*$"
+SPOT_ID_PATTERN: Final = r"[a-z0-9]+(-[a-z0-9]+)*"   # always used with re.fullmatch
 NL_LAT_RANGE: Final = (50.7, 53.7)          # inclusive
 NL_LON_RANGE: Final = (3.2, 7.3)            # inclusive
 TIDE_MIN_LEVEL_RANGE_CM: Final = (-300, 300)
@@ -121,9 +137,10 @@ SPOT_COLUMNS: Final[tuple[str, ...]] = (
 |---|---|
 | `_StrictInt` | Before-validator: `bool` of een niet-`int` geeft `ValueError("expected an integer")`. |
 | `_Number` | Before-validator: `bool`, of geen `int`/`float`, geeft `ValueError("expected a number")`. Niet eindig geeft `ValueError("expected a finite number")`. Resultaat `float(v)`. |
-| `_NonBlankStr` | `StringConstraints(strict=True)` plus een after-validator: `v.strip() == ""` geeft `ValueError("must not be blank")`. |
-| `_MonthDay` | Strikte `str`. Moet matchen op `^\d{2}-\d{2}$` en `date(2000, mm, dd)` moet slagen (2000 is een schrikkeljaar, dus `02-29` mag). Anders `ValueError("expected a quoted 'MM-DD' date, e.g. \"05-01\"")`. |
-| `_LocalTime` | Before-validator: een `time` met `tzinfo is None`, `second == 0` en `microsecond == 0` gaat ongewijzigd door. Een `str` die volledig matcht op `([01]\d\|2[0-3]):[0-5]\d` wordt `time(h, m)`. Al het andere (ook `int`, zoals het ongequote `10:00`) geeft `ValueError("expected a quoted 'HH:MM' time (24h), e.g. \"10:00\"")`. |
+| `_NonBlankStr` | `StringConstraints(strict=True)` plus een after-validator, in deze volgorde: `"\x00" in v` geeft `ValueError("must not contain NUL characters")` (Postgres weigert NUL in `text` en `jsonb`); `v.strip() == ""` geeft `ValueError("must not be blank")`. |
+| `_MonthDay` | `Annotated[str, BeforeValidator(...)]`. De before-validator: is `v` geen `str` (ook een YAML-`date` of `int`), of slaagt `re.fullmatch(r"[0-9]{2}-[0-9]{2}", v)` niet, of faalt `date(2000, int(v[:2]), int(v[3:]))` (2000 is een schrikkeljaar, dus `02-29` mag), dan `ValueError("expected a quoted 'MM-DD' date, e.g. \"05-01\"")`. Anders gaat `v` ongewijzigd door. `fullmatch` met `[0-9]` weigert een afsluitende newline en niet-ASCII-cijfers. |
+| `_LocalTime` | Before-validator: een `time` met `tzinfo is None`, `second == 0` en `microsecond == 0` gaat ongewijzigd door. Een `str` waarvoor `re.fullmatch(r"([01][0-9]\|2[0-3]):[0-5][0-9]", v)` slaagt, wordt `time(int(v[:2]), int(v[3:]))`. Al het andere (ook `int`, zoals het ongequote `10:00`, en `"10:00\n"`) geeft `ValueError("expected a quoted 'HH:MM' time (24h), e.g. \"10:00\"")`. |
+| `_SpotId` | `Annotated[str, BeforeValidator(...)]`. Is `v` geen `str`, of slaagt `re.fullmatch(SPOT_ID_PATTERN, v)` niet, dan `ValueError("expected a lowercase slug (a-z, 0-9, single hyphens), e.g. \"wijk-aan-zee\"")`. Bewust geen `StringConstraints(pattern=...)`: zo hangt het gedrag van `$` niet af van de regex-engine van pydantic (review N-2, E40). |
 | `_none_to(default)` | Before-validator: `None` wordt `default`. |
 
 **Modellen:**
@@ -146,7 +163,7 @@ class SeasonClosure(BaseModel):
 
 class SpotProfileBase(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
-    id: Annotated[str, StringConstraints(strict=True, pattern=SPOT_ID_PATTERN)]
+    id: _SpotId
     name: _NonBlankStr
     region: _NonBlankStr | None = None
     lat: Annotated[float, <_Number>, Field(ge=50.7, le=53.7)] | None = None
@@ -222,11 +239,21 @@ class SpotValidationError(Exception):
 class UniqueKeySafeLoader(yaml.SafeLoader):
     """SafeLoader that rejects duplicate mapping keys."""
     def construct_mapping(self, node, deep=False):
-        # For MappingNode: for each key_node in node.value, skip tag "tag:yaml.org,2002:merge";
-        # construct the key (self.construct_object(key_node, deep=False)); if it was seen before ->
-        # raise yaml.constructor.ConstructorError("while constructing a mapping", node.start_mark,
-        #                                         f"found duplicate key {key!r}", key_node.start_mark)
-        # then return super().construct_mapping(node, deep=deep)
+        if isinstance(node, yaml.MappingNode):
+            seen: set[object] = set()
+            for key_node, _value_node in node.value:
+                if key_node.tag == "tag:yaml.org,2002:merge":
+                    continue
+                key = self.construct_object(key_node, deep=False)
+                if not isinstance(key, collections.abc.Hashable):
+                    # leave it to super(): it raises ConstructorError("found unhashable key")
+                    continue
+                if key in seen:
+                    raise yaml.constructor.ConstructorError(
+                        "while constructing a mapping", node.start_mark,
+                        f"found duplicate key {key!r}", key_node.start_mark)
+                seen.add(key)
+        return super().construct_mapping(node, deep=deep)
 
 def load_spots(path: Path) -> list[SpotProfile]:
     """Load and validate all spot profiles; raise SpotValidationError with every error found."""
@@ -245,7 +272,7 @@ def load_spots(path: Path) -> list[SpotProfile]:
    - `spots` geen `list` geeft dezelfde melding als hierboven.
 
    `spots: []` is geldig (0 spots).
-4. Per item `i` (in volgorde), met `label = f"spots[{i}] ({item['id']})"` als het item een `dict` met een `str`-id is, en anders `f"spots[{i}]"`:
+4. Per item `i` (in volgorde), met `label = f"spots[{i}] ({item['id']})"` als het item een `dict` is met een `str`-id waarvoor `id.isprintable()` geldt, en anders `f"spots[{i}]"` (zo komt een id met een newline of NUL, E40, niet in de uitvoer en blijft elke fout één regel):
    - geen `dict` geeft `f"spots[{i}]: expected a mapping"`, en het item wordt overgeslagen;
    - is de `str`-id eerder gezien op index `j`, dan volgt `f"{label}: id: duplicate of spots[{j}]"` (de eerste index wordt onthouden);
    - `SpotProfileBase.model_validate(item)`. Bij een `ValidationError` volgt per fout uit `exc.errors(include_url=False, include_input=False)` de regel `f"{label}: {_loc(err['loc'])}: {err['msg']}"`, en het item wordt overgeslagen;
@@ -292,13 +319,14 @@ def spots() -> None:
 
 @spots.command("validate")
 @click.option("--path", type=click.Path(dir_okay=False, path_type=Path), default=None,
-              help="Spots YAML file (default: data/spots.yaml).")
+              help="Spots YAML file (default: data/spots.yaml; SPOTS_PATH is not read).")
 def spots_validate(path: Path | None) -> None:
     from shakka.spots.commands import run_validate
     raise SystemExit(run_validate(path, echo=click.echo))
 
 @spots.command("sync")
-@click.option("--path", ...same...)
+@click.option("--path", type=click.Path(dir_okay=False, path_type=Path), default=None,
+              help="Spots YAML file (default: SPOTS_PATH, else data/spots.yaml).")
 def spots_sync(path: Path | None) -> None:
     from shakka.spots.commands import run_sync
     raise SystemExit(run_sync(path, echo=click.echo))
@@ -361,7 +389,7 @@ De id's en namen, in deze volgorde:
 Geen andere velden, geen coördinaten, geen regio.
 
 ### `docs/SPOT_DATA.md` (Nederlands; verplichte inhoud)
-1. **Doel en werkwijze.** Profielen invullen in `data/spots.yaml`, dan `cd ingest && uv run shakka spots validate`, committen via een PR. Na de merge draait Lars `uv run shakka spots sync` (met `.env` naar het remote project, na `supabase db push` van WP-01). Sync overschrijft wijzigingen in het dashboard (A5) en verwijdert nooit iets (A6). Een spot verwijderen kan alleen handmatig, en dat verwijdert via de cascade ook favorieten, alertregels, forecasts en evaluaties. Id's niet hernoemen: favorieten verwijzen ernaar.
+1. **Doel en werkwijze.** Profielen invullen in `data/spots.yaml`, dan `cd ingest && uv run shakka spots validate`, committen via een PR. Na de merge draait Lars `uv run shakka spots sync` (met `.env` naar het remote project, na `supabase db push` van WP-01). Sync overschrijft wijzigingen in het dashboard (A5) en verwijdert nooit iets (A6). Een spot verwijderen kan alleen handmatig, en dat verwijdert via de cascade ook favorieten, alertregels, forecasts en evaluaties. Id's niet hernoemen: favorieten verwijzen ernaar. Let op: `spots validate` leest altijd `data/spots.yaml` (of `--path`), terwijl `spots sync` zonder `--path` de env-variabele `SPOTS_PATH` volgt als die gezet is. Wie `SPOTS_PATH` zet, geeft bij `validate` hetzelfde bestand mee met `--path` (sync valideert zelf ook volledig voordat er iets geschreven wordt).
 2. **Basisregels.** Niets invullen wat je niet zeker weet; leeg laten (weglaten of `null`) en `verified: false`. YAML-tips: datums en tijden altijd tussen aanhalingstekens (`"05-01"`, `"10:00"`), met de uitleg waarom (`10:00` zonder aanhalingstekens wordt 600). Getallen zonder aanhalingstekens. `true`/`false` voor `verified`. Geen lege tekst `""`. Inspringen met spaties.
 3. **Veldentabel.** Elk van de 17 velden uit `SPOT_COLUMNS` (elk als `` `veld` `` in de tekst), met type, verplicht ja/nee, toegestane waarden of bereik (de waarden uit Interfaces) en betekenis.
 4. **`shore_normal_deg`.** Definitie: de richting loodrecht op de kust, van land naar water. Ga op het strand staan en kijk recht naar het water: de kompasrichting waarin je kijkt is `shore_normal_deg`. Rekenvoorbeeld 1: een kust die op het westen ligt (je kijkt naar het westen) geeft **270**. Rekenvoorbeeld 2: een kustlijn die loopt van 20° naar 200° (NNO–ZZW), met het water aan de westkant. De twee loodlijnen zijn 20 + 90 = 110 en 20 − 90 = −70, dus 290. Het water ligt aan de westkant, dus 290. Het verband met windrichting (meteorologisch, "waar de wind vandaan komt"): wind uit `shore_normal_deg` is onshore. Indicatief, met de voorbeelden uit WP-05 AC-1 voor 270: 270 onshore, 225/315 side-onshore, 180/0 sideshore, 135/45 side-offshore, 90 offshore. De exacte grenzen liggen vast in WP-05. Noem geen echte spot met een waarde.
@@ -370,7 +398,7 @@ Geen andere velden, geen coördinaten, geen regio.
 7. **Getij.** De betekenis van `none`, `prefer_low`, `prefer_high` en `avoid_low`. `tide_min_level_cm` in cm ten opzichte van NAP, alleen bij `tide_sensitive` niet `none`. `rws_station`: kies de code met `shakka tides stations` (beschikbaar na WP-04).
 8. **Eisen voor `verified: true`.** Verplicht: `lat`, `lon`, `shore_normal_deg`, `status` en `level`, en `rws_station` als `tide_sensitive` niet `none` is. Daarnaast de inhoudelijke check door Lars: de NKV-spotkaart, de gemeentelijke en lokale regels en de seizoenssluitingen. Alleen Lars zet `verified: true`.
 9. **Volledig fictief voorbeeld.** Het `test-strand`-blok uit het WP-02-contract, duidelijk gemarkeerd als fictief en "niet overnemen in `data/spots.yaml`".
-10. **Foutmeldingen lezen.** De vorm `spots[3] (domburg): season[0].start: ...`, met twee of drie voorbeelden.
+10. **Foutmeldingen lezen.** De vorm `spots[3] (domburg): season[0].start: ...`, met twee of drie voorbeelden. Daarnaast de tweede vorm voor fouten in de YAML zelf, die vóór de spots ontstaan en dus geen spot-id hebben: `spots.yaml: line 12, column 5: found duplicate key 'lat'` (zoek de spot via het regelnummer). Gebruik in de voorbeelden geen echte spotwaarden; een id uit de startset met een fictieve fout mag.
 
 ## Edge cases
 
@@ -392,7 +420,7 @@ Geen andere velden, geen coördinaten, geen regio.
 | E14 | `name: "  "`, `region: ""` | Fout: "must not be blank" |
 | E15 | `id: 123` (YAML-int) | Fout op `id`; het label is `spots[i]`, zonder id |
 | E16 | Item zonder `id` | Fout `id: Field required`; het label is `spots[i]` |
-| E17 | Dubbele YAML-sleutel binnen een spot (`lat` twee keer) | Eén fout met regel en kolom: "found duplicate key 'lat'" |
+| E17 | Dubbele YAML-sleutel binnen een spot (`lat` twee keer) | Eén fout `spots.yaml: line L, column C: found duplicate key 'lat'`. Bewust zonder spot-id of index: YAML-fouten ontstaan vóór er spots zijn (review N-7; voorbeeld in `SPOT_DATA.md` §10). |
 | E18 | Leeg bestand, alleen commentaar, top-level lijst, `spots: {}`, extra top-level sleutel | Eén vormfout (extra sleutels: één fout per sleutel) |
 | E19 | Bestand bestaat niet | `"{path}: file not found"`, exitcode 1 |
 | E20 | YAML-syntaxfout | Eén fout met regel en kolom (1-based) |
@@ -414,6 +442,9 @@ Geen andere velden, geen coördinaten, geen regio.
 | E36 | Een toewijzing aan een veld van een profiel | `ValidationError` (bevroren) |
 | E37 | `DirRange(from_deg=1, to_deg=2)` en `DirRange.model_validate({"from": 1, "to": 2})` | Allebei geldig en gelijk |
 | E38 | Merge-sleutels (`<<: *anchor`) in de YAML | Geen fout van de dubbele-sleutelcontrole. Ze worden niet aangeraden. |
+| E39 | Complexe (onhashbare) sleutel in een spot: `? [a, b]\n    : x` | Geen traceback. Eén fout `spots.yaml: line L, column C: found unhashable key` (de `ConstructorError` van de superklasse). |
+| E40 | Afsluitende newline of niet-ASCII-cijfers: `start: "05-01\n"`, `start: "０５-01"` (fullwidth `05`), `from_time: "10:00\n"`, `id: "zz-a\n"` | Fout op respectievelijk `season[0].start` ("expected a quoted 'MM-DD' date"), `season[0].start`, `season[0].from_time` ("expected a quoted 'HH:MM' time") en `id`. Bij `id: "zz-a\n"` is het label `spots[0]` (id niet afdrukbaar), en geen enkele foutregel bevat een newline. De waarde komt nooit in de database. |
+| E41 | NUL-teken in tekst: `name: "a\0b"`, `notes: "x\0"`, `season[0].note: "\0"` | Fout op het veld: "must not contain NUL characters" |
 
 ## Testplan
 Tests eerst voor alle domeinlogica. Er worden geen echte spotwaarden in tests gebruikt: alleen de fictieve `test-strand` en ids met het prefix `zz`.
@@ -434,7 +465,8 @@ Tests eerst voor alle domeinlogica. Er worden geen echte spotwaarden in tests ge
 - helper `write_spots(tmp_path, text) -> Path`.
 
 **AC-1** (`shakka spots validate` geeft 0 op `data/spots.yaml`):
-- `test_spots_cli.py::test_validate_default_path`: `CliRunner().invoke(cli, ["spots", "validate"])` zonder env: exitcode 0, `25 spots valid (0 verified)` en `spots validate: ok` in de uitvoer;
+- `test_spots_cli.py::test_validate_default_path`: `CliRunner().invoke(cli, ["spots", "validate"])` zonder env. Eisen: exitcode 0; `re.search(r"^ok      \d+ spots valid \(\d+ verified\)$", result.output, re.MULTILINE)` slaagt; de regel `spots validate: ok` staat in de uitvoer. Géén exacte telling: die test zou rood worden zodra Lars een spot toevoegt of verifieert (review B-1);
+- `test_spots_cli.py::test_validate_counts_on_tmp_file`: de exacte uitvoertekst met vaste aantallen, op tijdelijke bestanden via `--path`. `MIN_SPOT_YAML` geeft `ok      1 spots valid (0 verified)`, en `FULL_SPOT_YAML` geeft `ok      1 spots valid (1 verified)`, elk gevolgd door `spots validate: ok`;
 - `test_spots_data.py::test_data_file_is_valid`: `load_spots(DEFAULT_SPOTS_PATH)` geeft geen exceptie;
 - de verifier draait ook letterlijk `cd ingest && uv run shakka spots validate`.
 
@@ -442,7 +474,7 @@ Tests eerst voor alle domeinlogica. Er worden geen echte spotwaarden in tests ge
 ```
 uv run python -c "import yaml; d = yaml.safe_load(open('../data/spots.yaml')); print([(s['id'], s['name'], s['verified'], sorted(s)) for s in d['spots']])"
 ```
-en controleert: precies de 25 id's uit de tabel, met de namen uit het plan, elk `verified` gelijk aan `False` en sleutels `['id', 'name', 'verified']`. De permanente test `test_spots_data.py::test_contract_ids_present` eist dat de 25 contract-id's aanwezig zijn (superset toegestaan, A9). Hij controleert de namen en de afwezigheid van andere velden níet, want Lars vult die later in.
+en controleert: precies de 25 id's uit de tabel, met de namen uit het plan, elk `verified` gelijk aan `False` en sleutels `['id', 'name', 'verified']`. Daarnaast toont `uv run shakka spots validate` op dat moment letterlijk `ok      25 spots valid (0 verified)`; ook dat is alleen deze eenmalige controle, geen test. De permanente test `test_spots_data.py::test_contract_ids_present` eist dat de 25 contract-id's aanwezig zijn (superset toegestaan, A9). Hij controleert de namen en de afwezigheid van andere velden níet, want Lars vult die later in.
 
 **AC-3** (`test_spots_validation.py`). Geparametriseerd: `(yaml_text, expected_id_in_msg, expected_field_in_msg)`. Elk geval geeft `SpotValidationError`, en minstens één regel in `exc.errors` bevat zowel de id als de veldnaam:
 
@@ -464,7 +496,8 @@ en controleert: precies de 25 id's uit de tabel, met de namen uit het plan, elk 
 
 Daarnaast in hetzelfde bestand:
 - `test_three_errors_in_one_exception`: items `{id: Bad_Id, name: X, status: open}` en `{id: zz-ok, name: Y, lat: 52.0}`. Dat geeft `len(exc.errors) == 3` (slug, status, lon), in die volgorde;
-- `test_edge_cases`, geparametriseerd over E1, E3 (alle ongeldige varianten), E4, E6, E8, E9, E10, E11, E14, E15, E16, E17, E18, E19, E20, E22, E23 en E24. Elk geeft een `SpotValidationError`, en de verwachte veldnaam of het kernwoord staat in de foutregel;
+- `test_edge_cases`, geparametriseerd over E1, E3 (alle ongeldige varianten), E4, E6, E8, E9, E10, E11, E14, E15, E16, E17, E18, E19, E20, E22, E23, E24, E39, E40 (alle vier varianten, elk als eigen geval) en E41 (alle drie). Elk geeft een `SpotValidationError`, en de verwachte veldnaam of het kernwoord staat in de foutregel. Kernwoorden: E4 `expected a quoted 'MM-DD' date` (bewijst dat een YAML-`date` onze eigen melding krijgt, review N-1), E17 `found duplicate key 'lat'`, E39 `found unhashable key`, E41 `must not contain NUL characters`. De YAML-tekst van E40 en E41 gebruikt double-quoted escapes (`"０５-01"`, `"a\0b"`) in een Python raw string, zodat PyYAML de tekens maakt;
+- `test_error_lines_are_single_line`: voor de gevallen E40 en E41 bevat geen enkele regel in `exc.errors` een `"\n"` of `"\x00"`;
 - `test_valid_edge_cases`: E2, `"02-29"`, E5, E7, E12, E13 en E21 laden foutloos, met de verwachte waarden (bijv. E21: `season == ()`, `tide_sensitive is TideSensitivity.NONE`, `verified is False`);
 - `test_error_format`: de foutregel voor `zz-e` begint met `spots[0] (zz-e): season[0].start: `;
 - `test_file_order_preserved`: drie geldige spots komen terug in bestandsvolgorde.
@@ -480,15 +513,28 @@ Het CLI-deel: `test_spots_cli.py::test_validate_three_errors` op het bestand met
 
 Verder domeintests in hetzelfde bestand: `test_frozen` (E36), `test_extra_forbidden` voor alle drie de modellen, `test_dir_range_alias_and_name` (E37), `test_season_time_rules` (E6, plus beide-of-geen), `test_rule_violations_order` (E25, E26, E23, E24, en de volgorde uit de docstring), `test_direct_construction_enforces_rules` (E35) en `test_enum_values` (de exacte waardesets van de drie enums).
 
-**AC-5** (`test_spots_sync.py`, met `FakeSupabase`):
-- `test_first_sync_upserts_all`: een lege fake en twee profielen (de volledige fixture en de minimale spot). Resultaat `upserted == 2` en `orphaned == []`, `db.upserts == [("spots", "id")]`, en `writes` bevat geen `delete`. `FakeSupabase.rows("spots")` bevat beide, met `to_row`-waarden;
+**AC-5** (`test_spots_sync.py`, met `FakeSupabase`). Spy, bovenaan dat testbestand (review N-3; `tests/fakes.py` blijft ongewijzigd):
+```python
+class RecordingFake(FakeSupabase):
+    """FakeSupabase that also records the payload of every upsert."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.upsert_payloads: list[tuple[str, list[dict[str, Any]]]] = []
+
+    def upsert(self, table: str, rows: Sequence[Mapping[str, Any]], *, on_conflict: str) -> int:
+        self.upsert_payloads.append((table, [dict(r) for r in rows]))
+        return super().upsert(table, rows, on_conflict=on_conflict)
+```
+Alle tests hieronder gebruiken `RecordingFake()`. Elke geseede `spots`-rij bevat minstens `id` en `name` (`name` is in de database `not null`; de fake vult ontbrekende kolommen bij `select` met `None`) (review N-8).
+- `test_first_sync_upserts_all`: een lege fake en twee profielen (de volledige fixture en de minimale spot). Resultaat `upserted == 2` en `orphaned == []`, `db.upserts == [("spots", "id")]`, `db.upsert_payloads == [("spots", [full.to_row(), minimal.to_row()])]`, en `writes` bevat geen `delete`. `db.rows("spots")` bevat beide, met `to_row`-waarden;
 - `test_orphan_reported_not_deleted`: met `seed("spots", [{"id": "zz-orphan", "name": "Orphan"}])` geeft de sync `orphaned == ["zz-orphan"]`, en `zz-orphan` staat nog in `rows("spots")`;
-- `test_second_sync_is_noop`: twee keer achter elkaar. De tweede geeft `upserted == 0`, en `writes` groeit niet;
-- `test_only_changed_upserted`: na de eerste sync verandert één profiel (`notes`). Resultaat `upserted == 1`, en de laatste upsert bevat alleen die rij (`writes` krijgt precies één extra `("upsert", "spots")`);
-- `test_removed_field_becomes_null` (E31);
-- `test_invalid_db_row_overwritten` (E29): seed `zz-min` met `lat: 10.0, lon: 4.0`. Resultaat `upserted == 1`, en daarna `lat` is `None`;
+- `test_second_sync_is_noop`: twee keer achter elkaar. De tweede geeft `upserted == 0`, en `writes` en `upsert_payloads` groeien niet;
+- `test_only_changed_upserted`: na de eerste sync (volledige fixture en minimale spot) wordt de minimale spot vervangen door `minimal.model_copy(update={"notes": "changed"})` (geldig, want `notes` is vrije tekst; `model_copy` valideert niet, maar de waarde voldoet aan `_NonBlankStr`). Resultaat `upserted == 1`, `writes` krijgt precies één extra `("upsert", "spots")`, en `db.upsert_payloads[-1] == ("spots", [changed.to_row()])`: de laatste upsert bevat alleen die rij;
+- `test_removed_field_becomes_null` (E31): eerste sync met de volledige fixture, daarna een sync met dezelfde spot waaruit `region` is verwijderd (`full.model_copy(update={"region": None})`; `region` is niet verplicht bij `verified: true`). `upserted == 1`, en `region` van die rij in `rows("spots")` is `None`;
+- `test_invalid_db_row_overwritten` (E29): `seed("spots", [{"id": "zz-min", "name": "Minimal", "lat": 10.0, "lon": 4.0}])`, daarna sync met de minimale spot (`MIN_SPOT_YAML`, id `zz-min`). Resultaat `upserted == 1`, `orphaned == []`, en daarna zijn `lat` en `lon` `None`;
 - `test_duplicate_ids_rejected`: `ValueError` en 0 writes;
-- `test_empty_input` (E28): geen upsert, alle geseede ids staan in `orphaned`.
+- `test_empty_input` (E28): `seed("spots", [{"id": "zz-a", "name": "A"}, {"id": "zz-b", "name": "B"}])`, sync met `[]`. Geen upsert, `orphaned == ["zz-a", "zz-b"]`.
 
 **Sync via de CLI** (`test_spots_cli.py`; env via `monkeypatch.setenv("SUPABASE_URL", "https://testref.supabase.co")` en `SUPABASE_SECRET_KEY=sb_secret_TESTVALUE`; `monkeypatch.setattr(shakka.spots.commands, "open_db", lambda settings: fake)`):
 - `test_sync_ok`: exitcode 0, `ok      2 of 2 spots upserted (0 unchanged)` en `spots sync: ok`;
@@ -543,7 +589,7 @@ Geen externe API's, geen nieuwe diensten, geen kosten. Geen nieuwe dev-dependenc
 - **R2. Geen Docker bij de builder.** Dan is AC-6 niet lokaal te tonen (zoals bij WP-01, D1). Mitigatie: A11. De optionele lokale test en de exacte commando's liggen klaar voor de verifier. Anders is het `NEEDS_LARS`.
 - **R3. Sync overschrijft handmatige databasewijzigingen.** Bewust (A5). Staat in `SPOT_DATA.md`.
 - **R4. `from_row` faalt op een ongeldige databaserij** (de database is losser dan de Python-validatie). WP-10 moet per spot afvangen (A10). Sync herstelt zo'n rij bij de volgende run.
-- **R5. Een DB-CHECK strenger dan de Python-validatie zou de sync pas tegen de echte database laten falen.** Gecontroleerd tegen migratie 1: slug, niet-lege naam, lat/lon samen, bereiken voor `shore_normal_deg`, `tide_min_level_cm` en `default_min_kn`, de enums, en de array-vorm van `ridable_dirs` en `season`. Alle zijn in Python minstens zo streng (lat/lon zelfs strenger). De optionele lokale test bewijst het tegen echt Postgres.
+- **R5. Een DB-CHECK strenger dan de Python-validatie zou de sync pas tegen de echte database laten falen.** Gecontroleerd tegen migratie 1: slug, niet-lege naam, lat/lon samen, bereiken voor `shore_normal_deg`, `tide_min_level_cm` en `default_min_kn`, de enums, en de array-vorm van `ridable_dirs` en `season`. Alle zijn in Python minstens zo streng (lat/lon zelfs strenger). Postgres weigert daarnaast NUL-tekens in `text` en `jsonb`; die weigert Python ook (`_NonBlankStr`, en de patronen van `_SpotId`, `_MonthDay` en `_LocalTime`; E41, review N-5). De optionele lokale test bewijst het tegen echt Postgres.
 - **R6. Pydantic-meldingen kunnen per versie verschillen.** De tests toetsen alleen de spot-id, het veldpad en onze eigen meldingen, niet de pydantic-tekst.
 - **R7. Latere kolommen in `spots`.** Een migratie die een kolom toevoegt (toegestaan volgens WP-01) breekt `from_row` niet (extra sleutels worden genegeerd). Wel moet die WP `SPOT_COLUMNS`, `to_row` en de kolomtest in `test_spot_model.py` aanpassen, anders wordt de nieuwe kolom niet gesynchroniseerd. De kolomtest parseert alleen `create table public.spots`; een `alter table … add column` moet de test expliciet meenemen.
 - **R8. Een id hernoemen in de YAML** laat de oude rij als wees achter, met de favorieten van gebruikers. Mitigatie: A9 (de 25 contract-id's moeten blijven bestaan), en `SPOT_DATA.md` waarschuwt.
@@ -591,14 +637,14 @@ Werk op branch `wp/WP-02` in de worktree `/Users/larst/Dev/Shakka/.claude/worktr
 
    Commit: `feat(spots): idempotent upsert sync with orphan reporting`.
 5. **CLI, eerst de tests.**
-   - Schrijf `tests/test_spots_cli.py`, zonder `test_validate_default_path` (die heeft `data/spots.yaml` nodig en komt in stap 6). Rood.
+   - Schrijf `tests/test_spots_cli.py`, zonder `test_validate_default_path` (die heeft `data/spots.yaml` nodig en komt in stap 6). `test_validate_counts_on_tmp_file` hoort wel bij deze stap. Rood.
    - Implementeer `src/shakka/spots/commands.py` en de groep `spots` in `src/shakka/cli.py`. Groen.
 
    Commit: `feat(cli): add spots validate and spots sync commands`.
 6. **Startset.**
    - Maak `data/spots.yaml` exact volgens Interfaces (25 spots, alleen `id`, `name` en `verified: false`).
-   - Schrijf `tests/test_spots_data.py` (`test_data_file_is_valid`, `test_contract_ids_present`) en `test_validate_default_path`. Groen.
-   - Draai `uv run shakka spots validate`: exitcode 0.
+   - Schrijf `tests/test_spots_data.py` (`test_data_file_is_valid`, `test_contract_ids_present`) en `test_validate_default_path` (alleen het regex-patroon, geen exacte telling; zie Testplan AC-1). Groen.
+   - Draai `uv run shakka spots validate`: exitcode 0, en de uitvoer is nu letterlijk `ok      25 spots valid (0 verified)` (eenmalige AC-2-controle, niet in een test vastleggen).
 
    Commit: `feat(data): add starter set of 25 unverified spots`.
 7. **Handleiding.**
