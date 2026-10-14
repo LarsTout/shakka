@@ -7,7 +7,7 @@ Opdeling: goedgekeurd.
 | WP-00 | Repo, tooling, CI en Supabase-koppeling | done | |
 | WP-01 | Datamodel M1, RLS en database-client | done | AC-7: `supabase db push` door Lars na merge |
 | WP-02 | Spotprofielen: schema, validatie, sync en startset | verifying | AC-1..5,7 PASS; AC-6 NEEDS_LARS (lokale stack, zie verification.md) |
-| WP-03 | Forecast-ingest wind (Open-Meteo multi-model) met call-budget | todo | |
+| WP-03 | Forecast-ingest wind (Open-Meteo multi-model) met call-budget | blueprint | |
 | WP-04 | Getij-ingest (Rijkswaterstaat) | todo | |
 | WP-05 | Evaluatie-engine (puur) | todo | |
 | WP-06 | Kite-advies (puur) | todo | |
