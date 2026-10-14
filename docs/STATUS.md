@@ -17,7 +17,7 @@ Opdeling: goedgekeurd.
 | WP-10 | Evaluatie- en alertjobs plus beheer-CLI | todo | |
 | WP-11 | Orkestratie: uurlijkse workflow, logging, foutmeldingen | todo | |
 | WP-12 | Marine-ingest (golven) | todo | |
-| WP-13 | PWA-basis | verifying | |
+| WP-13 | PWA-basis | verifying | AC-1..6 PASS; AC-7 NEEDS_LARS (Cloudflare Pages, Supabase Auth-URLs, RUNBOOK 9) |
 | WP-14 | Spotlijst en spotpagina | todo | |
 | WP-15 | Kaart | todo | |
 | WP-16 | Profiel, favorieten en alertinstellingen | todo | |
