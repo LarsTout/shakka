@@ -1,5 +1,5 @@
 # Blueprint WP-07: Alertregels en windows (puur)
-Status: DRAFT
+Status: APPROVED
 Revisie: 2
 
 ## Doel
