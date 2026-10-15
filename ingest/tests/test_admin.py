@@ -20,7 +20,6 @@ from shakka.domain.alerts import AlertRuleOverride
 from shakka.jobs.admin import AdminError, parse_quiver, quiver_comma_note
 from shakka.jobs.alerts import RULE_COLUMNS, run_alerts
 
-
 USER_C_UNKNOWN = "99999999-9999-4999-8999-999999999999"
 
 
