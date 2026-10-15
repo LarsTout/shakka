@@ -1,3 +1,4 @@
+import type { SessionFormValues } from '../../src/lib/session-form.js';
 import type { SessionRow } from '../../src/lib/session-model.js';
 
 // Test data only.
@@ -36,3 +37,19 @@ export const GO_URL_DST_NIGHT =
 	'https://example.org/go?spot=test-strand&start=2026-10-25T00%3A00%3A00Z&end=2026-10-25T02%3A00%3A00Z';
 
 export const TIKKIE_URL = 'https://tikkie.me/pay/test'; // test data, A18 format
+
+/** A valid create form: test-strand, 2026-07-18 14:00-18:00 local, Lars, rest empty. */
+export function validForm(over: Partial<SessionFormValues> = {}): SessionFormValues {
+	return {
+		spot_id: 'test-strand',
+		date: '2026-07-18',
+		start_time: '14:00',
+		end_time: '18:00',
+		organizer_name: 'Lars',
+		note: '',
+		seats_free: '',
+		departure_point: '',
+		tikkie_url: '',
+		...over
+	};
+}

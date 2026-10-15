@@ -1,13 +1,13 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { page } from '$app/state';
 	import { onMount } from 'svelte';
-	import { goTarget } from '#lib/go.js';
+	import type { PageProps } from './$types';
 
-	// Safety net: the load in +page.ts normally redirects before this renders. replace keeps the
-	// back button from returning to /go (review N-4).
+	let { data }: PageProps = $props();
+
+	// Temporary until the session-aware version: replace keeps the back button from returning to /go.
 	onMount(() => {
-		void goto(goTarget(new URL(page.url.href)), { replace: true });
+		void goto(data.target, { replace: true });
 	});
 </script>
 
