@@ -5,11 +5,22 @@ from collections.abc import Sequence
 from datetime import timedelta
 from typing import Any, Literal
 
-import httpx
 import pytest
 
+import shakka.pipeline as pipeline
+from evaluation_fixtures import make_spot
 from fakes import FakeSupabase
-from job_fixtures import NOW
+from job_fixtures import NOW, USER_A, seed_favorite, seed_forecasts, seed_profile
+from pipeline_fixtures import (
+    PIPELINE_SPOT,
+    blocked_http,
+    failing_forecast_fetch,
+    fake_forecast_fetch,
+    make_settings,
+    no_tides,
+    seed_user,
+    write_spots_yaml,
+)
 from shakka.config import Settings
 from shakka.db import DatabaseError
 from shakka.pipeline import (
@@ -30,10 +41,6 @@ from shakka.pipeline import (
 
 SECRET = "sb_secret_TESTVALUE"
 SETTINGS = Settings(supabase_url="http://127.0.0.1:54321", supabase_secret_key=SECRET)
-
-
-def blocked_http() -> httpx.Client:
-    return httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(500)))
 
 
 def rep(name="x", status="ok", **kw: Any) -> StepReport:
@@ -273,3 +280,277 @@ def test_injected_clients_not_closed():
 def test_steps_sequence_type():
     steps: Sequence[Any] = []
     assert run(FakeSupabase(), steps).status == "ok"
+
+
+# -- real steps -------------------------------------------------------------------------------
+
+
+def run_real(tmp_path, db, *, spots=(PIPELINE_SPOT,), settings=None, **kw) -> RunReport:
+    settings = settings or make_settings(write_spots_yaml(tmp_path, spots))
+    kw.setdefault("forecast_fetch", fake_forecast_fetch)
+    kw.setdefault("tide_fetch", no_tides)
+    return run_hourly(settings, now=NOW, db=db, http=blocked_http(), **kw)
+
+
+def step(report: RunReport, name: str) -> StepReport:
+    return next(s for s in report.steps if s.name == name)
+
+
+def test_steps_contract_order():
+    assert [n for n, _ in pipeline.STEPS] == [
+        "spots_sync", "forecast", "tides", "evaluate", "alerts",
+    ]  # fmt: skip
+    assert [n for n, _ in pipeline.STEPS] == list(pipeline.STEP_NAMES)
+
+
+def test_all_steps_ok_records_run(tmp_path):
+    db = FakeSupabase()
+    seed_user(db)
+    report = run_real(tmp_path, db, clock=lambda: NOW + timedelta(minutes=1))
+    (row,) = db.rows("ingest_runs")
+    assert row["status"] == "ok" and row["finished_at"] is not None
+    assert row["error_summary"] is None
+    assert [s["name"] for s in row["steps"]] == list(pipeline.STEP_NAMES)
+    keys = set(rep().to_json())
+    assert all(set(s) == keys for s in row["steps"])
+    assert report.exit_code == 0 and report.run_id == row["id"]
+    first_insert = next(i for i, (kind, _) in enumerate(db.writes) if kind == "insert")
+    assert db.writes[first_insert] == ("insert", "ingest_runs")
+    assert db.writes[:first_insert] == [("update", "ingest_runs")]
+    alerts = row["steps"][-1]
+    assert alerts["counts"]["events"] == 1 and alerts["counts"]["new"] == 1
+
+
+def _stale_db(hours: float) -> FakeSupabase:
+    db = FakeSupabase()
+    seed_user(db)
+    db.seed("spots", [make_spot(verified=True).to_row()])
+    seed_forecasts(db, fetched_at=NOW - timedelta(hours=hours))
+    return db
+
+
+def test_forecast_exception_with_stale_data_skips_alerts(tmp_path):
+    db = _stale_db(4)
+    db.writes.clear()
+    report = run_real(tmp_path, db, forecast_fetch=failing_forecast_fetch(RuntimeError("boom")))
+    assert [step(report, n).status for n in ("tides", "evaluate")] == ["ok", "ok"]
+    alerts = step(report, "alerts")
+    assert alerts.status == "skipped" and alerts.reason == "stale_forecast"
+    forecast = step(report, "forecast")
+    assert forecast.status == "failed" and (forecast.error or "").startswith("RuntimeError: ")
+    assert forecast.error_type == "RuntimeError"
+    assert report.status == "partial" and report.exit_code == 1
+    assert ("insert", "alert_state") not in db.writes
+    assert ("update", "alert_state") not in db.writes
+    assert ("upsert", "alert_state") not in db.writes
+    assert any(a.startswith("::error::alerts skipped") for a in report.annotations)
+
+
+def test_forecast_exception_with_fresh_data_runs_alerts(tmp_path):
+    db = _stale_db(2)
+    report = run_real(tmp_path, db, forecast_fetch=failing_forecast_fetch(RuntimeError("boom")))
+    assert step(report, "alerts").status == "ok"
+    assert report.status == "partial" and report.exit_code == 0
+
+
+def test_stale_boundary_exactly_three_hours_is_fresh(tmp_path):
+    db = _stale_db(3)
+    report = run_real(tmp_path, db, forecast_fetch=failing_forecast_fetch(RuntimeError("boom")))
+    assert step(report, "alerts").status == "ok"
+
+
+def test_forecast_failed_without_rows_is_stale(tmp_path):
+    db = FakeSupabase()
+    seed_user(db)
+    report = run_real(tmp_path, db, forecast_fetch=failing_forecast_fetch(RuntimeError("boom")))
+    assert step(report, "alerts").reason == "stale_forecast"
+    assert report.exit_code == 1
+
+
+def test_forecast_partial_triggers_stale_check(tmp_path):
+    from shakka.openmeteo.forecast import ForecastFetchError
+
+    db = _stale_db(4)
+    report = run_real(
+        tmp_path, db, forecast_fetch=failing_forecast_fetch(ForecastFetchError("down"))
+    )
+    assert step(report, "forecast").status == "partial"
+    assert step(report, "alerts").status == "skipped"
+
+
+def test_forecast_ok_without_coordinates_runs_alerts(tmp_path):
+    db = FakeSupabase()
+    seed_user(db)
+    spot = {k: v for k, v in PIPELINE_SPOT.items() if k not in ("lat", "lon")}
+    spot["verified"] = False
+    report = run_real(tmp_path, db, spots=(spot,))
+    assert report.status == "ok"
+    assert step(report, "alerts").counts["ineligible"] == 1
+
+
+def test_failed_run_exit_code_1(tmp_path):
+    db = FakeSupabase()
+    seed_user(db)
+    settings = make_settings(write_spots_yaml(tmp_path), app_base_url="not a url")
+    report = run_real(tmp_path, db, settings=settings)
+    assert step(report, "alerts").status == "failed"
+    assert report.status == "failed" and report.exit_code == 1
+
+
+def test_budget_warning_recorded(tmp_path):
+    db = FakeSupabase()
+    db.seed(
+        "api_usage",
+        [{"day": "2026-07-15", "source": "open_meteo_forecast", "calls": 6500, "requests": 1}],
+    )
+    report = run_real(tmp_path, db)
+    forecast = step(report, "forecast")
+    assert forecast.status == "ok"
+    assert len(forecast.warnings) == 1
+    assert forecast.warnings[0].startswith("Open-Meteo usage today is ")
+    assert "% of the guard" in forecast.warnings[0]
+    assert forecast.counts["usage_daily"] > 6400
+    assert report.status == "ok" and report.exit_code == 0
+    line = next(
+        a for a in report.annotations if a.startswith("::warning::forecast: Open-Meteo usage today")
+    )
+    assert "%25 of the guard" in line
+
+
+@pytest.mark.parametrize("calls", [6000, 6398.8])
+def test_budget_below_threshold_no_warning(tmp_path, calls):
+    db = FakeSupabase()
+    db.seed(
+        "api_usage",
+        [{"day": "2026-07-15", "source": "open_meteo_forecast", "calls": calls, "requests": 1}],
+    )
+    report = run_real(tmp_path, db)
+    assert step(report, "forecast").warnings == ()
+
+
+def test_spots_sync_failure_continues(tmp_path):
+    db = FakeSupabase()
+    seed_user(db)
+    db.seed("spots", [make_spot(verified=True).to_row()])
+    settings = make_settings(tmp_path / "missing.yaml")
+    report = run_real(tmp_path, db, settings=settings)
+    sync = step(report, "spots_sync")
+    assert sync.status == "failed" and sync.error_type == "SpotValidationError"
+    assert [s.status for s in report.steps[1:]] == ["ok"] * 4
+    assert report.status == "partial" and report.exit_code == 0
+
+
+def test_spots_sync_orphan_warning(tmp_path):
+    db = FakeSupabase()
+    db.seed("spots", [make_spot(id="old-spot").to_row()])
+    report = run_real(tmp_path, db)
+    sync = step(report, "spots_sync")
+    assert sync.counts["orphaned"] == 1
+    assert sync.warnings == ("spots in the database but not in the YAML: old-spot",)
+
+
+def test_tides_partial(tmp_path):
+    from shakka.rws.tides import TideFetchError
+
+    spot = {**PIPELINE_SPOT, "rws_station": "hoekvanholland", "tide_sensitive": "none"}
+
+    def failing(station, start, end):
+        raise TideFetchError("down")
+
+    db = FakeSupabase()
+    report = run_real(tmp_path, db, spots=(spot,), tide_fetch=failing)
+    tides = step(report, "tides")
+    assert tides.status == "partial"
+    assert tides.counts["failed"] == ["hoekvanholland"]
+
+
+def _tide_ctx(db) -> tuple[PipelineContext, list[str], list[float]]:
+    from shakka.budget import BudgetGuard
+    from shakka.rws.tides import TideFetchError
+
+    calls: list[str] = []
+
+    def fetch(station, start, end):
+        calls.append(station)
+        clock[0] += pipeline.TIDE_STEP_BUDGET_S + 1
+        raise TideFetchError("down")
+
+    clock = [0.0]
+    ctx = PipelineContext(
+        SETTINGS, db, blocked_http(), NOW, BudgetGuard(db), fake_forecast_fetch, fetch
+    )
+    return ctx, calls, clock
+
+
+def test_tide_budget_stops_fetching(monkeypatch):
+    db = FakeSupabase()
+    db.seed(
+        "spots",
+        [
+            make_spot(id="spot-a", rws_station="station-a").to_row(),
+            make_spot(id="spot-b", rws_station="station-b").to_row(),
+        ],
+    )
+    ctx, calls, clock = _tide_ctx(db)
+    monkeypatch.setattr(pipeline, "_monotonic", lambda: clock[0])
+    outcome = pipeline.step_tides(ctx)
+    assert calls == ["station-a"]
+    assert outcome.status == "partial"
+    assert outcome.counts["failed"] == ["station-a", "station-b"]
+    assert outcome.counts["budget_skipped"] == 1
+    assert any(
+        e.startswith("station-b: TimeoutError: tide step time budget")
+        for e in outcome.counts["errors"]
+    )
+    assert len(outcome.warnings) == 1
+    assert outcome.warnings[0].startswith("time budget of 240 s reached; 1 station(s)")
+
+
+def test_tide_budget_zero_still_runs_alerts(tmp_path, monkeypatch):
+    monkeypatch.setattr(pipeline, "TIDE_STEP_BUDGET_S", 0.0)
+    spot = {**PIPELINE_SPOT, "rws_station": "hoekvanholland", "tide_sensitive": "none"}
+
+    def must_not_run(station, start, end):
+        raise AssertionError("tide fetch must not be called")
+
+    db = FakeSupabase()
+    seed_user(db)
+    report = run_real(tmp_path, db, spots=(spot,), tide_fetch=must_not_run)
+    tides = step(report, "tides")
+    assert tides.status == "partial" and tides.counts["budget_skipped"] == 1
+    assert step(report, "evaluate").status == "ok" and step(report, "alerts").status == "ok"
+    assert report.status == "partial" and report.exit_code == 0
+    assert any(a.startswith("::warning::tides: time budget") for a in report.annotations)
+
+
+def test_alert_counts_shape():
+    from shakka.jobs.alerts import AlertJobResult
+
+    counts = pipeline.alert_counts(AlertJobResult(users=1, events=0, messages=[]))
+    assert set(counts) == {
+        "users", "events", "favorites", "ineligible", "disabled", "skipped", "write_errors",
+        "deleted", "new", "improved", "worsened", "cancelled", "errors",
+    }  # fmt: skip
+    assert "messages" not in counts
+
+
+def test_alerts_errors_only_in_ingest_runs(tmp_path, caplog, capsys):
+    from shakka.logsetup import configure_logging
+
+    root = logging.getLogger()
+    handlers, level = list(root.handlers), root.level
+    try:
+        configure_logging()
+        db = FakeSupabase()
+        seed_profile(db, USER_A, level="intermediate")
+        seed_favorite(db, USER_A, "test-strand", earliest_local="24:00:00")
+        with caplog.at_level(logging.INFO):
+            report = run_real(tmp_path, db)
+    finally:
+        root.handlers[:] = handlers
+        root.setLevel(level)
+    alerts = step(report, "alerts")
+    assert alerts.status == "partial"
+    assert any("spot test-strand:" in e for e in alerts.counts["errors"])
+    out = capsys.readouterr()
+    assert "spot test-strand:" not in caplog.text + out.out + out.err
