@@ -10,7 +10,7 @@ Opdeling: goedgekeurd.
 | WP-03 | Forecast-ingest wind (Open-Meteo multi-model) met call-budget | done | |
 | WP-04 | Getij-ingest (Rijkswaterstaat) | done | |
 | WP-05 | Evaluatie-engine (puur) | todo | |
-| WP-06 | Kite-advies (puur) | approved | |
+| WP-06 | Kite-advies (puur) | building | |
 | WP-07 | Alertregels en windows (puur) | todo | |
 | WP-08 | Alert-deduplicatie en berichtopbouw (puur) | todo | |
 | WP-09 | Telegram-kanaal | todo | |
