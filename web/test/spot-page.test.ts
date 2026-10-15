@@ -3,7 +3,6 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { favoritesState, toggleFavoriteMock } from './helpers/fake-favorites.js';
 import { USER_ID } from './helpers/fake-session.js';
-import { NOW_FRESH, NOW_STALE, SPOT_VERIFIED, pageData } from './fixtures/spot-data.js';
 import { WAVES_NOTE_NL } from '../src/lib/marine.js';
 import {
 	MARINE_FRESH,
