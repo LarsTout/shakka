@@ -1,5 +1,5 @@
 # Blueprint WP-17: Web Push: backend (enige meldingskanaal)
-Status: DRAFT
+Status: APPROVED
 Revisie: 2
 
 ## Doel
