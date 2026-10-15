@@ -29,11 +29,13 @@ Map van deze WP: `docs/wp/$0/`. Werk `docs/STATUS.md` bij bij elke statuswissel 
 ## 1. Blueprint
 Status `blueprint`. Delegeer aan **planner**: "Schrijf de blueprint voor $0."
 
-## 2. Onafhankelijke review (max 2 rondes)
-Status `in_review`. Delegeer aan **reviewer**: "Review de blueprint van $0." Geef géén samenvatting van de planner mee.
+## 2. Onafhankelijke review (max 2 rondes, plus één gerichte herstelronde)
+Status `in_review`. Geef de reviewer géén samenvatting van de planner mee.
+- **Ronde 1.** Kies de reviewer op basis van de WP-sectie in WORK_PACKAGES: omvang **M**, of de WP raakt RLS/grants, tokens, persoonsgegevens, geld of de offshore-regel → **reviewer** (Opus). Omvang **S** zonder die onderwerpen → **reviewer-light**. Opdracht: "Review de blueprint van $0 (ronde 1)." Noem in de opdracht de twee of drie punten waar jij als orchestrator extra op wilt letten (harde regels, bekende risico's uit afhankelijke WP's); geen lange lijsten.
 - `APPROVED`: zet in `blueprint.md` de regel `Status: DRAFT` op `Status: APPROVED`, status `approved`, commit `docs($0): approved blueprint`.
-- `CHANGES_REQUIRED` in ronde 1: delegeer aan **planner**: "Herzie de blueprint van $0 op basis van `docs/wp/$0/review.md`." Daarna opnieuw de **reviewer** (nieuwe instantie, ronde 2).
-- `CHANGES_REQUIRED` in ronde 2: status `blocked`, stop. Geef Lars de openstaande blokkerende punten en vraag hoe verder.
+- `CHANGES_REQUIRED` in ronde 1: neem per blokkerend punt een beslissing als de reviewer een keuze voorlegt, en delegeer aan **planner**: "Herzie de blueprint van $0 op basis van `docs/wp/$0/review.md`. Beslissingen: …". Daarna **reviewer-light** (nieuwe instantie): "Review de blueprint van $0, ronde 2: alleen B-… en de gewijzigde secties." Noem de B-punten letterlijk.
+- `CHANGES_REQUIRED` in ronde 2 op een **nieuw** punt dat de revisie zelf veroorzaakte en waarvoor de reviewer een concrete fix geeft: één gerichte ronde 3 (planner, dan reviewer-light met alleen dat punt). In alle andere gevallen: status `blocked`, stop, geef Lars de openstaande punten.
+- Meldt een reviewer-light "ESCALATE": zet alsnog de volledige **reviewer** in voor die ronde.
 
 ## 3. Bouwen
 - Check dat de working tree schoon is en dat je op `wp/$0` zit.
