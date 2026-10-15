@@ -927,7 +927,7 @@ Vervallen (15 oktober 2026): Telegram is geschrapt; zie WP-17. Besluit van Lars,
 - AC-6: `grep -rEn "googletagmanager|google-analytics|plausible|fonts.googleapis|cdn\." web/src web/static` geeft niets, en `web/build/index.html` bevat geen `<script src="http`.
 - AC-7: De Cloudflare Pages-URL laadt, de app is te installeren (Chrome of Safari "Zet op beginscherm") en magic-link-login met Lars' e-mailadres werkt end-to-end. Dit is `NEEDS_LARS`.
 **Nodig van Lars:**
-- Een Cloudflare-account en een Pages-project gekoppeld aan de repo: root `web`, build `npm run build`, output `build`.
+- Een Cloudflare-account en een Pages-project gekoppeld aan de repo: root directory leeg (repo-root, zodat `data/contracts/*.json` beschikbaar is; WP-14 A7), build `cd web && npm ci && npm run build`, output `web/build`.
 - Build-variabelen `PUBLIC_SUPABASE_URL` en `PUBLIC_SUPABASE_PUBLISHABLE_KEY`.
 - In Supabase Auth: Site URL en Redirect URLs (Pages-URL en `http://localhost:5173`).
 - Node LTS lokaal.
