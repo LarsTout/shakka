@@ -1,7 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { createFakeSupabase } from './helpers/fake-supabase.js';
 import { PROFILE_FULL, ruleRow } from './fixtures/user-data.js';
+import { NOW_SESSIONS, SESSION_ID, SESSION_ROW, SLUG } from './fixtures/session-data.js';
 import { USER_ID } from './helpers/fake-session.js';
+import { SESSION_COLUMNS, SESSION_EDITABLE_COLUMNS, type NewSession } from '../src/lib/session-model.js';
 
 const fake = vi.hoisted(() => ({ current: null as unknown as ReturnType<typeof createFakeSupabase> }));
 vi.mock('#lib/supabase.js', async () => {
@@ -13,7 +15,11 @@ vi.mock('#lib/supabase.js', async () => {
 import { DataError } from '../src/lib/data.js';
 import {
 	addFavorite,
+	getOwnSession,
 	getProfile,
+	insertSession,
+	listOwnSessions,
+	updateOwnSession,
 	listAlertRules,
 	listFavoriteSpotIds,
 	listOwnPushSubscriptions,
@@ -246,5 +252,77 @@ describe('push_subscriptions', () => {
 				if (op[0] === 'eq') expect(['user_id', 'endpoint']).not.toContain(op[1]);
 			}
 		}
+	});
+});
+
+describe('sessions (WP-20)', () => {
+	const NEW: NewSession = {
+		spot_id: 'test-strand',
+		organizer_name: 'Lars',
+		starts_at: '2026-07-18T12:00:00.000Z',
+		ends_at: '2026-07-18T16:00:00.000Z',
+		note: null,
+		seats_free: 2,
+		departure_point: 'Utrecht',
+		tikkie_url: null
+	};
+	it('insertSession writes exactly the eight editable columns', async () => {
+		fake.current.respond('sessions', { data: { slug: SLUG }, error: null });
+		const withExtra = { ...NEW, organizer_id: 'x', slug: 'y', cancelled_at: 'z' } as unknown as NewSession;
+		expect(await insertSession(withExtra)).toEqual({ slug: SLUG });
+		const call = fake.current.calls[0]!;
+		expect(call.table).toBe('sessions');
+		expect(call.ops).toEqual([['insert', NEW], ['select', 'slug'], ['single']]);
+		expect(Object.keys(call.ops[0]![1] as object).sort()).toEqual([...SESSION_EDITABLE_COLUMNS].sort());
+	});
+	it('insertSession maps rate_limited without the Supabase text', async () => {
+		fake.current.respond('sessions', { data: null, error: { code: 'PT400', message: 'rate_limited' } });
+		const e = await insertSession(NEW).catch((x) => x);
+		expect(e).toBeInstanceOf(DataError);
+		expect(e.code).toBe('rate_limited');
+		expect(e.message).not.toContain('PT400');
+	});
+	it('insertSession keeps other codes and requires a slug', async () => {
+		fake.current.respond('sessions', { data: null, error: { code: '23503', message: 'detail' } });
+		await expect(insertSession(NEW)).rejects.toMatchObject({ code: '23503' });
+		fake.current.respond('sessions', { data: {}, error: null });
+		await expect(insertSession(NEW)).rejects.toMatchObject({ code: 'no_slug' });
+	});
+	it('listOwnSessions filters on organizer and end', async () => {
+		fake.current.respond('sessions', { data: [SESSION_ROW], error: null });
+		const rows = await listOwnSessions(USER_ID, new Date(NOW_SESSIONS));
+		expect(rows).toEqual([SESSION_ROW]);
+		expect(fake.current.calls[0]!.ops).toEqual([
+			['select', SESSION_COLUMNS.join(',')],
+			['eq', 'organizer_id', USER_ID],
+			['gt', 'ends_at', NOW_SESSIONS],
+			['order', 'starts_at', asc],
+			['order', 'id', asc],
+			['range', 0, 999]
+		]);
+	});
+	it('getOwnSession', async () => {
+		fake.current.respond('sessions', { data: SESSION_ROW, error: null });
+		expect(await getOwnSession(SLUG)).toEqual(SESSION_ROW);
+		expect(fake.current.calls[0]!.ops).toEqual([
+			['select', SESSION_COLUMNS.join(',')],
+			['eq', 'slug', SLUG],
+			['maybeSingle']
+		]);
+		fake.current.respond('sessions', { data: null, error: null });
+		expect(await getOwnSession(SLUG)).toBeNull();
+	});
+	it('updateOwnSession', async () => {
+		fake.current.respond('sessions', { data: [{ id: SESSION_ID }], error: null });
+		await updateOwnSession(SESSION_ID, { note: 'x' });
+		expect(fake.current.calls[0]!.ops).toEqual([
+			['update', { note: 'x' }],
+			['eq', 'id', SESSION_ID],
+			['select', 'id']
+		]);
+		fake.current.respond('sessions', { data: [], error: null });
+		await expect(updateOwnSession(SESSION_ID, { note: 'x' })).rejects.toMatchObject({
+			code: 'not_found'
+		});
 	});
 });
