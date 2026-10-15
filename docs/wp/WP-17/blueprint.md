@@ -1,6 +1,6 @@
 # Blueprint WP-17: Web Push: backend (enige meldingskanaal)
 Status: DRAFT
-Revisie: 1
+Revisie: 2
 
 ## Doel
 Alerts als Web Push afleveren, het enige meldingskanaal (A-16), naar alle geregistreerde apparaten van een gebruiker, en dode abonnementen automatisch opruimen:
@@ -20,6 +20,7 @@ Alerts als Web Push afleveren, het enige meldingskanaal (A-16), naar alle geregi
     - WP-17 gaat live vóór WP-18. Op het moment van livegang heeft niemand een push-abonnement, dus een eenmalige "opnieuw als `new` behandelen" bij livegang bereikt niemand;
     - een blijvende regel "actieve rijen zonder `last_notified_at` opnieuw als `new` pushen" zou "nooit afgeleverd omdat er geen abonnement was" (`no_target`, zie A6) verwarren met "uit M1", en zou elke run terugkomen bij gebruikers zonder abonnement. Dat past niet bij "één melding per window".
   - Wil Lars na het aanzetten van push (WP-18) de lopende windows alsnog als melding krijgen, dan verwijdert hij zijn actieve rijen (RUNBOOK §14, punt 9): `delete from public.alert_state where user_id = '<id>' and status = 'active';`. De volgende run geeft dan voor elk huidig window een `new`-event, dat gepusht wordt. Een geannuleerde rij die overlapt met een huidig window wordt dan heractiveerd met `new` (WP-08 A8); ook dat wordt gepusht.
+  - **Blijvend effect, niet alleen voor M1.** Hetzelfde geldt voor elke gebruiker die push pas aanzet nadat hij al favorieten heeft: de windows die op dat moment lopen, hebben hun `new`-event al gehad (`no_target`, de state schoof door) en komen niet meer als melding, tot een wezenlijke wijziging (`improved`, `worsened`, `cancelled`) of een nieuw window. WP-18 beslist of het daar iets mee doet (bijvoorbeeld een uitleg in de UI bij het aanzetten: "meldingen gelden voor nieuwe windows en wijzigingen"). De handmatige reset uit de RUNBOOK (§14, punt 9) werkt per gebruiker en is de enige ingreep die WP-17 levert.
 - **A2. `last_notified_at` = de `now` van de run waarin het event voor het eerst minstens één geslaagde aflevering had.** Afgestemd op WP-10 A2 (in M1 altijd `NULL`) en WP-08 A9 (`diff_windows` wijzigt het veld nooit). Een event zonder geslaagde aflevering (geen abonnement, of alleen permanente fouten) laat het veld ongewijzigd. Wordt een diff door de alles-of-nietsregel opnieuw afgeleverd in een latere run, dan krijgt het veld de `now` van die latere run (de run waarin de state werd opgeslagen). De run-`now` en niet de klok van het moment van versturen: jobfuncties lezen geen klok (afspraak WORK_PACKAGES); het verschil is hooguit enkele minuten.
 - **A3. Nieuwe `alert_state`-rijen krijgen altijd vooraf een `id` (`uuid4`), ook zonder pushkanaal.** WP-10 A10 liet de database de `id` kiezen. WP-17 kent hem toe vóór de aflevering (WP-10 en WP-08 "Gevolgen"), zodat `tag` en rij overeenkomen. Om één codepad te hebben gebeurt dat in elke run die niet `dry_run` is; `store_plan` blijft ongewijzigd, want `AlertStateEntry.to_row()` neemt een gezette `id` mee in de insert. Bij `dry_run` blijft `state_id` van een nieuwe rij `None` (WP-10-contract).
 - **A4. Afleverregel en alles-of-niets (bindend, uit WORK_PACKAGES en WP-08 "Gevolgen").** Per event:
@@ -37,13 +38,15 @@ Alerts als Web Push afleveren, het enige meldingskanaal (A-16), naar alle geregi
   - Een waarde telt als afwezig als ze `None` is, leeg na `strip()`, of (alleen bij `VAPID_SUBJECT`) precies `mailto:`. Dat laatste is de waarde uit `.env.example`; zonder deze regel zou een ongewijzigde `.env` als "half ingevuld" gelden.
   - Alle drie afwezig → kanaal uit (`{}`), met een waarschuwing in de log en een `::warning::`-annotatie per run.
   - Eén of twee aanwezig, een ongeldige private key, een ongeldig subject, of een `VAPID_PUBLIC_KEY` die niet bij de private key hoort → `ValueError` met een vaste tekst zonder waarden. In de pipeline maakt dat de stap `alerts` `failed` (run `failed`, exitcode 1, mail van GitHub): een configuratiefout moet opvallen, en anders zou elke aflevering stil falen.
-  - `VAPID_SUBJECT` is een e-mailadres en dus een persoonsgegeven. Het komt nooit in een foutmelding, log of uitvoer.
+  - **"Geldig subject" = wat py_vapid bij het ondertekenen accepteert** (review B-1). `WebPushNotifier.__init__` zet één proefhandtekening met de echte sleutel en het echte subject; elke exception daaruit wordt de vaste `ValueError` voor `VAPID_SUBJECT`. Zo kan een subject dat pas bij `webpush()` faalt (bijv. `https://shakka.nl/contact`: py_vapid staat bij `https` geen pad toe; `mailto:lars@example`: py_vapid eist een domein met een punt) niet door de constructie komen en daarna elke aflevering `deferred` maken. Geldige vormen in de praktijk: `mailto:<adres>@<domein.tld>` of `https://<host>` zonder pad.
+  - `VAPID_SUBJECT` is een e-mailadres en dus een persoonsgegeven. Het komt nooit in een foutmelding, log of uitvoer; als vangnet staat het ook in `secret_values` (redactie van log en `ingest_runs`, review N-11).
 - **A10. Sleutelformaat: raw base64url (32 bytes private, 65 bytes publiek, zonder `=`).** `py_vapid.Vapid.from_string` herkent een raw sleutel van 32 bytes (anders DER); PEM werkt daar niet (gecontroleerd in de broncode, zie Externe afhankelijkheden). De nieuwe CLI `shakka alerts vapid-keys` maakt zo'n paar; de publieke sleutel is ook de `applicationServerKey` voor de PWA (`PUBLIC_VAPID_PUBLIC_KEY`, WP-18).
 - **A11. `shakka alerts run` (lokaal) levert ook af**, met de notifiers uit `Settings`, net als de uurlijkse run. Anders zou een lokale run de state laten doorschuiven zonder melding. `--dry-run` levert nooit af. `shakka admin alerts preview` levert nooit af.
 - **A12. Additieve uitbreidingen van het contract** (alle signatures uit WORK_PACKAGES blijven exact; dit komt erbij):
   - `shakka.notify.base`: `WEBPUSH_CHANNEL`; validatie in `DeliveryResult` en `PushTarget`; `PushTarget.from_row`; `repr=False` voor endpoint en sleutels;
   - `shakka.domain.push`: `PUSH_PAYLOAD_MAX_BYTES`, `PUSH_TAG_MAX`, `ELLIPSIS`, `FALLBACK_TITLE`, `PushPayload`, `shorten_words`, `spot_path`, `push_tag`, `build_push_payload`, `payload_size`;
-  - `WebPushNotifier(..., *, ttl_s, timeout_s, webpush_fn)`, `.public_key`, `.send_payload(target, payload)`; `notifiers_from_settings`, `generate_vapid_keys`, `VapidKeys`;
+  - `WebPushNotifier(..., *, ttl_s, timeout_s, webpush_fn)`, `.public_key`, `.send_payload(target, payload)`; `notifiers_from_settings`, `generate_vapid_keys`, `VapidKeys`; `VAPID_PROBE_AUD` en de foutconstanten `INCOMPLETE_ERROR`, `SUBJECT_ERROR`, `PRIVATE_KEY_ERROR`, `PUBLIC_KEY_ERROR`;
+  - `shakka.pipeline`: `PUSH_DISABLED_WARNING`, `deferred_warning`; `shakka.logsetup.secret_values` neemt ook het VAPID-subject mee;
   - `shakka.jobs.push` (doelen laden, één event afleveren, abonnementen bijwerken, test-push, sleutels maken);
   - `shakka.jobs.alerts`: `assign_new_ids`, `deliver_plan`, `PlanDelivery`; `AlertJobResult.deferred`, `.removed`, `.push_enabled`, `.push_failures`;
   - `alert_counts` krijgt ook `deferred`, `removed`, `push_enabled`, `push_failures`; de stap `alerts` is ook `partial` bij `deferred > 0`;
@@ -94,7 +97,26 @@ Bovengrens: titel 50 en body 150 code points van hoogstens 4 bytes, of 6 bytes a
 ### Kanaal (`shakka.notify.base`, `shakka.notify.webpush`)
 - `DeliveryResult(ok, permanent_failure, detail)`: `ok and permanent_failure` → `ValueError`. `detail` is altijd een korte, vaste tekst: `"ok"`, `"HTTP <status>"`, `"WebPushException"` of de naam van een exceptietype. Nooit een melding, endpoint, sleutel of user-id.
 - `PushTarget`: frozen dataclass; `endpoint`, `p256dh` en `auth` met `field(repr=False)`, zodat ze ook niet via `repr()` in een traceback of assert belanden.
-- `WebPushNotifier.__init__`: valideert het subject (`^mailto:[^\s@]+@[^\s@]+$` of `^https://\S+$`, anders `ValueError("invalid VAPID_SUBJECT: expected mailto:<address> or https://<url>")`), en parseert de sleutel één keer met `Vapid.from_string(private_key=...)` (elke exception → `ValueError("invalid VAPID_PRIVATE_KEY: expected the base64url key from 'shakka alerts vapid-keys'") from None`). `public_key` = de bijbehorende publieke sleutel (X9.62 uncompressed point, base64url zonder `=`).
+- `WebPushNotifier.__init__` (A9, review B-1), exact in deze volgorde:
+  ```
+  subject = vapid_subject.strip() if isinstance(vapid_subject, str) else ""
+  if not subject or any(c.isspace() for c in subject):          # quick pre-check only
+      raise ValueError(SUBJECT_ERROR)
+  key = vapid_private_key.strip() if isinstance(vapid_private_key, str) else ""
+  try:
+      vapid = Vapid.from_string(private_key=key)                 # parsed once, reused per send
+  except Exception:
+      raise ValueError(PRIVATE_KEY_ERROR) from None
+  try:
+      vapid.sign({"sub": subject, "aud": VAPID_PROBE_AUD})       # trial signature: the library decides
+  except Exception:
+      raise ValueError(SUBJECT_ERROR) from None
+  self._vapid, self._subject = vapid, subject
+  ```
+  - Geen eigen regex voor het subject: de bron van waarheid is `py_vapid._check_sub`, via `_base_sign` in `sign`. De proefhandtekening gebruikt dezelfde `Vapid`-instantie (zelfde `conf`, dus strikte controle) die later aan `webpush()` wordt meegegeven, dus wat hier slaagt, slaagt daar ook. `VAPID_PROBE_AUD = "https://push.example.invalid"` voldoet aan de `aud`-controle van `_base_sign` (`^https?://[^/:]+(:\d+)?$`), dus een fout uit `sign` komt van het subject (de sleutel is op dat moment al geparsed).
+  - `_base_sign` leest `time.time()` voor `exp`; dat mag hier (notifier, geen domeincode). De handtekening zelf wordt weggegooid; er gaat niets over het netwerk.
+  - De sleutelfout gaat vóór de subjectfout (de proef heeft de sleutel nodig); alleen de witruimte-voorcheck van het subject komt eerder.
+  - `public_key` = de bijbehorende publieke sleutel (X9.62 uncompressed point, base64url zonder `=`).
 - `send(target, message, *, tag)`: `payload = build_push_payload(message, tag=tag)` (een `ValueError` daar → `DeliveryResult(False, False, "ValueError")`), dan `send_payload`.
 - `send_payload(target, payload)`:
   ```
@@ -168,12 +190,14 @@ Zonder notifier (`None`, `{}` of zonder `"webpush"`) is alles behalve stap 4 (vo
 
 ### Pipeline
 - `PipelineContext` krijgt het veld `notifiers: Mapping[str, Notifier] | None = None` (als laatste veld); `run_hourly(..., notifiers=None)` geeft het door.
-- `step_alerts`: na de stale-regel `notifiers = ctx.notifiers if ctx.notifiers is not None else notifiers_from_settings(ctx.settings)`. Een `ValueError` daaruit maakt de stap `failed` (A9). Is `notifiers` leeg: log `alerts: push disabled (no VAPID configuration); alert state is stored without delivery` op `WARNING`, en de stapwarning `"push disabled: VAPID secrets not set; alerts are stored but not delivered"` (wordt een `::warning::`-annotatie; status blijft `ok`). Dan `run_alerts(..., notifiers=notifiers)`. `partial` als `skipped`, `write_errors` of `deferred` niet 0 is.
+- `step_alerts`: na de stale-regel `notifiers = ctx.notifiers if ctx.notifiers is not None else notifiers_from_settings(ctx.settings)`. Een `ValueError` daaruit maakt de stap `failed` (A9). Is `notifiers` leeg: log `alerts: push disabled (no VAPID configuration); alert state is stored without delivery` op `WARNING`, en de stapwarning `PUSH_DISABLED_WARNING = "push disabled: VAPID secrets not set; alerts are stored but not delivered"` (wordt een `::warning::`-annotatie; status blijft `ok`). Dan `run_alerts(..., notifiers=notifiers)`. `partial` als `skipped`, `write_errors` of `deferred` niet 0 is.
+- **Stapwarning bij `deferred > 0`** (review N-1): `deferred_warning(result.deferred)` = `f"{result.deferred} favorite(s) deferred: no push delivery succeeded; retried next run (see push_failures in ingest_runs)"`. Via `build_annotations` wordt dat `::warning::alerts: <n> favorite(s) deferred: …` in de Actions-log, elke run zolang het duurt. Zo valt een volledige uitval van het enige kanaal op (bijv. 403 voor iedereen doordat `PUBLIC_VAPID_PUBLIC_KEY` in Cloudflare niet bij de ingest-sleutel hoort, R1), ook al is de run alleen `partial` met exitcode 0. De tekst bevat alleen een aantal. De volgorde in `warnings`: eerst de push-disabled-warning (als die er is), dan de deferred-warning (de twee sluiten elkaar in de praktijk uit: zonder kanaal is `deferred` 0).
 - `alert_counts`: de WP-11-sleutels plus `sent`, `failed`, `no_target`, `deferred`, `removed`, `push_enabled` en `push_failures` (dict). De logregel per stap toont alleen scalaire tellingen, dus `push_failures` komt alleen in `ingest_runs`.
 
 ### Logging
 - `shakka.logsetup.QUIET_LOGGERS` krijgt `"urllib3"` erbij (op `WARNING`): pywebpush gebruikt `requests`/`urllib3`, en urllib3 logt op `DEBUG` het request-pad, dus het endpoint.
 - Niemand logt endpoints, sleutels, user-id's, berichtteksten of het VAPID-subject. `secret_values` bevat de VAPID-private key al (WP-11), dus de log en `ingest_runs.steps[].error` worden er ook op geredigeerd.
+- `secret_values(settings)` krijgt als vangnet ook het subject (review N-11): na de bestaande waarden `settings.vapid_subject.strip()` als `vapid_subject` niet `None` is en de gestripte waarde niet leeg is. `redact` slaat waarden korter dan `MIN_SECRET_LENGTH` (8) over, dus de placeholder `mailto:` (7 tekens) wordt niet geredigeerd. Volgorde van het resultaat: `(supabase_secret_key, vapid_private_key?, vapid_subject?)`.
 
 ### CLI
 - `shakka alerts run [--dry-run]`: bouwt `notifiers_from_settings(settings)` vóór `open_db` (een `ValueError` → `alerts: invalid VAPID configuration: <vaste tekst>`, exit 1). Uitvoer zoals WP-10, met na de samenvatting (en na `alerts: dry run, nothing stored`) één regel:
@@ -202,13 +226,14 @@ Eén migratie met tabel, index, RLS, revoke, grants en policies, in het patroon 
 | `ingest/src/shakka/notify/base.py` | aanmaken | `WEBPUSH_CHANNEL`, `DeliveryResult`, `PushTarget`, `DeliveryTarget`, `Notifier`. |
 | `ingest/src/shakka/notify/webpush.py` | aanmaken | `PUSH_TTL_S`, `PUSH_TIMEOUT_S`, `VapidKeys`, `generate_vapid_keys`, `WebPushNotifier`, `notifiers_from_settings`. |
 | `ingest/src/shakka/jobs/push.py` | aanmaken | Constanten, `load_targets`, `load_all_targets`, `EventDelivery`, `deliver_event`, `SubscriptionUpdate`, `update_subscriptions`, `send_test_push`, `run_test_push_cli`, `run_vapid_keys_cli`. |
-| `ingest/src/shakka/jobs/alerts.py` | wijzigen | Docstring (levert nu af); `from shakka.jobs.push import load_targets` (contract `shakka.jobs.alerts.load_targets`); `AlertJobResult`-velden; `_new_state_id`, `assign_new_ids`, `PlanDelivery`, `deliver_plan`; `run_alerts` met `notifiers`; `run_alerts_cli` met notifiers en de `push:`-regel. |
-| `ingest/src/shakka/pipeline.py` | wijzigen | `PipelineContext.notifiers`, `run_hourly(notifiers=)`, `step_alerts`, `alert_counts`. |
-| `ingest/src/shakka/logsetup.py` | wijzigen | `QUIET_LOGGERS = ("httpx", "httpcore", "urllib3")`. |
+| `ingest/src/shakka/jobs/alerts.py` | wijzigen | Docstring (levert nu af); expliciete re-export `from shakka.jobs.push import load_targets as load_targets` (contract `shakka.jobs.alerts.load_targets`; de redundante alias voorkomt ruff `F401`, review N-3); `AlertJobResult`-velden; `_new_state_id`, `assign_new_ids`, `PlanDelivery`, `deliver_plan`; `run_alerts` met `notifiers`; `run_alerts_cli` met notifiers en de `push:`-regel. |
+| `ingest/src/shakka/pipeline.py` | wijzigen | `PUSH_DISABLED_WARNING`, `PipelineContext.notifiers`, `run_hourly(notifiers=)`, `step_alerts` (met de push-disabled- en deferred-warning), `alert_counts`. |
+| `ingest/src/shakka/logsetup.py` | wijzigen | `QUIET_LOGGERS = ("httpx", "httpcore", "urllib3")`; `secret_values` met het VAPID-subject (Ontwerp, Logging). |
 | `ingest/src/shakka/cli.py` | wijzigen | Groepsdocstring `alerts`; commando's `alerts test-push` en `alerts vapid-keys`. |
 | `ingest/tests/fakes.py` | wijzigen | Default voor `push_subscriptions`: `id` = `f"00000000-0000-4000-9000-{seq:012d}"` (eigen teller `_push_subscription_seq`) en `created_at` = `now`. |
-| `ingest/tests/conftest.py` | wijzigen | Autouse-fixture `_no_real_webpush`: `monkeypatch.setattr(pywebpush, "webpush", <functie die AssertionError("real web push in a test") geeft>)`. |
+| `ingest/tests/conftest.py` | wijzigen | Autouse-fixture `_no_real_webpush` (review N-2): `monkeypatch.setattr(pywebpush, "webpush", _blocked_webpush)` met `def _blocked_webpush(*args, **kwargs): pytest.fail("real web push in a test", pytrace=False)`. `pytest.fail` geeft `Failed`, een subklasse van `BaseException`; de `except Exception` in `send_payload`, `deliver_event` en `run_step` vangt hem dus niet en de test faalt echt. `import pywebpush` bovenaan. |
 | `ingest/tests/push_fixtures.py` | aanmaken | Zie Testplan. |
+| `ingest/tests/test_conftest_guard.py` | aanmaken | `test_real_webpush_is_blocked` (review N-2, zie Testplan "Overige tests"). |
 | `ingest/tests/test_push_text.py` | aanmaken | AC-3 en de payload. |
 | `ingest/tests/test_notify_webpush.py` | aanmaken | AC-2, statusmapping, configuratie, sleutels, AC-8 (notifierniveau). |
 | `ingest/tests/test_job_push.py` | aanmaken | Doelen laden, `deliver_event`, `update_subscriptions`, `send_test_push`. |
@@ -217,7 +242,8 @@ Eén migratie met tabel, index, RLS, revoke, grants en policies, in het patroon 
 | `ingest/tests/test_pipeline.py` | wijzigen | `test_alert_counts_shape` met de nieuwe sleutels; nieuwe tests AC-6 en notifiers via `run_hourly`. |
 | `ingest/tests/test_cli_jobs.py` | wijzigen | `test_alerts_run_cli`: de samenvatting staat nu op `lines[-3]` en `lines[-2] == "push: disabled (no VAPID configuration)"`. |
 | `ingest/tests/test_migrations.py` | wijzigen | `test_no_later_milestone_tables` zonder `push_subscriptions` in de regex. |
-| `ingest/tests/test_logsetup.py` | wijzigen | Fixture `restore_logging` herstelt alle `QUIET_LOGGERS`; `test_httpx_and_httpcore_quiet` controleert ook `urllib3` op `WARNING`. |
+| `ingest/tests/test_logsetup.py` | wijzigen | Fixture `restore_logging` herstelt alle `QUIET_LOGGERS`; `test_httpx_and_httpcore_quiet` controleert ook `urllib3` op `WARNING`; `test_secret_values` krijgt er een geval met `vapid_subject` bij (de bestaande asserts blijven). |
+| `ingest/tests/test_cli_pipeline.py` | wijzigen | `test_budget_warning_on_stdout`: `line.startswith("::warning::forecast:")` in plaats van `"::warning::"` (review N-5); de push-disabled-warning verschijnt nu elke run en zou de test anders altijd laten slagen. |
 | `ingest/tests/test_hourly_workflow.py` | wijzigen | AC-7 (zie Testplan). |
 | `.github/workflows/hourly.yml` | wijzigen | In de `env` van de stap "Hourly pipeline" na `SUPABASE_SECRET_KEY`: `VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}`, `VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}`, `VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}`. Verder niets. |
 | `docs/RUNBOOK.md` | wijzigen | Nieuwe §14; aanpassingen in §12 en §13 (zie Stappenplan stap 10). |
@@ -333,6 +359,11 @@ class Notifier(Protocol):
 ```python
 PUSH_TTL_S: Final = 12 * 60 * 60        # contract: TTL 12 hours
 PUSH_TIMEOUT_S: Final = 10.0            # passed to requests.post via pywebpush
+VAPID_PROBE_AUD: Final = "https://push.example.invalid"   # aud of the trial signature in __init__
+INCOMPLETE_ERROR: Final = "incomplete VAPID configuration: set VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and VAPID_SUBJECT together"
+SUBJECT_ERROR: Final = "invalid VAPID_SUBJECT: expected mailto:<address> with a domain, or https://<host> without a path"
+PRIVATE_KEY_ERROR: Final = "invalid VAPID_PRIVATE_KEY: expected the base64url key from 'shakka alerts vapid-keys'"
+PUBLIC_KEY_ERROR: Final = "VAPID_PUBLIC_KEY does not belong to VAPID_PRIVATE_KEY"
 
 @dataclass(frozen=True, slots=True)
 class VapidKeys:
@@ -346,7 +377,8 @@ class WebPushNotifier:
     def __init__(self, vapid_private_key: str, vapid_subject: str, *,
                  ttl_s: int = PUSH_TTL_S, timeout_s: float = PUSH_TIMEOUT_S,
                  webpush_fn: Callable[..., Any] | None = None) -> None: ...
-        # ValueError (fixed texts, no values) for an invalid subject or key
+        # ValueError (fixed texts, no values) for an invalid key (PRIVATE_KEY_ERROR) or a subject
+        # that fails the whitespace pre-check or the trial signature (SUBJECT_ERROR); see Ontwerp
     @property
     def public_key(self) -> str: ...      # base64url, no "="
     def send(self, target: PushTarget, message: AlertMessage, *, tag: str) -> DeliveryResult: ...
@@ -356,11 +388,13 @@ class WebPushNotifier:
 def notifiers_from_settings(settings: Settings) -> dict[str, Notifier]: ...
     # {} if no VAPID variable is set; ValueError (fixed text) if incomplete or invalid
 ```
-Vaste foutteksten (exact, zonder waarden):
-- `"incomplete VAPID configuration: set VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and VAPID_SUBJECT together"`;
-- `"invalid VAPID_SUBJECT: expected mailto:<address> or https://<url>"`;
-- `"invalid VAPID_PRIVATE_KEY: expected the base64url key from 'shakka alerts vapid-keys'"`;
-- `"VAPID_PUBLIC_KEY does not belong to VAPID_PRIVATE_KEY"`.
+Vaste foutteksten (exact, zonder waarden; de constanten hierboven):
+- `INCOMPLETE_ERROR`: `"incomplete VAPID configuration: set VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and VAPID_SUBJECT together"`;
+- `SUBJECT_ERROR`: `"invalid VAPID_SUBJECT: expected mailto:<address> with a domain, or https://<host> without a path"`;
+- `PRIVATE_KEY_ERROR`: `"invalid VAPID_PRIVATE_KEY: expected the base64url key from 'shakka alerts vapid-keys'"`;
+- `PUBLIC_KEY_ERROR`: `"VAPID_PUBLIC_KEY does not belong to VAPID_PRIVATE_KEY"`.
+
+`notifiers_from_settings` geeft `vapid_private_key.get_secret_value()` en `vapid_subject` ongewijzigd door aan `WebPushNotifier`; het strippen gebeurt in `__init__`. Langer dan 100 tekens per regel mag niet (ruff `E501`): schrijf de teksten als impliciete concatenatie van stringliterals tussen haakjes; de resulterende tekst is exact zoals hierboven.
 
 Push-payload naar de PWA (contract, ongewijzigd): JSON `{"title": str, "body": str, "url": str, "tag": str}`, hoogstens 3.000 bytes; `url` is de `go_url` (absoluut, uit `APP_BASE_URL`) of anders `/spot/{spot_id}` (relatief, bijvoorbeeld bij `cancelled`); `tag` is `alert-{alert_state.id}`. De test-push gebruikt `url = "/"` en `tag = "shakka-test"`.
 
@@ -428,7 +462,8 @@ note: put both in .env and in the GitHub Secrets (docs/RUNBOOK.md, section 14). 
 
 ### `shakka.jobs.alerts` (uitbreiding)
 ```python
-from shakka.jobs.push import load_targets   # contract: shakka.jobs.alerts.load_targets
+from shakka.jobs.push import load_targets as load_targets   # explicit re-export (no F401);
+                                                            # contract: shakka.jobs.alerts.load_targets
 
 @dataclass(frozen=True, slots=True)
 class AlertJobResult:
@@ -463,6 +498,14 @@ def run_alerts(db: SupabaseRest, *, now: datetime, base_url: str | None, dry_run
 
 ### `shakka.pipeline` (uitbreiding)
 ```python
+PUSH_DISABLED_WARNING: Final = (
+    "push disabled: VAPID secrets not set; alerts are stored but not delivered"
+)
+
+def deferred_warning(deferred: int) -> str: ...
+    # f"{deferred} favorite(s) deferred: no push delivery succeeded; "
+    # "retried next run (see push_failures in ingest_runs)"
+
 @dataclass(slots=True)
 class PipelineContext:
     ...                                                   # WP-11 fields unchanged
@@ -499,6 +542,8 @@ Een niet-gezet secret is een lege string; `Settings` (`env_ignore_empty=True`) m
   - Insert in `push_subscriptions` met alleen `endpoint`, `p256dh` en `auth` uit `subscription.toJSON()` (`user_id` volgt uit `auth.uid()`). Andere kolommen mag `authenticated` niet zetten; `update` mag niet.
   - `endpoint` is uniek. Een insert van een endpoint dat al bestaat geeft `23505` (bijvoorbeeld: opnieuw aanzetten op hetzelfde apparaat). Behandel dat als "staat al aan" als de eigen select de rij vindt; vindt de eigen select hem niet, dan hoort het endpoint bij een ander account op dit apparaat; toon dan een melding.
   - Uitzetten: eerst de eigen rij verwijderen (filter op `endpoint`), dan `subscription.unsubscribe()`.
+  - **Uitloggen** (review N-7): eerst de eigen rij van dit apparaat verwijderen (filter op `endpoint`, terwijl de sessie nog geldig is), dan uitloggen. Anders blijft door `endpoint unique` en RLS het abonnement van gebruiker A op een gedeeld apparaat bestaan: A's meldingen over zijn favoriete spots blijven daar binnenkomen, en gebruiker B kan op dat apparaat geen abonnement maken (`23505`). Of `subscription.unsubscribe()` daarbij ook nodig is, beslist WP-18.
+  - Push pas aanzetten na favorieten (A1): lopende windows komen niet meer als melding; WP-18 beslist over een uitleg in de UI.
   - De `push`-handler krijgt exact de payload hierboven; `url` kan absoluut (`go_url`) of relatief (`/spot/{id}`, `/`) zijn; `tag` vervangt een eerdere melding met dezelfde `tag`.
   - `PUBLIC_VAPID_PUBLIC_KEY` = `VAPID_PUBLIC_KEY` (base64url, 65 bytes na decoderen).
   - AC-5 van WP-18 gebruikt `shakka alerts test-push`.
@@ -506,7 +551,8 @@ Een niet-gezet secret is een lege string; `Settings` (`env_ignore_empty=True`) m
   - pushmeldingen aan Lars: `load_targets(db, OPERATOR_USER_ID)` en `WebPushNotifier.send_payload` met een eigen `PushPayload` (geen `AlertMessage` nodig);
   - een grens op het aantal abonnementen per gebruiker in de database (nu alleen `MAX_TARGETS_PER_USER` in de job), eventueel een allowlist van push-service-hosts voor `endpoint`;
   - een maximum aantal herhaalpogingen of een leeftijdsgrens voor een niet-permanente fout (R1), en een tijdsbudget voor de afleveringen (R3);
-  - de egress van `load_all_targets` groeit met het aantal abonnementen (orde 400 bytes per rij).
+  - de egress van `load_all_targets` groeit met het aantal abonnementen (orde 400 bytes per rij);
+  - **SSRF/egress via endpoints** (review N-10): een ingelogde gebruiker kan rijen toevoegen met een willekeurig `https`-endpoint (alleen begrensd door de CHECK en, in de job, `MAX_TARGETS_PER_USER`), en de ingest POST daarheen vanuit GitHub Actions. Het risico is nu beperkt (de `aud` is de host van de aanvaller, de payload is versleuteld voor zijn eigen sleutels en gaat over zijn eigen alerts, er komen geen geheimen mee), maar WP-22 hoort te beslissen over een allowlist van push-service-hosts (in de CHECK of in `PushTarget.from_row`) en een grens in de database op het aantal rijen per gebruiker.
 
 ## Edge cases
 
@@ -515,10 +561,12 @@ Een niet-gezet secret is een lege string; `Settings` (`env_ignore_empty=True`) m
 | E1 | Geen VAPID-variabelen (of alleen `VAPID_SUBJECT=mailto:` uit `.env.example`) | Kanaal uit: `{}`; in de pipeline een `WARNING` en een `::warning::`-annotatie; `run_alerts` als WP-10; `push_enabled=False`; alle pushtellers 0. |
 | E2 | Een of twee VAPID-variabelen gezet | `ValueError` "incomplete VAPID configuration"; pipeline: stap `alerts` `failed`, run `failed`, exit 1; CLI `alerts run` exit 1 vóór `open_db`. |
 | E3 | Ongeldige private key of subject, of publieke sleutel hoort niet bij de private key | `ValueError` met vaste tekst; zoals E2. De waarde staat nergens in uitvoer of `ingest_runs`. |
+| E3a | Subject dat er goed uitziet maar door py_vapid geweigerd wordt (`https://shakka.nl/contact`, `mailto:lars@example`) | De proefhandtekening in `__init__` faalt → `SUBJECT_ERROR`; zoals E2 (stap `alerts` `failed`, mail van GitHub). Nooit pas bij de aflevering. |
+| E3b | Subject met witruimte eromheen (bijv. een geplakt secret met `\n`) | Gestript in `__init__`; geldig als de rest geldig is. Witruimte ín het subject → `SUBJECT_ERROR`. |
 | E4 | Gebruiker zonder abonnement | Per event `no_target += 1`; geen aanroep van de notifier; de state schuift door; `last_notified_at` blijft `NULL`. |
 | E5 | Twee abonnementen, één geeft 503 | Twee afleveringen; `sent=1`, `failed=1`; event afgeleverd; state door; `last_notified_at = now`; alleen het geslaagde abonnement krijgt `last_success_at`. |
 | E6 | Eén abonnement, 410 (of 404) | `failed=1`; abonnement verwijderd (`removed=1`); state door; `last_notified_at` ongewijzigd. Volgende events van die gebruiker in dezelfde run: `no_target`. |
-| E7 | Eén abonnement, 503 (of 429, 403, 413, time-out, verbindingsfout) | `deferred=1`; geen schrijfactie op `alert_state` voor die favoriet; geen bericht in `messages`; de volgende run berekent dezelfde diff en levert opnieuw af. |
+| E7 | Eén abonnement, 503 (of 429, 403, 413, time-out, verbindingsfout) | `deferred=1`; geen schrijfactie op `alert_state` voor die favoriet; geen bericht in `messages`; de volgende run berekent dezelfde diff en levert opnieuw af. In de pipeline: stap `alerts` `partial` en `::warning::alerts: 1 favorite(s) deferred: …` (elke run zolang het duurt). |
 | E8 | Split (update `worsened` + insert `new`), het tweede event faalt niet-permanent | Het eerste event is afgeleverd, maar niets wordt opgeslagen (alles-of-niets). Volgende run: beide opnieuw; het eerste vervangt de vorige melding (zelfde `tag`). |
 | E9 | Eerste event van een diff faalt niet-permanent | De overige events van die diff worden niet afgeleverd (A4); `deferred=1`. |
 | E10 | `cancelled`-event | Afgeleverd met `url = "/spot/{spot_id}"` (geen `go_url`) en de `tag` van de bestaande rij, zodat de annulering de eerdere melding vervangt. |
@@ -540,7 +588,7 @@ Een niet-gezet secret is een lege string; `Settings` (`env_ignore_empty=True`) m
 | E26 | Ingelogde gebruiker voegt een rij toe voor een ander, of zet `last_success_at` | `42501` (RLS, kolomrecht). |
 | E27 | Gebruiker wordt verwijderd | Abonnementen verdwijnen via de cascade. |
 | E28 | `load_all_targets` faalt (`DatabaseError`) | Gaat door naar de aanroeper (als bij het laden in WP-10): stap `alerts` `failed`. |
-| E29 | `pywebpush` zou het netwerk op gaan in een test | De autouse-fixture laat de test falen met `AssertionError`. |
+| E29 | `pywebpush` zou het netwerk op gaan in een test | De autouse-fixture roept `pytest.fail` aan (`Failed` is een `BaseException`, dus geen `except Exception` slikt hem in); de test faalt. |
 
 ## Testplan
 Tests eerst voor `shakka.domain.push` (puur) en de notifier. Geen netwerk: `pywebpush.webpush` is in elke test geblokkeerd (conftest); tests geven een nep-functie via `webpush_fn` of `monkeypatch.setattr(pywebpush, "webpush", ...)`. Geen klok: `now` expliciet (`NOW` uit `job_fixtures`). Alle databasetests gebruiken `FakeSupabase`.
@@ -597,11 +645,12 @@ class RecordingWebpush:                            # a webpush_fn
 7–10. `column_privs_are` authenticated `{INSERT, SELECT}` op `user_id`, `endpoint`, `p256dh`, `auth`;
 11–13. `column_privs_are` authenticated `{SELECT}` op `id`, `created_at`, `last_success_at`;
 14. `policies_are` `{push_subscriptions_select_own, push_subscriptions_insert_own, push_subscriptions_delete_own}`;
-15. `throws_ok` insert met `endpoint 'http://push.example.test/x'` → `23514`;
-16. `throws_ok` endpoint met een spatie → `23514`;
-17. `throws_ok` `p256dh 'ab cd'` → `23514`;
-18. `throws_ok` `auth 'a+b'` → `23514`;
-19. `throws_ok` insert voor A met het endpoint van B → `23505`;
+15–19 draaien als `postgres` en geven **expliciet `user_id` A** (`'11111111-1111-1111-1111-111111111111'`) mee (review N-4): zonder `user_id` geeft de default `auth.uid()` als `postgres` `NULL`, en Postgres controleert NOT NULL vóór CHECK, dus dan kwam `23502` terug in plaats van de bedoelde code. De overige kolommen zijn in elk van die inserts geldig, op de ene ongeldige waarde na.
+15. `throws_ok` insert `(user_id A, endpoint 'http://push.example.test/x', p256dh 'AAAA', auth 'aaaa')` → `23514`;
+16. `throws_ok` insert `(user_id A, endpoint 'https://push.example.test/a b', 'AAAA', 'aaaa')` → `23514`;
+17. `throws_ok` insert `(user_id A, 'https://push.example.test/a2', p256dh 'ab cd', 'aaaa')` → `23514`;
+18. `throws_ok` insert `(user_id A, 'https://push.example.test/a3', 'AAAA', auth 'a+b')` → `23514`;
+19. `throws_ok` insert `(user_id A, endpoint 'https://push.example.test/b1' (dat van B), 'AAAA', 'aaaa')` → `23505`;
 20. als authenticated A (`set local role authenticated`, claims met `sub` A): `lives_ok` insert `(endpoint, p256dh, auth)` = `('https://push.example.test/a1', 'AAAA', 'aaaa')` zonder `user_id`;
 21. `results_eq('select user_id from public.push_subscriptions', $$values ('1111…'::uuid)$$)`: A ziet alleen zijn eigen rij, en `user_id` kwam uit `auth.uid()`;
 22. `throws_ok` insert met `user_id` B → `42501`;
@@ -623,7 +672,12 @@ class RecordingWebpush:                            # a webpush_fn
 - `test_fresh_claims_per_call`: twee `send`s naar endpoints met verschillende hosts; de nep-functie zet `aud` in de dict → de tweede aanroep krijgt een andere dict (`claims_id` verschilt) en bij binnenkomst alleen `{"sub": SUBJECT}`.
 - `test_status_mapping`, geparametriseerd: `WebPushException("Push failed: …", response=FakeResponse(s))` met `s` in 404, 410 → `(False, True, f"HTTP {s}")`; 400, 403, 413, 429, 500, 503 → `(False, False, f"HTTP {s}")`; `response=None` → `(False, False, "WebPushException")`; `requests.exceptions.ConnectTimeout("…")` → `(False, False, "ConnectTimeout")`; `RuntimeError` → `"RuntimeError"`.
 - `test_payload_value_error_is_retryable`: een `AlertMessage` met een spot-id van 4.000 tekens → `DeliveryResult(False, False, "ValueError")`, webpush niet aangeroepen.
-- `test_invalid_key_and_subject`: `WebPushNotifier("not-a-key", SUBJECT)` → `ValueError` met exact de vaste tekst, zonder `"not-a-key"`; subject `"lars@example.org"` (zonder `mailto:`) → `ValueError` met de vaste tekst, zonder het adres; `"mailto:"` → `ValueError`; `"https://example.org"` → geldig.
+- `test_invalid_key`: `WebPushNotifier("not-a-key", SUBJECT)` → `ValueError` met exact `PRIVATE_KEY_ERROR`, zonder `"not-a-key"`; `exc.__cause__ is None` en `exc.__suppress_context__` is waar (`from None`).
+- `test_subject_validation` (review B-1), geparametriseerd, steeds met `KEYS.private_key`:
+  - `ValueError` met exact `SUBJECT_ERROR` (en het subject niet in de tekst) voor: `"https://shakka.nl/contact"`, `"https://example.org/contact"` (pad), `"mailto:lars@example"` (domein zonder punt), `"lars@example.org"` (zonder `mailto:`), `"mailto:"`, `""`, `"   "`, `"http://example.org"` (geen https), `"mailto:a b@example.org"` (witruimte, voorcheck);
+  - geldig (geen exception) voor: `"mailto:test@example.org"`, `"https://example.org"`, `"https://shakka.nl"`, `"  mailto:test@example.org\n"` (gestript; `RecordingWebpush` ziet daarna `vapid_claims["sub"] == "mailto:test@example.org"`).
+- `test_subject_check_matches_library`: voor elk geldig subject uit de vorige test slaagt ook `Vapid.from_string(private_key=KEYS.private_key).sign({"sub": s.strip(), "aud": "https://fcm.googleapis.com"})`, en voor elk ongeldig subject dat de voorcheck passeert (`"https://shakka.nl/contact"`, `"mailto:lars@example"`, `"lars@example.org"`, `"mailto:"`, `"http://example.org"`) geeft die aanroep `py_vapid.VapidException`. Dit legt vast dat de constructie en de echte aflevering hetzelfde oordeel hebben; breekt een nieuwe py_vapid-versie dat, dan faalt deze test.
+- `test_key_error_before_subject_error`: `WebPushNotifier("not-a-key", "mailto:lars@example")` → `PRIVATE_KEY_ERROR`.
 - `test_public_key_matches_generated`: `WebPushNotifier(KEYS.private_key, SUBJECT).public_key == KEYS.public_key`; `repr()` bevat de sleutel en het subject niet.
 - `test_generate_vapid_keys`: base64url zonder `=` (regex `^[A-Za-z0-9_-]+$`); gedecodeerd 65 bytes (eerste byte `0x04`) en 32 bytes; twee aanroepen geven verschillende sleutels; `repr(keys)` bevat de private key niet.
 - `test_notifiers_from_settings`: geen VAPID → `{}`; alleen `vapid_subject="mailto:"` → `{}`; alleen `vapid_subject="  "` → `{}`; private + subject zonder public → `ValueError` "incomplete …"; volledig → `{"webpush": WebPushNotifier}`; public met afsluitende `=` en spaties → nog steeds geldig; public van een ander paar → `ValueError` "does not belong"; in geen enkele foutmelding staat een sleutelwaarde of het subject.
@@ -641,7 +695,7 @@ class RecordingWebpush:                            # a webpush_fn
 - `test_title_never_empty`: titel `"   "` → `"Shakka"`; elke uitkomst van `to_push_text` heeft `title.strip() != ""`.
 - `test_code_points`: titel met `"ü"` en `"🌊"` telt per teken 1 (titel van 50 code points blijft ongewijzigd).
 - `test_shorten_words_limit`: `shorten_words("abc", 1)` → `ValueError`.
-- `test_build_payload`: `go_url` gezet → `url == go_url`; `cancelled` → `url == "/spot/test-strand"`; `tag` met spatie → `ValidationError`; `to_json()` bevat "–" letterlijk (geen `–`) en de sleutels in de volgorde `title, body, url, tag`; `payload_size` telt UTF-8-bytes.
+- `test_build_payload`: `go_url` gezet → `url == go_url`; `cancelled` → `url == "/spot/test-strand"`; `tag` met spatie → `ValidationError`; `to_json()` bevat het teken `–` (U+2013) letterlijk en niet de escape-reeks `–` (`ensure_ascii=False`), en de sleutels in de volgorde `title, body, url, tag`; `payload_size` telt UTF-8-bytes.
 - `test_payload_fallback_url`: `go_url` van 3.000 tekens (geldige `base_url` met een lang pad) → `url == "/spot/test-strand"` en `payload_size <= 3000`.
 - `test_domain_purity.py` blijft groen met `shakka/domain/push.py` (AC-3, laatste punt; de bestaande test leest alle bestanden in `shakka/domain`).
 
@@ -677,7 +731,8 @@ Opzet: `make_db()`-patroon uit `test_job_alerts.py` (geverifieerde spot, scenari
 - **AC-6** `test_hourly_without_vapid(tmp_path, caplog)`: `seed_user(db)`, `run_real(tmp_path, db)` met `make_settings` zonder VAPID → geen exception; stap `alerts` `ok`; `counts`: `events == 1`, `new == 1`, `sent == failed == no_target == deferred == removed == 0`, `push_enabled is False`; een `WARNING` met `"push disabled"` in `caplog`; een annotatie die begint met `"::warning::alerts: push disabled"`; de `alert_state`-rij `status active`, `last_event new`, `last_notified_at None`.
 - `test_hourly_incomplete_vapid`: `make_settings(..., vapid_private_key=KEYS.private_key, vapid_subject=SUBJECT)` zonder public → stap `alerts` `failed`, `error_type == "ValueError"`, run `failed`, exitcode 1; `KEYS.private_key` en `SUBJECT` staan niet in `db.rows("ingest_runs")` (als tekst) en niet in de log.
 - `test_hourly_with_notifiers`: `run_real(..., notifiers={"webpush": FakeNotifier()})` en een abonnement voor A → `counts["sent"] == 1`, `push_enabled is True`; zonder `"push disabled"`-warning.
-- **AC-8 (pipelineniveau)** `test_hourly_push_failure_leaks_nothing(tmp_path, caplog, capsys)`: `configure_logging()` (zoals `test_alerts_errors_only_in_ingest_runs`), settings met de volledige VAPID-dummyconfiguratie (`KEYS`, `SUBJECT`), `monkeypatch.setattr(pywebpush, "webpush", <geeft Exception met endpoint, sleutels en private key>)`, abonnement met de dummywaarden → endpoint, `p256dh`, `auth`, `KEYS.private_key`, `SUBJECT` en `USER_A` staan niet in `caplog.text`, niet in stdout/stderr en niet in `str(db.rows("ingest_runs"))`; `counts["push_failures"] == {"Exception": 1}`; stap `alerts` `partial` (`deferred == 1`).
+- **AC-8 (pipelineniveau)** `test_hourly_push_failure_leaks_nothing(tmp_path, caplog, capsys)`: `configure_logging()` (zoals `test_alerts_errors_only_in_ingest_runs`), settings met de volledige VAPID-dummyconfiguratie (`KEYS`, `SUBJECT`), `monkeypatch.setattr(pywebpush, "webpush", <geeft Exception met endpoint, sleutels en private key>)`, abonnement met de dummywaarden → endpoint, `p256dh`, `auth`, `KEYS.private_key`, `SUBJECT` en `USER_A` staan niet in `caplog.text`, niet in stdout/stderr, niet in `report.annotations` en niet in `str(db.rows("ingest_runs"))`; `counts["push_failures"] == {"Exception": 1}`; stap `alerts` `partial` (`deferred == 1`).
+- `test_hourly_deferred_warning` (review N-1): `run_real(..., notifiers={"webpush": FakeNotifier({<endpoint>: DOWN})})` met één abonnement voor A → stap `alerts` `partial`, `report.exit_code == 0`, de stap heeft `warnings == (deferred_warning(1),)`, en `report.annotations` bevat exact `"::warning::alerts: 1 favorite(s) deferred: no push delivery succeeded; retried next run (see push_failures in ingest_runs)"`. Met `OK` in plaats van `DOWN`: geen annotatie die met `"::warning::alerts:"` begint.
 - `test_alert_counts_shape` (aangepast): exact de WP-11-sleutels plus `sent`, `failed`, `no_target`, `deferred`, `removed`, `push_enabled`, `push_failures`; geen `messages`.
 
 ### AC-7: `tests/test_hourly_workflow.py`
@@ -699,7 +754,10 @@ Seams zoals `test_cli_jobs.py` (`runtime.open_db`, `runtime.utcnow`); env `SUPAB
 
 ### Overige tests
 - `tests/test_migrations.py`: `test_table_keys_match_migrations` groen met `push_subscriptions`; `test_every_migration_table_enables_rls` dekt de nieuwe tabel.
-- `tests/test_logsetup.py`: `urllib3` op `WARNING` na `configure_logging`.
+- `tests/test_logsetup.py`: `urllib3` op `WARNING` na `configure_logging`. `test_secret_values` (uitgebreid, review N-11): met `vapid_subject=" mailto:test@example.org "` → het resultaat eindigt op `"mailto:test@example.org"`; met `vapid_subject="mailto:"` staat de waarde er wel in maar `redact("x mailto: y", secret_values(s))` laat de tekst ongewijzigd (korter dan 8); de bestaande twee asserts blijven ongewijzigd.
+- `tests/test_cli_pipeline.py::test_budget_warning_on_stdout` (review N-5): controleert `any(line.startswith("::warning::forecast:") ...)`. Bewijs dat de test iets toetst: zonder de geseede `api_usage`-rij zou hij falen (de builder controleert dat één keer lokaal door de seed tijdelijk weg te laten; geen extra test).
+- `tests/test_conftest_guard.py` (nieuw, review N-2) `test_real_webpush_is_blocked`: `n = WebPushNotifier(KEYS.private_key, SUBJECT)` (zonder `webpush_fn`) en `with pytest.raises(pytest.fail.Exception): n.send_payload(target, payload)`: de autouse-fixture komt door de `except Exception` van `send_payload` heen. Idem via `deliver_event(n, [target], message, tag="alert-x")`.
+- `tests/test_job_alerts_push.py::test_load_targets_reexported` (review N-3): `shakka.jobs.alerts.load_targets is shakka.jobs.push.load_targets`.
 - `tests/test_fakes.py` (bestaand) blijft groen; `test_generated_defaults` hoeft niet te wijzigen.
 - Volledige suite: `cd ingest && uv run pytest`, `uv run ruff check .`, `uv run ruff format --check .`; `supabase test db`.
 
@@ -720,7 +778,7 @@ Gecontroleerd in de broncode van pywebpush (`main`, https://github.com/web-push-
 - `timeout` gaat ongewijzigd naar `requests.post(endpoint, timeout=timeout, ...)` ([requests, Timeouts](https://requests.readthedocs.io/en/latest/user/advanced/#timeouts));
 - logging alleen bij `verbose=True` (claims en headers), dus WP-17 laat `verbose` uit.
 
-Gecontroleerd in de broncode van py_vapid (https://github.com/web-push-libs/vapid/blob/main/python/py_vapid/__init__.py): `from_string` haalt `\n` weg, decodeert base64url en gebruikt `from_raw` bij 32 bytes, anders `from_der`; geen PEM. `from_raw` gebruikt `ec.derive_private_key(..., ec.SECP256R1())`. `sign` eist dat `sub` een `mailto:`-link of een `https`-URL is.
+Gecontroleerd in de broncode van py_vapid (https://raw.githubusercontent.com/web-push-libs/vapid/main/python/py_vapid/__init__.py, opnieuw op 15 oktober 2026 voor revisie 2): `from_string` haalt `\n` weg, decodeert base64url en gebruikt `from_raw` bij 32 bytes, anders `from_der`; geen PEM. `from_raw` gebruikt `ec.derive_private_key(..., ec.SECP256R1())` en maakt de instantie met `cls(key)` (lege `conf`, dus strikte controle). `sign(claims)` (Vapid01 en Vapid02) roept `_base_sign(claims)` aan; die kopieert de claims, zet `exp = int(time.time()) + 86400` als die ontbreekt, controleert `sub` met `_check_sub` (tenzij `conf["no-strict"]`) en `aud` met `^https?://[^/:]+(:\d+)?$`, en geeft anders `VapidException`. `_check_sub` gebruikt (hoofdletterongevoelig, `re.match`) `^(mailto:.+@((localhost|[%\w-]+(\.[%\w-]+)+|<ipv6>)))|https:\/\/(localhost|[\w-]+\.[\w\.-]+|<ipv6>)$`: een mailto-domein moet een punt hebben (of `localhost`/IPv6), een `https`-subject is alleen een host zonder pad. Daarom beslist de proefhandtekening in `__init__` en geen eigen regex (review B-1).
 
 Web Push-protocol (https://web.dev/articles/push-notifications-web-push-protocol): 201 Created is succes; 404 "The subscription is expired … you should delete the PushSubscription"; 410 "should be removed from application server"; 429 met `Retry-After`; 400; 413 (minimaal ondersteund 4.096 bytes). TTL is verplicht. Push API (https://w3c.github.io/push-api/): `toJSON().keys` is "URL-safe base64 encoding without padding"; het endpoint is een capability-URL.
 
@@ -731,7 +789,10 @@ GitHub CLI: `gh secret set NAAM` zonder `--body` leest de waarde van stdin of ui
 Geen API-endpoints van derden behalve de push-services van de browsers (FCM, Mozilla, Apple, WNS), die de endpoint-URL zelf bepaalt. Geen nieuwe betaalde dienst.
 
 ## Risico's
-- **R1. Aanhoudende niet-permanente fout blokkeert de state van één (gebruiker, spot).** Een 403 (bijv. een abonnement dat met een oude VAPID-sleutel is gemaakt), 400 of 413 komt elke run terug; zolang er geen ander abonnement van die gebruiker slaagt, blijft de diff `deferred` en wordt hij elk uur opnieuw geprobeerd. Zichtbaar via `deferred` en `push_failures` in `ingest_runs` en een `partial` stap. Mitigatie: RUNBOOK (bij sleutelwissel alle abonnementen verwijderen); een retry-limiet hoort bij WP-22.
+- **R1. Aanhoudende niet-permanente fout blokkeert de state van één (gebruiker, spot).** Een 403 (bijv. een abonnement dat met een oude VAPID-sleutel is gemaakt), 400 of 413 komt elke run terug; zolang er geen ander abonnement van die gebruiker slaagt, blijft de diff `deferred` en wordt hij elk uur opnieuw geprobeerd. Zichtbaar via `deferred` en `push_failures` in `ingest_runs`, een `partial` stap en een `::warning::alerts: <n> favorite(s) deferred …`-annotatie per run (review N-1). Mitigatie: RUNBOOK (bij sleutelwissel alle abonnementen verwijderen); een retry-limiet hoort bij WP-22.
+  - 401/403 blijven bewust niet-permanent (review N-1): ze komen meestal door onze eigen VAPID-configuratie (ongeldige of verlopen JWT, verkeerde sleutel, klokverschil) en niet door een dood abonnement. Ze permanent maken zou bij één configuratiefout alle abonnementen van alle gebruikers wissen.
+  - **Scenario "verkeerde publieke sleutel in de PWA":** hoort `PUBLIC_VAPID_PUBLIC_KEY` (Cloudflare Pages, WP-18) niet bij de ingest-sleutel, dan zijn alle abonnementen met die verkeerde sleutel gemaakt en geeft elke aflevering 403. Elke favoriet met events is dan `deferred`; de run blijft `partial` met exitcode 0 (geen mail), maar de deferred-annotatie staat in elke run in de Actions-log en `push_failures` toont `{"HTTP 403": n}`. Herstel: de juiste sleutel in Cloudflare, `delete from public.push_subscriptions;`, push in de app opnieuw aanzetten (RUNBOOK §14, punt 10).
+  - Een `ValueError` bij het bouwen van de payload (review N-9) is deterministisch maar telt als niet-permanent, en zou die favoriet dan elke run blokkeren. Dat kan alleen bij een spot-id van duizenden tekens; spot-id's zijn korte slugs uit `spots.yaml`. Geaccepteerd; de deferred-annotatie maakt het zichtbaar als het toch gebeurt.
 - **R2. Dubbele meldingen na een tijdelijke fout** (A4, E13). Geaccepteerd in WP-08; voor bestaande rijen vervangt de `tag` de melding.
 - **R3. Looptijd.** Elke aflevering kost een VAPID-handtekening en een TLS-verbinding (geen gedeelde sessie); bij een hangende push-service tot 10 s per aflevering. Bij M2 (een paar gebruikers, enkele events per uur) seconden; bij veel gebruikers moet WP-22 een tijdsbudget of een gedeelde `requests.Session` toevoegen. De job-timeout is 15 minuten.
 - **R4. Zwaardere installatie.** `aiohttp`, `requests` en `cryptography` komen mee met pywebpush; `uv sync` in de uurlijkse workflow duurt daardoor iets langer (wheels, geen build). Geen licentie- of kostenprobleem (MPL-2.0, Apache/BSD).
@@ -752,30 +813,48 @@ Geen API-endpoints van derden behalve de push-services van de browsers (FCM, Moz
 ## Stappenplan voor de builder
 Werk op branch `wp/WP-17` in `/Users/larst/Dev/Shakka/.claude/worktrees/WP-17`. Lees of print `.env` nooit. Draai na elke stap vanuit `ingest/`: `uv run pytest && uv run ruff check . && uv run ruff format --check .`; na stap 2 ook `supabase test db` (vanuit de worktree-root, met de lokale stack; zonder Docker komt het bewijs uit de CI-job `db`). Eén commit per stap, commitberichten in het Engels.
 
-1. **Dependencies.** Voeg `cryptography>=47,<51`, `py-vapid>=1.9.6,<2` en `pywebpush>=2.5,<3` toe aan `ingest/pyproject.toml`; `uv lock` en `uv sync`. Controleer `uv run python -c "import pywebpush, py_vapid, cryptography"`. Voeg de autouse-fixture `_no_real_webpush` toe aan `tests/conftest.py`. Suite groen. Commit: `build(WP-17): add pywebpush, py-vapid and cryptography`.
+1. **Dependencies.** Voeg `cryptography>=47,<51`, `py-vapid>=1.9.6,<2` en `pywebpush>=2.5,<3` toe aan `ingest/pyproject.toml`; `uv lock` en `uv sync`. Controleer `uv run python -c "import pywebpush, py_vapid, cryptography"`. Voeg de autouse-fixture `_no_real_webpush` toe aan `tests/conftest.py` (met `pytest.fail`, zie Bestanden). Suite groen. Commit: `build(WP-17): add pywebpush, py-vapid and cryptography`.
 2. **Tabel `push_subscriptions`.** Migratie exact uit Interfaces; `05_push_subscriptions.test.sql` (32 asserts, volgorde uit het Testplan); `01_schema.test.sql` bijwerken; `TABLE_KEYS`; de default in `tests/fakes.py`; `test_migrations.py` (regex zonder `push_subscriptions`). `supabase db reset && supabase test db` groen. Commit: `feat(WP-17): push_subscriptions table with RLS and pgTAP tests`.
 3. **`shakka.domain.push`, tests eerst.** Schrijf `tests/test_push_text.py` (rood), dan `domain/push.py`. Controleer de lengtes uit `test_golden_bodies` (110/142/132 ongewijzigd; 133, 148, 105 na inkorten). Wijkt een telling af, controleer dan eerst de telling (handmatig geteld door de planner) en niet de regel; de regel is leidend. `test_domain_purity.py` groen. Commit: `feat(WP-17): push text shortening and payload (pure)`.
-4. **`shakka.notify`, tests eerst.** `push_fixtures.py` en `tests/test_notify_webpush.py`, dan `notify/__init__.py`, `notify/base.py` en `notify/webpush.py`. Commit: `feat(WP-17): notifier interface and WebPushNotifier`.
+4. **`shakka.notify`, tests eerst.** `push_fixtures.py`, `tests/test_notify_webpush.py` (met `test_subject_validation` en `test_subject_check_matches_library`) en `tests/test_conftest_guard.py`, dan `notify/__init__.py`, `notify/base.py` en `notify/webpush.py`. Subjectvalidatie alleen via de witruimte-voorcheck en de proefhandtekening (Ontwerp, Kanaal); geen eigen regex. Commit: `feat(WP-17): notifier interface and WebPushNotifier`.
 5. **`shakka.jobs.push`.** `tests/test_job_push.py`, dan `jobs/push.py` (zonder de CLI-runners). Commit: `feat(WP-17): load push targets, deliver one event, maintain subscriptions`.
-6. **Alertjob.** `tests/test_job_alerts_push.py`, dan in `jobs/alerts.py`: `AlertJobResult`-velden, `_new_state_id`, `assign_new_ids`, `PlanDelivery`, `deliver_plan`, `run_alerts(notifiers=)`, de import van `load_targets`, de docstring. Alle bestaande tests in `test_job_alerts.py` blijven ongewijzigd groen. Commit: `feat(WP-17): deliver alerts between planning and storing (all-or-nothing)`.
-7. **Pipeline en logging.** `PipelineContext.notifiers`, `run_hourly(notifiers=)`, `step_alerts`, `alert_counts`; `QUIET_LOGGERS` met `urllib3`; tests in `test_pipeline.py` (AC-6, AC-8, shape) en `test_logsetup.py`. Commit: `feat(WP-17): pass notifiers through the hourly pipeline`.
+6. **Alertjob.** `tests/test_job_alerts_push.py`, dan in `jobs/alerts.py`: `AlertJobResult`-velden, `_new_state_id`, `assign_new_ids`, `PlanDelivery`, `deliver_plan`, `run_alerts(notifiers=)`, de re-export `from shakka.jobs.push import load_targets as load_targets` (laat ruff de import sorteren; de alias blijft staan), de docstring. Alle bestaande tests in `test_job_alerts.py` blijven ongewijzigd groen. Commit: `feat(WP-17): deliver alerts between planning and storing (all-or-nothing)`.
+7. **Pipeline en logging.** `PUSH_DISABLED_WARNING`, `deferred_warning`, `PipelineContext.notifiers`, `run_hourly(notifiers=)`, `step_alerts` (beide warnings), `alert_counts`; `QUIET_LOGGERS` met `urllib3`; `secret_values` met het subject; tests in `test_pipeline.py` (AC-6, AC-8, `test_hourly_deferred_warning`, shape), `test_logsetup.py` en `test_cli_pipeline.py::test_budget_warning_on_stdout` (`::warning::forecast:`). Commit: `feat(WP-17): pass notifiers through the hourly pipeline`.
 8. **CLI.** `run_alerts_cli` met notifiers en de `push:`-regel; `run_test_push_cli` en `run_vapid_keys_cli` in `jobs/push.py`; commando's `alerts test-push --user-id` (type `click.UUID`, `required=True`) en `alerts vapid-keys` in `cli.py` (imports binnen de functies); groepsdocstring `alerts`: `"Alerts: evaluate favorites, record the state and deliver Web Push."`. Tests in `test_cli_push.py`; `test_cli_jobs.py::test_alerts_run_cli` aanpassen zoals in Bestanden. Commit: `feat(WP-17): alerts test-push and vapid-keys commands`.
 9. **Workflow.** `hourly.yml` (alleen de drie `VAPID_*`-regels erbij, exact zoals in Interfaces) en `test_hourly_workflow.py`. Commit: `ci(WP-17): pass VAPID secrets to the hourly run`.
 10. **RUNBOOK.**
     - Nieuwe §14 "Pushmeldingen (vanaf WP-17)":
       1. wat er gebeurt (alerts gaan als Web Push naar alle apparaten van een gebruiker; abonneren komt met WP-18);
-      2. sleutels maken: `cd ingest && uv run shakka alerts vapid-keys`, en de twee regels plus `VAPID_SUBJECT=mailto:<jouw adres>` in `.env` zetten; de uitvoer niet delen of in een workflow draaien;
+      2. sleutels maken: `cd ingest && uv run shakka alerts vapid-keys`, en de twee regels plus `VAPID_SUBJECT=mailto:<jouw adres>` in `.env` zetten; de uitvoer niet delen of in een workflow draaien. Het subject is `mailto:<adres>` met een domein met een punt, of `https://<host>` zonder pad (bijv. niet `https://…/contact`); een ander subject laat de stap `alerts` falen;
       3. GitHub Secrets: `gh secret set VAPID_PUBLIC_KEY`, `gh secret set VAPID_PRIVATE_KEY`, `gh secret set VAPID_SUBJECT`, en de waarde plakken bij de prompt (niet met `--body`, dan staat hij in je shell-history);
       4. Cloudflare Pages (WP-18): `PUBLIC_VAPID_PUBLIC_KEY` = dezelfde publieke sleutel;
       5. database: `supabase db push` na de merge (§8);
       6. controleren (na WP-18): `uv run shakka alerts test-push --user-id <id>` en de betekenis van de uitvoerregels;
-      7. tellers in `ingest_runs` (stap `alerts`): `sent`, `failed`, `no_target`, `deferred`, `removed`, `push_enabled`, `push_failures`, en wat `deferred` betekent (opnieuw geprobeerd in de volgende run);
+      7. tellers in `ingest_runs` (stap `alerts`): `sent`, `failed`, `no_target`, `deferred`, `removed`, `push_enabled`, `push_failures`, en wat `deferred` betekent (opnieuw geprobeerd in de volgende run; zichtbaar als `::warning::alerts: <n> favorite(s) deferred …` in de Actions-log). Staat die warning in elke run en toont `push_failures` `HTTP 403`, controleer dan of `PUBLIC_VAPID_PUBLIC_KEY` in Cloudflare gelijk is aan `VAPID_PUBLIC_KEY` (R1) en volg punt 10;
       8. zonder VAPID-secrets: kanaal uit, `::warning::` per run, de state schuift door zonder melding; onvolledige of ongeldige configuratie: stap `alerts` faalt, mail van GitHub;
-      9. overgang M1 → push (optioneel, A1): na het aanzetten van push in de app de SQL `delete from public.alert_state where user_id = '<id>' and status = 'active';` in de SQL Editor; de volgende run pusht de lopende windows als nieuw;
+      9. overgang naar push (optioneel, A1): wie push aanzet nadat hij al favorieten had (Lars bij de overgang uit M1, maar ook elke latere gebruiker), krijgt de lopende windows niet als melding. Wil je dat voor één gebruiker toch: na het aanzetten van push in de app de SQL `delete from public.alert_state where user_id = '<id>' and status = 'active';` in de SQL Editor; de volgende run pusht de lopende windows als nieuw;
       10. sleutels vervangen: nieuwe sleutels overal zetten, daarna `delete from public.push_subscriptions;` (oude abonnementen werken niet met een nieuwe sleutel, R1) en push in de app opnieuw aanzetten;
       11. privacy: endpoints, sleutels en het subject komen nooit in logs of uitvoer; `shakka alerts run` levert lokaal ook echt af (A11).
     - §12 punt 7: "`last_notified_at` is in M1 altijd leeg; vanaf WP-17 het tijdstip van de run waarin de melding voor het eerst is afgeleverd." Punt 9: `alerts run` levert vanaf WP-17 ook af.
     - §13 punt 2: de secrets `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` en `VAPID_SUBJECT` bij de eenmalige setup (vanaf WP-17; zonder deze secrets geen pushmeldingen).
 
     Commit: `docs(WP-17): runbook for VAPID keys and push delivery`.
-11. **Eindcontrole.** Volledige suite, ruff, `supabase test db`. Controleer met grep: `grep -rn "pywebpush" ingest/src/shakka/domain` geeft niets; `grep -rnE "logger\.(debug|info|warning|error)\(.*(endpoint|p256dh|auth|subject)" ingest/src` geeft niets; `grep -n "verbose=True" -r ingest/src` geeft niets. Geen commit als er niets verandert.
+11. **Eindcontrole.** Volledige suite, ruff, `supabase test db`. Controleer met grep: `grep -rn "pywebpush" ingest/src/shakka/domain` geeft niets; `grep -rnE "logger\.(debug|info|warning|error)\(.*(endpoint|p256dh|auth|subject)" ingest/src` geeft niets; `grep -n "verbose=True" -r ingest/src` geeft niets; `grep -n "re.compile" ingest/src/shakka/notify/webpush.py` geeft niets (geen eigen subjectregex). Geen commit als er niets verandert.
+
+## Verwerking review
+Ronde 1 (`docs/wp/WP-17/review.md`, CHANGES_REQUIRED), verwerkt in revisie 2.
+
+| Punt | Verwerking |
+|---|---|
+| **B-1** (blokkerend) subjectvalidatie ruimer dan py_vapid | Overgenomen. De eigen regexen zijn weg. `WebPushNotifier.__init__` stript het subject, doet een witruimte-voorcheck, parseert de sleutel en zet daarna één proefhandtekening `vapid.sign({"sub": subject, "aud": VAPID_PROBE_AUD})` met `VAPID_PROBE_AUD = "https://push.example.invalid"`; elke exception wordt `ValueError(SUBJECT_ERROR) from None` (vaste tekst, nu met "with a domain" en "without a path"). In de pipeline maakt dat de stap `alerts` `failed` (exit 1, mail). Bijgewerkt: A9, Ontwerp "Kanaal" (exacte pseudocode), Interfaces (constanten), E3a/E3b, Externe afhankelijkheden (`_check_sub`/`_base_sign` opnieuw gecontroleerd en geciteerd), RUNBOOK §14 punt 2, stap 4 en 11. Tests: `test_subject_validation` (o.a. `https://shakka.nl/contact`, `https://example.org/contact`, `mailto:lars@example` falen bij constructie; `https://example.org`, `mailto:test@example.org` geldig) en `test_subject_check_matches_library` (constructie en `Vapid.sign` oordelen hetzelfde). |
+| N-1 403/401 en een warning bij `deferred` | Overgenomen. 401/403 blijven niet-permanent (onderbouwing in R1). Nieuwe stapwarning `deferred_warning(n)` → `::warning::alerts: <n> favorite(s) deferred: …` in elke run met `deferred > 0`; R1 beschrijft het scenario "verkeerde `PUBLIC_VAPID_PUBLIC_KEY` in de PWA" (403 voor iedereen). Test `test_hourly_deferred_warning`; E7 en RUNBOOK §14 punt 7 bijgewerkt. |
+| N-2 autouse-fixture slikt de fout in | Overgenomen. `_no_real_webpush` roept `pytest.fail(..., pytrace=False)` aan (`Failed` is een `BaseException`). Nieuwe test `test_conftest_guard.py::test_real_webpush_is_blocked` bewijst dat hij door `send_payload` en `deliver_event` heen komt. E29 aangepast. |
+| N-3 F401 op `load_targets` | Overgenomen: `from shakka.jobs.push import load_targets as load_targets` (redundante alias = expliciete re-export volgens de ruff-documentatie van F401). Test `test_load_targets_reexported`. |
+| N-4 pgTAP 15–18 geven `23502` | Overgenomen. Asserts 15–19 geven expliciet `user_id` A mee; de volledige insertwaarden staan nu in het Testplan. |
+| N-5 `test_budget_warning_on_stdout` toetst niets meer | Overgenomen: `startswith("::warning::forecast:")`; `test_cli_pipeline.py` staat in Bestanden en stap 7. |
+| N-6 renderfout in `test_build_payload` | Overgenomen: "bevat het teken `–` (U+2013) letterlijk en niet de escape-reeks `–`". |
+| N-7 uitloggen op een gedeeld apparaat | Overgenomen in "Gevolgen voor latere WP's", WP-18: eerst de eigen rij verwijderen, dan uitloggen. |
+| N-8 A1 is blijvend | Overgenomen: A1 zegt nu expliciet dat het voor elke gebruiker geldt die push na favorieten aanzet; WP-18 beslist over een UI-uitleg; RUNBOOK §14 punt 9 en WP-18-gevolgen aangepast. Geen nieuw gedrag (geen scope-uitbreiding). |
+| N-9 `ValueError` bij payload blokkeert | Alleen een opmerking in R1, zoals de review voorstelt; geen codewijziging. |
+| N-10 SSRF/egress via endpoints | Overgenomen als expliciet WP-22-punt (allowlist van push-hosts, grens in de database). Geen wijziging in WP-17. |
+| N-11 subject in `secret_values` | Overgenomen: `secret_values` voegt het gestripte `vapid_subject` toe (vangnet); `test_secret_values` uitgebreid, bestaande asserts ongewijzigd. |
