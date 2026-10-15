@@ -4,6 +4,15 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { favoritesState, toggleFavoriteMock } from './helpers/fake-favorites.js';
 import { USER_ID } from './helpers/fake-session.js';
 import { NOW_FRESH, NOW_STALE, SPOT_VERIFIED, pageData } from './fixtures/spot-data.js';
+import { WAVES_NOTE_NL } from '../src/lib/marine.js';
+import {
+	MARINE_FRESH,
+	MARINE_STALE,
+	NOW_FRESH,
+	NOW_STALE,
+	SPOT_VERIFIED,
+	pageData
+} from './fixtures/spot-data.js';
 
 const nav = vi.hoisted(() => ({ refreshAll: vi.fn() }));
 vi.mock('$app/navigation', () => ({ refreshAll: nav.refreshAll }));
@@ -150,5 +159,36 @@ describe('favorite star on the spot page (WP-16)', () => {
 		expect(within(row).getByRole('heading', { level: 1 })).toHaveTextContent('Teststrand');
 		await userEvent.click(star);
 		expect(toggleFavoriteMock).toHaveBeenCalledWith('test-strand');
+	});
+});
+
+describe('waves (WP-12, AC-6)', () => {
+	it('shows one wave line under the matching hour, plus the note', () => {
+		render(Page, props(pageData({ marine: [MARINE_FRESH] })));
+		const li = hourOf('14:00').closest('li') as HTMLElement;
+		const waves = li.querySelector('.waves');
+		expect(waves).toHaveTextContent('Golven 1,2 m, periode 5 s, uit WZW (250°)');
+		expect(document.querySelectorAll('.waves')).toHaveLength(1);
+		expect(screen.getByText(WAVES_NOTE_NL)).toBeInTheDocument();
+	});
+
+	it('without wave data: no wave line, no note, no alert', () => {
+		render(Page, props(pageData()));
+		expect(document.querySelectorAll('.waves')).toHaveLength(0);
+		expect(document.querySelector('.waves-note')).toBeNull();
+		expect(screen.queryByRole('alert')).toBeNull();
+	});
+
+	it('hides stale wave data', () => {
+		render(Page, props(pageData({ marine: [MARINE_STALE] })));
+		expect(document.querySelectorAll('.waves')).toHaveLength(0);
+		expect(document.querySelector('.waves-note')).toBeNull();
+	});
+
+	it('no note when the only wave row belongs to a hidden (dark) hour', () => {
+		const dark = { ...MARINE_FRESH, valid_at: '2026-07-15T21:00:00+00:00' };
+		render(Page, props(pageData({ marine: [dark] })));
+		expect(document.querySelectorAll('.waves')).toHaveLength(0);
+		expect(document.querySelector('.waves-note')).toBeNull();
 	});
 });
