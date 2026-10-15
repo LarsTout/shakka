@@ -23,7 +23,7 @@ Opdeling: goedgekeurd.
 | WP-16 | Profiel, favorieten en alertinstellingen | done | AC-7 open: rooktest in de app door Lars (verification.md O-1) |
 | WP-17 | Web Push: backend (enige meldingskanaal) | done | supabase db push (push_subscriptions) door Lars; echte test-push na WP-18 |
 | WP-18 | Web Push: PWA | done | AC-5 open: echte push-test op iPhone/Android, meten 50/150 (RUNBOOK §14.12-15) |
-| WP-19 | Sessies: datamodel, RLS en RPC's | approved | |
+| WP-19 | Sessies: datamodel, RLS en RPC's | building | |
 | WP-20 | Sessie aanmaken en delen | todo | |
 | WP-21 | Publieke sessiepagina en RSVP zonder account | todo | |
 | WP-22 | Hardening backend en kostenbewaking | todo | |
