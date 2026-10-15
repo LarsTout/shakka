@@ -25,7 +25,7 @@ Opdeling: goedgekeurd.
 | WP-18 | Web Push: PWA | done | AC-5 open: echte push-test op iPhone/Android, meten 50/150 (RUNBOOK §14.12-15) |
 | WP-19 | Sessies: datamodel, RLS en RPC's | done | bewaartermijn 7 dagen bevestigen (A1) |
 | WP-20 | Sessie aanmaken en delen | done | AC-6 open: telefoontest (push → ik ga → WhatsApp) door Lars |
-| WP-21 | Publieke sessiepagina en RSVP zonder account | blueprint | |
+| WP-21 | Publieke sessiepagina en RSVP zonder account | in_review | |
 | WP-22 | Hardening backend en kostenbewaking | todo | |
 | WP-23 | Privacy, toegankelijkheid en performance | todo | |
 
