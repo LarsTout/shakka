@@ -52,6 +52,7 @@ jobs:
           VAPID_PUBLIC_KEY: ${{ secrets.VAPID_PUBLIC_KEY }}
           VAPID_PRIVATE_KEY: ${{ secrets.VAPID_PRIVATE_KEY }}
           VAPID_SUBJECT: ${{ secrets.VAPID_SUBJECT }}
+          OPERATOR_USER_ID: ${{ secrets.OPERATOR_USER_ID }}
           APP_BASE_URL: ${{ vars.APP_BASE_URL }}
         run: uv run shakka run-hourly
       - name: Repository activity (schedules stop after 60 days without activity)

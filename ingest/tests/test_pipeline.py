@@ -304,6 +304,7 @@ def step(report: RunReport, name: str) -> StepReport:
 def test_steps_contract_order():
     assert [n for n, _ in pipeline.STEPS] == [
         "spots_sync", "forecast", "marine", "tides", "evaluate", "alerts", "sessions_cleanup",
+        "usage_report",
     ]  # fmt: skip
     assert [n for n, _ in pipeline.STEPS] == list(pipeline.STEP_NAMES)
 
@@ -324,9 +325,12 @@ def test_all_steps_ok_records_run(tmp_path):
     assert db.writes[:first_insert] == [("update", "ingest_runs")]
     alerts = next(s for s in row["steps"] if s["name"] == "alerts")
     assert alerts["counts"]["events"] == 1 and alerts["counts"]["new"] == 1
+    cleanup = row["steps"][-2]
+    assert cleanup["name"] == "sessions_cleanup" and cleanup["status"] == "ok"
+    assert cleanup["counts"] == {"deleted": 0}
     last = row["steps"][-1]
-    assert last["name"] == "sessions_cleanup" and last["status"] == "ok"
-    assert last["counts"] == {"deleted": 0}
+    assert last["name"] == "usage_report" and last["status"] == "ok"
+    assert last["counts"]["due"] is False
 
 
 def test_sessions_cleanup_deletes_expired(tmp_path):
@@ -559,7 +563,7 @@ def test_spots_sync_failure_continues(tmp_path):
     report = run_real(tmp_path, db, settings=settings)
     sync = step(report, "spots_sync")
     assert sync.status == "failed" and sync.error_type == "SpotValidationError"
-    assert len(report.steps) == 7
+    assert len(report.steps) == 8
     assert all(s.status == "ok" for s in report.steps[1:])
     assert report.status == "partial" and report.exit_code == 0
 

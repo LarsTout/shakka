@@ -1,6 +1,8 @@
 """Hourly orchestration: run all steps in a fixed order and record the run.
 
-Steps: spots_sync, forecast, marine, tides, evaluate, alerts, sessions_cleanup (retention).
+Steps: spots_sync, forecast, marine, tides, evaluate, alerts, sessions_cleanup (retention),
+usage_report (weekly usage push and threshold warnings for the operator).
+Before each step the run time budget is checked (RUN_TIME_BUDGET_S).
 
 Every run is a row in `ingest_runs`. A step that raises never stops the others. Stdout and
 logs carry counts and statuses only (the Actions logs are public); error texts and lists
@@ -34,8 +36,9 @@ from shakka.jobs.inputs import db_error_summary, require_aware, short_error
 from shakka.jobs.marine import FetchMarine, run_marine_ingest
 from shakka.jobs.sessions import purge_expired_sessions
 from shakka.jobs.tides import TideFetcher, run_tide_ingest
+from shakka.jobs.usage import UsageReportResult, run_usage_report, usage_stats_json
 from shakka.logsetup import configure_logging, github_annotation, redact, secret_values
-from shakka.notify.base import Notifier
+from shakka.notify.base import WEBPUSH_CHANNEL, Notifier
 from shakka.notify.webpush import notifiers_from_settings
 from shakka.spots.loader import load_spots
 from shakka.spots.sync import sync_spots
@@ -72,6 +75,7 @@ STEP_NAMES: Final = (
     "evaluate",
     "alerts",
     "sessions_cleanup",
+    "usage_report",
 )
 
 _monotonic: Callable[[], float] = time.monotonic  # looked up at call time; tests monkeypatch it
@@ -315,6 +319,51 @@ def step_sessions_cleanup(ctx: PipelineContext) -> StepOutcome:
     return StepOutcome("ok", {"deleted": deleted})
 
 
+def usage_counts(result: UsageReportResult) -> dict[str, Any]:
+    """Counts of the usage step. `report` holds the full text (ingest_runs only, no secrets)."""
+    stats = result.stats
+    delivery = result.delivery
+
+    def rounded(value: float | None) -> float | None:
+        return None if value is None else round(value, 2)
+
+    return {
+        "due": result.report_due,
+        "report_done": result.report_done,
+        "warning_notified": result.warning_notified,
+        "database_bytes": stats.database_bytes,
+        "open_meteo_today": rounded(stats.open_meteo_today),
+        "open_meteo_month": rounded(stats.open_meteo_month),
+        "warnings": list(result.warnings),
+        "delivery": None if delivery is None else delivery.status,
+        "sent": 0 if delivery is None else delivery.sent,
+        "failed": 0 if delivery is None else delivery.failed,
+        "removed": 0 if delivery is None else delivery.removed,
+        "push_failures": {} if delivery is None else dict(delivery.push_failures),
+        "runs_deleted": result.runs_deleted,
+        "report": result.report,
+        "stats": usage_stats_json(stats) if result.report_due else None,
+        "errors": list(result.errors),
+    }
+
+
+def step_usage_report(ctx: PipelineContext) -> StepOutcome:
+    def notifier_factory() -> Notifier | None:
+        notifiers = (
+            ctx.notifiers if ctx.notifiers is not None else notifiers_from_settings(ctx.settings)
+        )
+        return notifiers.get(WEBPUSH_CHANNEL)
+
+    result = run_usage_report(
+        ctx.db,
+        now=ctx.now,
+        operator_user_id=ctx.settings.operator_user_id,
+        notifier_factory=notifier_factory,
+    )
+    warnings = tuple(f"usage threshold: {w}" for w in result.warnings) + result.notes
+    return StepOutcome(result.status, usage_counts(result), warnings)
+
+
 STEPS: Final[tuple[Step, ...]] = (
     ("spots_sync", step_spots_sync),
     ("forecast", step_forecast),
@@ -323,6 +372,7 @@ STEPS: Final[tuple[Step, ...]] = (
     ("evaluate", step_evaluate),
     ("alerts", step_alerts),
     ("sessions_cleanup", step_sessions_cleanup),
+    ("usage_report", step_usage_report),
 )
 
 

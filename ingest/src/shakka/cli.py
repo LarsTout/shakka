@@ -119,6 +119,19 @@ def alerts_vapid_keys() -> None:
 
 
 @cli.group()
+def usage() -> None:
+    """Usage report: Open-Meteo calls, database size, runs and push."""
+
+
+@usage.command("show")
+def usage_show() -> None:
+    """Show the usage report. Reads only: sends and stores nothing."""
+    from shakka.jobs.usage import run_usage_show_cli
+
+    raise SystemExit(run_usage_show_cli(echo=click.echo))
+
+
+@cli.group()
 def tides() -> None:
     """Rijkswaterstaat astronomical tide extremes."""
 
@@ -397,9 +410,10 @@ def admin_alerts_preview(user_id) -> None:
 
 @cli.command("run-hourly")
 def run_hourly_cmd() -> None:
-    """Run all hourly steps (spots sync, forecast, marine, tides, evaluate, alerts).
+    """Run all hourly steps.
 
-    Records the run.
+    Steps: spots sync, forecast, marine, tides, evaluate, alerts, sessions cleanup and the
+    usage report. Records the run.
     """
     from shakka.pipeline import run_hourly_cli
 

@@ -7,6 +7,7 @@ only, and every formatted line is scrubbed of known secrets as a safety net.
 import logging
 import sys
 import time
+import uuid
 from collections.abc import Iterable
 from typing import Final, Literal, TextIO
 
@@ -33,6 +34,15 @@ def secret_values(settings: Settings) -> tuple[str, ...]:
         values.append(settings.vapid_private_key.get_secret_value())
     if settings.vapid_subject is not None and settings.vapid_subject.strip():
         values.append(settings.vapid_subject.strip())  # an e-mail address: personal data
+    if settings.operator_user_id is not None and settings.operator_user_id.strip():
+        raw = settings.operator_user_id.strip()
+        values.append(raw)  # a user id: personal data
+        try:
+            canonical = str(uuid.UUID(raw))
+        except ValueError:
+            canonical = raw  # the usage step reports an invalid value without echoing it
+        if canonical != raw:
+            values.append(canonical)
     return tuple(values)
 
 

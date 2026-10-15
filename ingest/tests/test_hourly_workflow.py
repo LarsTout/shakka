@@ -45,6 +45,7 @@ def test_pipeline_step_env(job):
         "VAPID_PUBLIC_KEY": "${{ secrets.VAPID_PUBLIC_KEY }}",
         "VAPID_PRIVATE_KEY": "${{ secrets.VAPID_PRIVATE_KEY }}",
         "VAPID_SUBJECT": "${{ secrets.VAPID_SUBJECT }}",
+        "OPERATOR_USER_ID": "${{ secrets.OPERATOR_USER_ID }}",
         "APP_BASE_URL": "${{ vars.APP_BASE_URL }}",
     }
     assert "env" not in job or not any("secrets." in str(v) for v in job["env"].values())
@@ -72,6 +73,7 @@ def test_only_known_secrets():
         "VAPID_PUBLIC_KEY",
         "VAPID_PRIVATE_KEY",
         "VAPID_SUBJECT",
+        "OPERATOR_USER_ID",
     }
 
 

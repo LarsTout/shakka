@@ -15,6 +15,7 @@ ENV_KEYS = [
     "VAPID_PUBLIC_KEY",
     "VAPID_PRIVATE_KEY",
     "VAPID_SUBJECT",
+    "OPERATOR_USER_ID",
 ]
 
 
