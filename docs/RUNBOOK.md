@@ -156,7 +156,7 @@ In M1 worden er nog geen meldingen verstuurd. De alertjob berekent per favoriet 
 9. **Waarschuwing.** `alerts run` en `admin alerts preview` tonen berichtteksten. Gebruik ze lokaal en nooit in een GitHub-workflow: de logs van een publieke repo zijn openbaar. De uurlijkse workflow (WP-11) roept de functies aan, niet deze commando's.
 10. **Oude `TELEGRAM_*`-variabelen.** Die mag je uit je lokale `.env` halen. Ze worden genegeerd en zijn niet meer nodig.
 
-## 13. Uurlijke run (vanaf WP-11)
+## 13. Uurlijkse run (vanaf WP-11)
 1. **Wat draait er.** Elk uur om :17 UTC (geen garantie: GitHub kan vertragen of een run overslaan) draait `shakka run-hourly`: `spots_sync`, `forecast`, `tides`, `evaluate`, `alerts`, met foutisolatie per stap. De schedule draait de code van `main`, met het workflowbestand van `develop` (de default branch). Alleen als de variable `HOURLY_ENABLED` op `true` staat. Er draait één run tegelijk.
 2. **Eenmalige setup.**
    - Repo Settings, Secrets and variables, Actions: secrets `SUPABASE_URL` en `SUPABASE_SECRET_KEY`; optioneel de variable `APP_BASE_URL` (pas zinvol na WP-14).
