@@ -71,10 +71,7 @@ def angular_distance(a: float, b: float) -> float:
 def classify_direction(wind_from_deg: float, shore_normal_deg: float) -> DirClass:
     """Class from angular_distance(wind_from_deg, shore_normal_deg) and the *_MAX_DEG bounds
     (upper bound inclusive). Both arguments are taken modulo 360. ValueError if not finite."""
-    d = angular_distance(
-        wind_from_deg % 360 if math.isfinite(wind_from_deg) else wind_from_deg,
-        shore_normal_deg % 360 if math.isfinite(shore_normal_deg) else shore_normal_deg,
-    )
+    d = angular_distance(wind_from_deg, shore_normal_deg)  # takes both modulo 360
     if d <= ONSHORE_MAX_DEG:
         return DirClass.ONSHORE
     if d <= SIDE_ONSHORE_MAX_DEG:
