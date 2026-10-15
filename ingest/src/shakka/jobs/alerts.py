@@ -19,11 +19,14 @@ is covered by WP-11 setting the httpx and httpcore loggers to WARNING.
 
 import logging
 from collections import Counter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final, Literal
 
+from pydantic import ValidationError
+
+from shakka.config import get_settings
 from shakka.db import DatabaseError, SupabaseRest, iso_utc
 from shakka.domain.alerts import (
     RULE_FIELDS,
@@ -48,6 +51,7 @@ from shakka.domain.evaluation import evaluate_spot
 from shakka.domain.kite import KiteAdvice, RiderProfile, recommend_for_window
 from shakka.domain.messages import AlertMessage, build_go_url, render_alert
 from shakka.domain.spot import SpotProfile
+from shakka.jobs import runtime
 from shakka.jobs.inputs import (
     SpotInputs,
     db_error_summary,
@@ -395,3 +399,47 @@ def format_rule(rule: AlertRule) -> str:
         f"after {after}, before {before}, min {rule.min_go_hours} h, "
         f"{rule.days_ahead} days ahead, {'enabled' if rule.enabled else 'disabled'}"
     )
+
+
+def run_alerts_cli(*, dry_run: bool, echo: Callable[[str], None]) -> int:
+    """Run the alert job from the CLI. Shows message texts: for local use only."""
+    try:
+        settings = get_settings()
+    except ValidationError:
+        echo("alerts: configuration incomplete; run shakka doctor")
+        return 1
+    try:
+        base = normalize_base_url(settings.app_base_url)
+    except ValueError:
+        echo("alerts: invalid APP_BASE_URL")
+        return 1
+    db = runtime.open_db(settings)
+    try:
+        result = run_alerts(db, now=runtime.utcnow(), base_url=base, dry_run=dry_run)
+    except DatabaseError as exc:
+        echo(f"alerts: database error: {exc}")
+        return 1
+    finally:
+        db.close()
+    for item in result.messages:
+        message = item.message
+        echo(f"{message.kind.value} {message.spot_id}: {message.title}")
+        for line in message.body.splitlines():
+            echo(f"  {line}")
+        if message.go_url is not None:
+            echo(f"  link: {message.go_url}")
+    kinds = Counter(item.message.kind for item in result.messages)
+    echo(
+        f"alerts: users={result.users} favorites={result.favorites} events={result.events} "
+        f"(new={kinds[AlertEventKind.NEW]} improved={kinds[AlertEventKind.IMPROVED]} "
+        f"worsened={kinds[AlertEventKind.WORSENED]} cancelled={kinds[AlertEventKind.CANCELLED]}) "
+        f"ineligible={result.ineligible} disabled={result.disabled} skipped={result.skipped} "
+        f"write_errors={result.write_errors} deleted={result.deleted}"
+    )
+    if dry_run:
+        echo("alerts: dry run, nothing stored")
+    for line in result.errors:
+        echo(f"error   {line}")
+    failed = result.skipped > 0 or result.write_errors > 0
+    echo("alerts: failed" if failed else "alerts: ok")
+    return 1 if failed else 0

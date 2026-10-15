@@ -75,6 +75,20 @@ def evaluate() -> None:
 
 
 @cli.group()
+def alerts() -> None:
+    """Alerts: evaluate favorites and record the state (nothing is sent yet)."""
+
+
+@alerts.command("run")
+@click.option("--dry-run", is_flag=True, help="Compute and show the messages; write nothing.")
+def alerts_run(dry_run: bool) -> None:
+    """Compute alerts for all favorites. Shows message texts: use locally only."""
+    from shakka.jobs.alerts import run_alerts_cli
+
+    raise SystemExit(run_alerts_cli(dry_run=dry_run, echo=click.echo))
+
+
+@cli.group()
 def tides() -> None:
     """Rijkswaterstaat astronomical tide extremes."""
 
