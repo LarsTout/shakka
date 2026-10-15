@@ -1,10 +1,10 @@
-import axe from 'axe-core';
+import axe, { type RunOptions } from 'axe-core';
 
 // jsdom has no layout, so color-contrast cannot work here; contrast.test.ts covers the colours (blueprint A16).
-export const AXE_OPTIONS = {
+export const AXE_OPTIONS: RunOptions = {
 	rules: { 'color-contrast': { enabled: false } },
 	resultTypes: ['violations']
-} as const;
+};
 
 export interface AxeFinding {
 	id: string;
@@ -14,7 +14,7 @@ export interface AxeFinding {
 
 /** axe.run(root, AXE_OPTIONS); violations with impact 'serious' or 'critical', flattened to id/impact/targets. */
 export async function seriousViolations(root: Element = document.body): Promise<AxeFinding[]> {
-	const result = await axe.run(root, { ...AXE_OPTIONS, rules: { ...AXE_OPTIONS.rules } });
+	const result = await axe.run(root, AXE_OPTIONS);
 	return result.violations
 		.filter((v) => v.impact === 'serious' || v.impact === 'critical')
 		.map((v) => ({
