@@ -1,6 +1,6 @@
 # Blueprint WP-23: Privacy, toegankelijkheid en performance
 Status: DRAFT
-Revisie: 1
+Revisie: 2
 
 ## Doel
 De PWA klaarmaken voor anderen:
@@ -23,11 +23,11 @@ Voorstellen waar Lars op kan reageren staan als **Voorstel**.
   Cloudflare Pages bouwt met `cd web && npm ci && npm run build` (RUNBOOK §11) en pakt dit dus vanzelf op. AC-4 parseert het sjabloon `web/static/_headers`; `verify:build` doet dezelfde controles op het ingevulde bestand.
 - **A3. Het scriptpad is `web/scripts/check-bundle-size.mjs`.** WORK_PACKAGES noemt `scripts/check-bundle-size.mjs` met `node scripts/check-bundle-size.mjs`. Dat commando werkt vanuit `web/`, net als `verify-build.mjs`; het script heeft de build in `web/build` nodig. De CI-stap is letterlijk `- run: node scripts/check-bundle-size.mjs` in de job `web` (working directory `web`). De orchestrator past het pad in WORK_PACKAGES aan.
 - **A4. Voorstel: twee budgetten, in gzip-bytes (niveau 9), 1 kB = 1024 bytes.**
-  - **Initiële JS ≤ 150 kB.** Dat is alle JavaScript die nodig is voordat een route rendert: de bestanden in `_app/immutable/entry/` (start en app), de root-layout `_app/immutable/nodes/0.*.js`, en de statische import-afsluiting daarvan (`import … from`, `import "…"`, `export … from`). Dynamische `import()` telt niet mee, dus het MapLibre-chunk en de route-chunks niet. Dit is "het entry-chunk, exclusief het kaart-chunk" uit de WP, nauwkeurig gedefinieerd: één bestand meten zegt weinig, omdat Vite de code over chunks verdeelt.
+  - **Initiële JS ≤ 150 kB.** Dat is alle JavaScript die nodig is voordat een route rendert: de bestanden in `_app/immutable/entry/` (start, payload en app), de root-layout `_app/immutable/nodes/0.*.js`, en de statische import-afsluiting daarvan (`import … from`, `import "…"`, `export … from`). Dynamische `import()` telt niet mee, dus het MapLibre-chunk en de route-chunks niet. De `<link rel="modulepreload">`-lijst in `index.html` dient als kruiscontrole en telt mee (review N-3). Dit is "het entry-chunk, exclusief het kaart-chunk" uit de WP, nauwkeurig gedefinieerd: één bestand meten zegt weinig, omdat Vite de code over chunks verdeelt.
   - **Precache ≤ 900 kB.** Dat is alles wat de service worker bij installatie downloadt: alle bestanden onder `_app/immutable/`, de bestanden uit `static/` (zonder `_headers` en `_redirects`, zie A6) en `index.html`. Hier zit het MapLibre-chunk (±250 kB gzip) wel in.
   - De getallen zijn schattingen; ik kan niet bouwen. Schatting initiële JS: supabase-js ±55 kB, Svelte en SvelteKit ±30 kB, app-code in de layout ±15 kB, dus ±100 kB. Precache: MapLibre en zijn worker ±370 kB, de rest ±200 kB. De builder meet in stap 9 en schrijft de gemeten waarden in `docs/RUNBOOK.md`. Komt een meting boven een budget uit, dan verhoogt hij het budget **niet** zelf: hij noteert het in `deviations.md` en stopt (beslissing Lars).
 - **A5. Het MapLibre-chunk blijft in de precache** (WP-15 A9, N-9). Eruit halen vraagt een oplossing voor oude chunknamen na een deploy (een `import()` op een chunk die niet meer bestaat). Het kost ±250 kB eenmalig per installatie per app-versie; het precachebudget van A4 bewaakt dat het niet ongemerkt groeit.
-- **A6. Cloudflare serveert `_headers` niet als bestand.** Volgens de Cloudflare-docs wordt `_headers` "not itself be served as a static asset". De service worker precachet alle bestanden uit `static/` (`$app/manifest` `assets`). Een 404 in `cache.addAll` laat de installatie van de service worker falen, en daarmee ook push. `precacheList` laat daarom `/_headers` en `/_redirects` weg. Dat moet in de code staan vóórdat `_headers` in `static/` komt (stappenplan: stap 7 vóór stap 8).
+- **A6. Cloudflare serveert `_headers` niet als bestand.** Volgens de Cloudflare-docs wordt `_headers` "not itself be served as a static asset". De service worker precachet alle bestanden uit `static/` (`$app/manifest` `assets`). Een verzoek naar `/_headers` valt op Pages door naar de SPA-fallback: `index.html` met status 200, geen 404. `cache.addAll` faalt dus niet, maar zou `index.html` onder de sleutel `/_headers` in de cache zetten: een zinloze kopie die bij elke installatie opnieuw wordt gedownload, en een precachelijst die niet klopt met wat er echt bestaat. `precacheList` laat daarom `/_headers` en `/_redirects` weg, omdat het geen echte bestanden van de site zijn. Dit repareert geen bestaande bug (er staat nu geen `_headers` of `_redirects` in `static/`); stap 7 vóór stap 8 is genoeg.
 - **A7. Voorstel: `style-src 'self' 'unsafe-inline'`.** `app.html` heeft `style="display: contents"`, en templates met `style="…"` worden door Svelte via template-HTML gemaakt. Zonder `'unsafe-inline'` blokkeert de browser die. Inline stijl kan geen script uitvoeren; de bescherming tegen XSS zit in `script-src`. De WP eist alleen `script-src 'self'` en de beperking van `connect-src`.
 - **A8. Voorstel: `Referrer-Policy: strict-origin-when-cross-origin`** (de standaard van moderne browsers, nu expliciet). Bij verzoeken naar een andere origin gaat alleen de origin mee, nooit het pad. Zo lekt de slug van `/s/{slug}` niet naar Supabase, MapTiler of externe links. Niet `no-referrer`: de MapTiler-review (WP-15 N-2) kon niet bevestigen dat de origin-restrictie geen Referer nodig heeft. Deze keuze verandert niets ten opzichte van nu, dus de kaart kan er niet door op 403 lopen.
 - **A9. Geen opruimronde over `shakka:rsvp:*` bij het starten** (voorstel van WP-21). Zonder datum in de waarde kan de app niet zien of een sessie weg is, behalve door per sleutel `get_public_session` aan te roepen. Een datum toevoegen verandert het opslagcontract van WP-21 (`{rsvp_id, edit_token}`, met een test die extra velden weert). De sleutel bevat geen naam, staat alleen op het eigen apparaat, en de aanmelding zelf is na de bewaartermijn op de server weg. De privacypagina zegt dit eerlijk en legt uit hoe je hem wist (browsergegevens wissen).
@@ -46,6 +46,12 @@ Voorstellen waar Lars op kan reageren staan als **Voorstel**.
 - **A18. Bronvermelding: golfmodellen expliciet** (WP-12 review N-9). De volledige `Attribution` krijgt "Weermodellen van KNMI, DWD, ECMWF en NOAA, en golfmodellen van DWD en ECMWF, via Open-Meteo." De compacte stand ("Modellen: KNMI, DWD, ECMWF, NOAA") dekt beide al en blijft gelijk.
 - **A19. Opruimpunt `browserStorage`** (WP-20 en WP-21: "uiterlijk WP-23"). `rsvp-storage.ts` gebruikt voortaan `browserStorage()` uit `#lib/browser-storage.js` (`StorageLike | undefined`) en zijn functies accepteren `StorageLike | undefined` in plaats van `| null`. Het gedrag blijft gelijk. `formatWindowLocal` (compact) en `sessionWindowText` (voluit) blijven bewust twee functies (WP-20: "twee formaten voor twee doelen").
 - **A20. Geen extra origins.** WP-12, WP-14, WP-16, WP-18, WP-20 en WP-21 voegen niets toe aan `connect-src`; Web Push, Web Share, het klembord en links naar WhatsApp en Tikkie zijn geen fetch-verzoeken. De enige externe origin naast Supabase is `MAP_EXTERNAL_ORIGINS` = `https://api.maptiler.com` (WP-15).
+- **A21. `shakka:return_to` wordt ook zonder inloggen opgeruimd** (review B-1a). Nu wist alleen `takeReturnTo` de sleutel, en die draait pas als er een sessie is. Wie op dat apparaat nooit inlogt, houdt de sleutel onbeperkt. Nieuw is `pruneReturnTo(storage, nowMs)` in `local-prefs.ts`: die wist de sleutel tenzij hij een waarde bevat die `takeReturnTo` op dit moment zou accepteren (vers en toegestaan). De layout roept hem één keer aan bij elke app-start (`onMount`, vóór `initAuth`). Een verse waarde blijft staan, dus de terugkeer na inloggen werkt als voorheen. Een sleutel ouder dan 60 minuten verdwijnt bij de eerstvolgende start. Blijft de app langer dan 60 minuten open zonder inloggen, dan staat de sleutel er tot de volgende start, maar wordt hij niet meer gebruikt. De privacytekst beschrijft precies dat, zonder "hoogstens".
+- **A22. Wat de uurlijkse job leest** (review B-1b). `jobs/alerts.py` en `jobs/push.py` lezen `profiles` (`PROFILE_COLUMNS`), `favorites`, `alert_rules`, `alert_state` en `push_subscriptions`. Ze schrijven `alert_state` en werken `push_subscriptions` bij (`last_success_at`; verwijderen bij 404/410). `/privacy` en `docs/PRIVACY.md` noemen dezelfde vijf gegevens. `privacy-page.test.ts` toetst beide formuleringen.
+- **A23. Grondslag in één zin, als feitelijke tekst** (review N-7). De privacypagina krijgt een korte sectie "Waarom Shakka dit mag". Daarin staat: Shakka verwerkt de gegevens om de dienst te leveren die je zelf aanvraagt. Meldingen komen pas nadat je ze zelf aanzet. De logs zijn nodig om de dienst veilig te laten werken. Shakka gebruikt geen tracking, dus vraagt het niet om toestemming voor cookies. Dit is geen juridisch advies en valt onder het akkoord van Lars op de tekst (A15).
+- **A24. Opslag die de browser of een library zelf beheert** (review N-8, gecontroleerd in `node_modules` van de WP-21-build):
+  - SvelteKit 3 schrijft in `sessionStorage` de sleutels `sveltekit:history-info` (scrollpositie per history-item) en `sveltekit:snapshot` (leeg: Shakka gebruikt geen `export const snapshot`). `sessionStorage` verdwijnt als je het tabblad sluit. Bron: `@sveltejs/kit/src/runtime/client/constants.js` en `client.js`.
+  - MapLibre GL JS 6.14.0 heeft geen tegelcache via de Cache API meer: in `maplibre-gl/dist` staat geen `caches.open` en geen `maplibre-tiles`. De tegelcache van MapLibre zit in het geheugen (`TileCache`). Kaarttegels, fonts en sprites van MapTiler kunnen wel in de gewone HTTP-cache van de browser komen, volgens de `Cache-Control` van MapTiler. Dat is browsercache en geen opslag door de app. De builder controleert dit in stap 5 opnieuw op de geïnstalleerde versie (zie daar).
 
 ## Ontwerp
 
@@ -57,7 +63,9 @@ De auth-tabellen van Supabase (`identities`, `sessions`, `refresh_tokens`, MFA) 
 
 In de web-app is `#lib/account.ts` de enige module die de RPC aanroept, met een time-out zoals `rsvp.ts`. `DeleteAccount.svelte` staat op `/profiel` onder het formulier, zichtbaar zodra je ingelogd bent, ook als je profiel niet laadt. De knop toont eerst een bevestiging met de gevolgen, en de focus gaat naar de vraag "Weet je het zeker?". Na succes toont de pagina een statusmelding en logt de app uit (A10).
 
-**Privacy.** `#lib/privacy.ts` bevat de bewaartermijnen die de pagina toont. `retention-consistency.test.ts` leest de Python-bronnen (`timedelta(...)`) en de migratie (`interval '7 days'`) en vergelijkt die met deze constanten en met `SESSION_RETENTION_DAYS`. Gaat een termijn in de ingest omhoog, dan faalt de web-test en moet de tekst mee. `/privacy` is een statische pagina; de footer linkt ernaar. `/over`, `/login` en het RSVP-paneel krijgen een link. `docs/PRIVACY.md` is de technische inventaris voor beheer en review.
+**Privacy.** `#lib/privacy.ts` bevat de bewaartermijnen die de pagina toont. `retention-consistency.test.ts` leest de Python-bronnen (`timedelta(...)`) en de migratie (`interval '7 days'`) en vergelijkt die met deze constanten en met `SESSION_RETENTION_DAYS`. Gaat een termijn in de ingest omhoog, dan faalt de web-test en moet de tekst mee. `/privacy` is een statische pagina; de footer linkt ernaar. `/over`, `/login` en het RSVP-paneel krijgen een link. `docs/PRIVACY.md` is de technische inventaris voor beheer en review. `privacy-page.test.ts` legt de formuleringen die het snelst uit de pas lopen (de lijst van wat de uurlijkse job leest, en de bewaartermijn van `shakka:return_to`) zowel op `/privacy` als in `docs/PRIVACY.md` vast.
+
+Om de tekst over `shakka:return_to` waar te maken, ruimt de layout bij elke app-start een verlopen sleutel op met `pruneReturnTo` (A21). Dat is een kleine, pure functie naast `takeReturnTo`, met dezelfde versheidsregel.
 
 **Headers.** `web/static/_headers` (sjabloon) bevat drie regels: `/*` (CSP, referrer, nosniff, permissions), `/_app/immutable/*` (een jaar cache, `immutable`) en `/s/*` (`X-Robots-Tag: noindex`). `web/scripts/write-headers.mjs` doet drie dingen:
 - het leest `PUBLIC_SUPABASE_URL` zoals Vite dat doet (`loadEnv('production', web, 'PUBLIC_')`; `process.env` gaat voor `.env`);
@@ -95,10 +103,12 @@ Daarnaast komen er een skiplink ("Naar de inhoud") en `<main id="main" tabindex=
 | `web/src/lib/components/DeleteAccount.svelte` | aanmaken | Sectie met bevestiging. |
 | `web/src/routes/privacy/+page.svelte` | aanmaken | Privacypagina (tekst exact, zie Interfaces). |
 | `web/src/routes/profiel/+page.svelte` | wijzigen | `accountDeleted`, statusmelding, `DeleteAccount`. |
-| `web/src/routes/+layout.svelte` | wijzigen | Skiplink, `id`/`tabindex` op `main`, link "Privacy" in de footer. |
+| `web/src/routes/+layout.svelte` | wijzigen | Skiplink, `id`/`tabindex` op `main`, link "Privacy" in de footer, `pruneReturnTo` in `onMount` (A21). |
+| `web/src/lib/local-prefs.ts` | wijzigen | Interne helper `freshReturnPath`, nieuwe export `pruneReturnTo`; `takeReturnTo` gebruikt de helper, gedrag gelijk (A21). |
+| `web/test/local-prefs.test.ts` | wijzigen | Tests voor `pruneReturnTo` (zie Testplan). |
 | `web/src/routes/over/+page.svelte` | wijzigen | Link naar `/privacy` in "Geen advertenties, geen tracking". |
 | `web/src/routes/login/+page.svelte` | wijzigen | Eén hint met link naar `/privacy` onder het formulier. |
-| `web/src/lib/components/RsvpPanel.svelte` | wijzigen | Link "Meer over privacy" in de hint `#rsvp-privacy`. |
+| `web/src/lib/components/RsvpPanel.svelte` | wijzigen | Link "Meer over privacy" in de hint `#rsvp-privacy` (stap 4), en de import van `browserStorage` uit `#lib/browser-storage.js` (stap 10, A19). |
 | `web/src/lib/components/Attribution.svelte` | wijzigen | Tweede alinea van de volledige stand (A18). |
 | `web/src/app.css` | wijzigen | `.skip-link`, `main:focus`, `.danger`, `.delete-account`. |
 | `web/src/lib/sw/shell.ts` | wijzigen | `PRECACHE_EXCLUDED_PATHS`; `precacheList` filtert die. |
@@ -263,6 +273,29 @@ Gedrag:
   {/if}
   ```
 
+### `web/src/lib/local-prefs.ts` (wijziging, A21)
+```ts
+/** Path from a raw stored value when it parses as {path: string, saved_at: number}, its age
+ *  (nowMs - saved_at) is within 0..RETURN_TO_TTL_MS, and isAllowedReturnPath(path). Else null. Never throws.
+ *  Not exported. */
+function freshReturnPath(raw: string | null, nowMs: number): string | null;
+
+/** Reads and ALWAYS removes the key. Returns freshReturnPath(raw, nowMs). (Behaviour unchanged.) */
+export function takeReturnTo(storage: StorageLike | undefined, nowMs: number): string | null;
+
+/** Removes RETURN_TO_KEY unless freshReturnPath(stored value, nowMs) is not null. Missing key: no-op.
+ *  Returns true when it removed the key. undefined storage or storage errors: false. Never throws. */
+export function pruneReturnTo(storage: StorageLike | undefined, nowMs: number): boolean;
+```
+- `takeReturnTo` houdt exact zijn huidige volgorde: eerst lezen, dan altijd verwijderen, dan `freshReturnPath`. De bestaande tests in `local-prefs.test.ts` en `layout.test.ts` blijven ongewijzigd groen.
+- Geen nieuwe imports: `session-tables.test.ts` rekent `local-prefs.ts` tot de pure modules.
+
+`+layout.svelte`, in `onMount`, als eerste regel:
+```ts
+pruneReturnTo(browserStorage(), Date.now());
+```
+De import wordt `import { pruneReturnTo, takeReturnTo } from '#lib/local-prefs.js';`. Het `$effect` met `takeReturnTo` blijft gelijk. De volgorde ten opzichte van dat effect maakt niet uit: een verse sleutel laat `pruneReturnTo` staan, een verlopen sleutel zou `takeReturnTo` ook weigeren.
+
 ### `web/src/lib/privacy.ts` (exact)
 ```ts
 import { RETURN_TO_TTL_MS } from './local-prefs.js';
@@ -306,6 +339,14 @@ Imports: de constanten uit `#lib/privacy.js` en `SESSION_RETENTION_DAYS` uit `#l
 	<li>De weerdata komt van de server van Shakka. Je browser praat nooit met Open-Meteo.</li>
 	<li>Je account en alles wat eraan vastzit, verwijder je zelf op je <a href="/profiel">profielpagina</a>.</li>
 </ul>
+
+<h2>Waarom Shakka dit mag</h2>
+<p>
+	Shakka verwerkt deze gegevens om de dienst te leveren die je zelf aanvraagt: inloggen, je alerts,
+	meldingen, en de sessies die je organiseert of waarvoor je je aanmeldt. Meldingen krijg je pas als
+	je ze zelf aanzet. De logs bij Supabase en Cloudflare zijn nodig om de dienst veilig te laten werken.
+	Shakka gebruikt geen tracking en vraagt daarom niet om toestemming voor cookies.
+</p>
 
 <h2>Wat Shakka bewaart als je inlogt</h2>
 <ul>
@@ -364,8 +405,9 @@ Imports: de constanten uit `#lib/privacy.js` en `SESSION_RETENTION_DAYS` uit `#l
 	<li>Je inlogsessie. Verdwijnt als je uitlogt.</li>
 	<li>De voornaam die je als organisator invulde, zodat je hem niet opnieuw hoeft te typen.</li>
 	<li>
-		Na "Ik ga" als je nog niet bent ingelogd: de spot en het tijdvak, hoogstens
-		{RETURN_TO_TTL_MINUTES} minuten, zodat je na het inloggen verder kunt.
+		Na "Ik ga" als je nog niet bent ingelogd: de spot en het tijdvak, zodat je na het inloggen verder
+		kunt. Dit wordt gewist zodra je inlogt. Log je niet in, dan gebruikt Shakka het na
+		{RETURN_TO_TTL_MINUTES} minuten niet meer, en wist het de eerstvolgende keer dat je Shakka opent.
 	</li>
 	<li>
 		Per sessie waarvoor je je aanmeldde: een code waarmee je je aanmelding kunt wijzigen of
@@ -375,6 +417,11 @@ Imports: de constanten uit `#lib/privacy.js` en `SESSION_RETENTION_DAYS` uit `#l
 	</li>
 	<li>De bestanden van de app zelf, zodat Shakka ook offline opent. Daarin staat niets over jou.</li>
 </ul>
+<p>
+	Daarnaast houdt je browser zelf een paar dingen bij, zoals bij elke website: per tabblad de
+	scrollpositie (verdwijnt als je het tabblad sluit), en in de gewone browsercache bijvoorbeeld
+	kaarttegels van MapTiler. Shakka slaat daar zelf niets in op.
+</p>
 
 <h2>Wie er nog meer iets ziet</h2>
 <ul>
@@ -389,7 +436,8 @@ Imports: de constanten uit `#lib/privacy.js` en `SESSION_RETENTION_DAYS` uit `#l
 	</li>
 	<li>
 		<strong>GitHub</strong> draait elk uur de berekening van oordelen en alerts. Die leest daarvoor je
-		alertinstellingen en push-abonnementen. In de logs komen geen persoonsgegevens.
+		profiel, favorieten, alertinstellingen, push-abonnementen en welke alerts je al kreeg. In de logs
+		komen geen persoonsgegevens.
 	</li>
 	<li>
 		<strong>De pushdienst van je browser</strong> (bijvoorbeeld van Apple, Google, Mozilla of
@@ -460,7 +508,8 @@ main:focus:not(:focus-visible) { outline: none; }
 
 ### `web/src/lib/sw/shell.ts` (wijziging)
 ```ts
-/** Host configuration files in static/ that Cloudflare Pages never serves (they would 404 and fail cache.addAll). */
+/** Host configuration files in static/ that Cloudflare Pages never serves as files. A request for them gets
+ *  the SPA fallback (index.html, 200), so precaching them would store a useless copy of index.html. */
 export const PRECACHE_EXCLUDED_PATHS: readonly string[] = ['/_headers', '/_redirects'];
 
 /** Unique list of absolute paths to precache, without PRECACHE_EXCLUDED_PATHS, always including shellPath.
@@ -471,8 +520,8 @@ export function precacheList(paths: readonly string[], shellPath: string): strin
 ### `web/static/_headers` (exact)
 ```
 # Cloudflare Pages response headers (WP-23). This file is a template: `npm run build` runs
-# scripts/write-headers.mjs, which writes build/_headers with {{SUPABASE_ORIGIN}} and {{SCRIPT_HASHES}}
-# filled in. Never put secrets here. Checked by test/headers.test.ts and verify-build.
+# scripts/write-headers.mjs, which writes build/_headers with the two placeholders (Supabase origin,
+# inline script hashes) filled in. Never put secrets here. Checked by test/headers.test.ts and verify-build.
 /*
   Content-Security-Policy: default-src 'self'; script-src 'self' {{SCRIPT_HASHES}}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://api.maptiler.com; font-src 'self'; connect-src 'self' {{SUPABASE_ORIGIN}} https://api.maptiler.com; worker-src 'self'; manifest-src 'self'; frame-src 'none'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'
   Referrer-Policy: strict-origin-when-cross-origin
@@ -483,7 +532,7 @@ export function precacheList(paths: readonly string[], shellPath: string): strin
 /s/*
   X-Robots-Tag: noindex
 ```
-Inspringing: twee spaties. Elke regel is korter dan 2.000 tekens (limiet van Cloudflare).
+Inspringing: twee spaties. Elke regel is korter dan 2.000 tekens (limiet van Cloudflare). De placeholders `{{SUPABASE_ORIGIN}}` en `{{SCRIPT_HASHES}}` staan alleen in de CSP-regel, niet in het commentaar.
 
 ### `web/scripts/write-headers.mjs`
 ```js
@@ -511,8 +560,9 @@ export function inlineScriptHashes(html);
  *  @param {string | undefined} value @returns {string} */
 export function supabaseOrigin(value);
 
-/** Replaces both placeholders (hashes joined by one space), collapses runs of spaces inside header values,
- *  and throws Error('unresolved placeholder in _headers') if '{{' remains.
+/** Replaces every occurrence of both placeholders with String.prototype.replaceAll (hashes joined by one
+ *  space), collapses runs of spaces inside header values, and throws
+ *  Error('unresolved placeholder in _headers') if '{{' remains anywhere in the text (comments included).
  *  @param {string} template @param {{ supabaseOrigin: string, scriptHashes: string[] }} values @returns {string} */
 export function renderHeaders(template, values);
 
@@ -537,7 +587,8 @@ export function checkHeaders(text, opts);
 6. bij `template: false` er nog `{{` in de tekst staat.
 
 `main()`:
-- args: `--template <pad>` (standaard `web/static/_headers`), `--build <dir>` (standaard `web/build`);
+- `WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')`, net als in `verify-build.mjs`;
+- args: `--template <pad>` (standaard `<WEB_ROOT>/static/_headers`), `--build <dir>` (standaard `<WEB_ROOT>/build`). Relatieve paden in args worden opgelost vanaf `process.cwd()`;
 - `const { loadEnv } = await import('vite')`; `env = loadEnv('production', WEB_ROOT, 'PUBLIC_')`;
 - `origin = supabaseOrigin(env.PUBLIC_SUPABASE_URL)`;
 - lees `<build>/index.html`. Ontbreekt dat, dan `write-headers: build/index.html is missing` en exit 1;
@@ -581,6 +632,13 @@ export function importClosure(startFiles);
 /** text includes 'setWorkerUrl' and 'getWorkerCount' (same rule as verify-build). @param {string} text */
 export function isMapLibreChunk(text);
 
+/** Absolute paths of the .js files that index.html lists as <link rel="modulepreload" href="…">.
+ *  Tags: /<link\b[^>]*>/gi whose attributes contain rel="modulepreload" (quotes optional, case-insensitive).
+ *  href: drop '?…' and '#…', strip leading '/', './' and any number of '../', keep only paths that start
+ *  with '_app/immutable/' and end with '.js', resolve against buildDir. Unique, sorted.
+ *  @param {string} html @param {string} buildDir @returns {string[]} */
+export function modulepreloadFiles(html, buildDir);
+
 /** @param {string} buildDir @param {string} staticDir
  *  @returns {{ initial: { files: string[], gzip: number }, precache: { files: string[], gzip: number },
  *              maplibre: { file: string | null, gzip: number }, problems: string[] }} */
@@ -596,8 +654,11 @@ Regels voor `measure`:
   - geen entry-JS: `no entry chunks in _app/immutable/entry`;
   - geen `nodes/0`: `root layout chunk _app/immutable/nodes/0.*.js not found`;
   - geen bestand in de afsluiting met `SUPABASE_MARKER`: `initial JS does not contain supabase-js: import parsing is probably broken`;
-  - een bestand in de afsluiting waarvoor `isMapLibreChunk` geldt: `MapLibre is in the initial JS: <relpath>`.
-- **Initial:** `importClosure(startFiles)`, met `gzip` als som van `gzipSize` per bestand.
+  - een bestand in de afsluiting waarvoor `isMapLibreChunk` geldt: `MapLibre is in the initial JS: <relpath>`;
+  - `modulepreloadFiles(<build>/index.html)` is leeg: `index.html has no modulepreload links: cannot cross-check the import closure`;
+  - de modulepreload-lijst bevat bestanden die niet in `importClosure(startFiles)` zitten: `modulepreload files missing from the import closure (import parsing is probably broken): <relpaths, komma-gescheiden>`.
+  Bestanden die wel in de afsluiting zitten maar niet in de modulepreload-lijst, zijn geen probleem (ze tellen gewoon mee).
+- **Initial:** de vereniging van `importClosure(startFiles)` en `modulepreloadFiles(...)`, met `gzip` als som van `gzipSize` per bestand. Zo telt alles wat de browser vóór de eerste route laadt mee, ook als de import-regex iets mist (en dan faalt de check toch, via het probleem hierboven). Onder "alle `.js` in `entry/`" valt ook `entry/payload.*.js`; die telt terecht mee. In de WP-21-build somt `index.html` precies `entry/start`, `entry/payload`, `entry/app`, `nodes/0` en 12 chunks op (review N-3).
 - **Precache:** alle bestanden onder `<build>/_app/immutable/`, plus voor elk bestand in `staticDir` (recursief, relatief pad; `/`+pad niet in `PRECACHE_EXCLUDED`) het bestand in `<build>` als dat bestaat, plus `<build>/index.html`.
 - **MapLibre:** het eerste bestand onder `_app/immutable` (buiten `entry/`) waarvoor `isMapLibreChunk` geldt. Alleen ter informatie.
 
@@ -608,7 +669,7 @@ Regels voor `measure`:
 Waarden worden afgerond op één decimaal.
 
 `main()`:
-- args `--build <dir>` (standaard `web/build`) en `--static <dir>` (standaard `web/static`);
+- `WEB_ROOT` zoals in `write-headers.mjs`; args `--build <dir>` (standaard `<WEB_ROOT>/build`) en `--static <dir>` (standaard `<WEB_ROOT>/static`);
 - print drie regels: `initial JS: <x> kB gzip (<n> files, budget 150 kB)`, `precache: <x> kB gzip (<n> files, budget 900 kB)`, `maplibre chunk: <x> kB gzip` (of `maplibre chunk: not found`);
 - daarna elk probleem met prefix `check-bundle-size: `; exit 1 bij problemen, anders 0.
 
@@ -659,26 +720,31 @@ Kop "Privacy-inventaris Shakka", een regel "Bijgewerkt in WP-23; wijzig dit best
    | Geen persoonsgegevens | `spots`, `forecast_hours`, `marine_hours`, `tide_extremes`, `evaluations`, `api_usage`, `ingest_runs` | — | — | Forecast-, golf-, getij- en evaluatiedata 48 uur | `jobs/*` |
 
    Onder de tabel: "In de database staat nergens een IP-adres in een `public`-tabel. Er wordt geen locatie opgeslagen."
-2. **Browser (`localStorage`).**
+2. **Browser.**
 
-   | Sleutel | Inhoud | Bewaard tot |
-   |---|---|---|
-   | `sb-<project-ref>-auth-token` | supabase-js-sessie | Uitloggen of account verwijderen |
-   | `shakka:organizer_name` | voornaam van de organisator | Account verwijderen (`clearAccountLocalData`), of browsergegevens wissen |
-   | `shakka:return_to` | `{path, saved_at}` van een `/go`-link | Inloggen (altijd gewist), hoogstens 60 minuten geldig; account verwijderen |
-   | `shakka:rsvp:{slug}` | `{rsvp_id, edit_token}` | Afmelden, of het openen van de sessiepagina nadat de sessie weg is; anders tot browsergegevens wissen (A9) |
+   | Opslag | Sleutel | Inhoud | Bewaard tot |
+   |---|---|---|---|
+   | `localStorage` | `sb-<project-ref>-auth-token` | supabase-js-sessie | Uitloggen of account verwijderen |
+   | `localStorage` | `shakka:organizer_name` | voornaam van de organisator | Account verwijderen (`clearAccountLocalData`), of browsergegevens wissen |
+   | `localStorage` | `shakka:return_to` | `{path, saved_at}` van een `/go`-link | Gewist bij inloggen (`takeReturnTo`). Zonder inloggen: na 60 minuten niet meer gebruikt, en gewist bij de eerstvolgende app-start (`pruneReturnTo`). Ook gewist bij account verwijderen |
+   | `localStorage` | `shakka:rsvp:{slug}` | `{rsvp_id, edit_token}` | Afmelden, of het openen van de sessiepagina nadat de sessie weg is; anders tot browsergegevens wissen (A9) |
+   | `sessionStorage` (SvelteKit) | `sveltekit:history-info`, `sveltekit:snapshot` | scrollpositie per history-item; snapshots (leeg, Shakka gebruikt ze niet) | Tabblad sluiten |
+   | Cache API (service worker) | `shakka-shell-<versie>` | alleen app-bestanden | Volgende app-versie (`onActivate`) |
+   | HTTP-cache van de browser | — | o.a. kaarttegels, fonts en sprites van MapTiler, volgens hun `Cache-Control` | Beheerd door de browser; geen opslag door de app |
 
-   Plus: de cache van de service worker (`shakka-shell-<versie>`) bevat alleen app-bestanden. Er zijn geen cookies van Shakka.
+   Onder de tabel: "MapLibre GL JS <versie uit `package-lock.json`> heeft geen eigen tegelcache in de Cache API (gecontroleerd in WP-23: geen `caches.open` in `maplibre-gl/dist`). Er zijn geen cookies van Shakka."
 3. **Logs en derden.**
    - Supabase: API-logs 1 dag, auth-auditlogs 1 uur (gratis plan), regio EU (A13).
    - Cloudflare Pages: hosting; Web Analytics uit.
-   - GitHub Actions: verwerkt alertregels, profielen en push-abonnementen; logs zonder persoonsgegevens (tests in WP-10, WP-11 en WP-17); de repo is publiek, dus de logs ook.
+   - GitHub Actions: de uurlijkse job leest profielen, favorieten, alertregels, push-abonnementen en `alert_state` (de laatst gemelde windows). Hij schrijft `alert_state`, en werkt `push_subscriptions` bij (`last_success_at`; verwijderen bij 404/410). De logs bevatten geen persoonsgegevens (tests in WP-10, WP-11 en WP-17). De repo is publiek, dus de logs ook.
    - Pushdiensten (Apple, Google, Mozilla, Microsoft): endpoint plus versleutelde payload.
    - MapTiler: alleen na een klik op "Kaart"; IP, origin, user agent; Referer alleen de origin (`Referrer-Policy`).
    - Maildienst: Supabase (tot WP-22).
    - Open-Meteo en Rijkswaterstaat: alleen de server, zonder gebruikersgegevens.
 4. **Afdwinging.** Een korte lijst met waar het getest wordt: `09_delete_my_account.test.sql`, `retention-consistency.test.ts`, `headers.test.ts` en `verify-build` (CSP), `no-third-party.test.ts` en `verify-build` (trackers), en `check-no-client-openmeteo.sh`.
-5. **Checklist bij wijzigingen.** Een nieuwe tabel of kolom met persoonsgegevens, een nieuwe `localStorage`-sleutel of een nieuwe externe origin → werk dit bestand, `/privacy` en zo nodig `_headers` bij.
+5. **Checklist bij wijzigingen.** Een nieuwe tabel of kolom met persoonsgegevens, een nieuwe `localStorage`-sleutel, een nieuwe externe origin, of een nieuwe kolom die de uurlijkse job leest → werk dit bestand, `/privacy` en zo nodig `_headers` bij.
+
+De regel die met `- GitHub Actions:` begint en de rij van `shakka:return_to` worden door `privacy-page.test.ts` getoetst (zie Testplan AC-5). Pas die test mee aan als de formulering verandert.
 
 ### `docs/RUNBOOK.md` (nieuwe sectie)
 Nummer: het eerstvolgende vrije nummer bij de merge (nu §17; neemt WP-22 §17, dan wordt dit §18). Titel: "Privacy, CSP en performance (vanaf WP-23)". Punten:
@@ -712,7 +778,7 @@ Nummer: het eerstvolgende vrije nummer bij de merge (nu §17; neemt WP-22 §17, 
 | E10 | `index.html` heeft geen inline script (kit verandert) | `inlineScriptHashes` geeft `[]`; `script-src 'self'`. De checks blijven werken. |
 | E11 | `PUBLIC_SUPABASE_URL` ontbreekt of is ongeldig bij de build | `write-headers` faalt met exit 1, zonder de waarde te tonen; de build faalt (zoals `env-schema`). |
 | E12 | Iemand draait alleen `vite build` | `build/_headers` is dan het sjabloon met placeholders. `verify:build` faalt ("unresolved placeholder"). Pages draait `npm run build`, dus het script loopt daar altijd mee. |
-| E13 | Service worker precache met `_headers` in `static/` | `precacheList` laat `/_headers` en `/_redirects` weg (A6). |
+| E13 | Service worker precache met `_headers` in `static/` | Zonder filter zou de SPA-fallback (`index.html`, 200) onder `/_headers` in de cache komen. `precacheList` laat `/_headers` en `/_redirects` weg (A6). |
 | E14 | Offline: de shell uit de cache | Bevat de CSP-header van het moment van cachen, die bij dezelfde `index.html` (en hash) hoort. |
 | E15 | Nieuwe deploy: andere inline-scripthash | De netwerkrespons van een navigatie brengt nieuwe HTML en een nieuwe header tegelijk mee. |
 | E16 | Lokale dev (`vite dev`, `vite preview`) | Geen `_headers`, dus geen CSP. Bewust: CSP-gedrag wordt op een Pages-preview getoetst (RUNBOOK). |
@@ -720,6 +786,10 @@ Nummer: het eerstvolgende vrije nummer bij de merge (nu §17; neemt WP-22 §17, 
 | E18 | Een nieuwe kleur in CSS of een component | `contrast.test.ts` faalt tot de kleur in een paar of in `DECORATIVE` staat. |
 | E19 | `PRIVACY_CONTACT_EMAIL` gezet | `mailto:`-link; anders de algemene zin. |
 | E20 | De bewaartermijn in de ingest wordt bijvoorbeeld 72 uur | `retention-consistency.test.ts` faalt tot `#lib/privacy.ts` (en dus de tekst) meegaat. |
+| E21 | Bezoeker tikt "Ik ga", logt nooit in, en opent Shakka twee uur later opnieuw | `pruneReturnTo` wist de sleutel bij die start (A21); er volgt geen navigatie. |
+| E22 | Bezoeker tikt "Ik ga" en opent binnen 60 minuten de magic link | `pruneReturnTo` laat de verse sleutel staan; `takeReturnTo` stuurt na inloggen terug naar de `/go`-link (gedrag van WP-20 ongewijzigd). |
+| E23 | `shakka:return_to` met kapotte JSON, een `saved_at` in de toekomst of een niet-toegestaan pad | `pruneReturnTo` wist hem bij de start: `takeReturnTo` zou hem nooit gebruiken. |
+| E24 | Modulepreload-lijst in `index.html` ontbreekt of bevat iets buiten de import-afsluiting | `check-bundle-size` meldt een probleem (exit 1); de meting telt de vereniging. |
 
 ## Testplan
 Tests eerst voor de pure logica: `account.ts`, `write-headers.mjs`, `check-bundle-size.mjs`, `contrast.ts` en `precacheList`. Alle webtests draaien in `npm test`; de DB-tests in `supabase test db`.
@@ -790,7 +860,8 @@ Aanvullend:
 - `nodes/0.c.js`: `import{s}from"../chunks/supa.js";`
 - `nodes/1.d.js`: `import"../chunks/route.js";`
 - de chunks `x`, `y`, `z`, `supa` (met `"X-Client-Info"`), `lazy`, `route` en `maplibre.e.js` (met `setWorkerUrl` en `getWorkerCount`);
-- `index.html`, en een `static/` met `favicon.svg` en `_headers`, plus de kopieën in de build.
+- `index.html` met zeven modulepreload-links: `<link rel="modulepreload" href="/_app/immutable/entry/start.a.js">` en op dezelfde manier `entry/app.b.js`, `nodes/0.c.js`, `chunks/y.js`, `chunks/z.js` en `chunks/supa.js`, plus voor `x` de vorm `<link href="./_app/immutable/chunks/x.js?v=1" rel=modulepreload>` (andere attribuutvolgorde, geen quotes, `./` en query). Daarnaast één `<link rel="stylesheet" href="/_app/immutable/assets/a.css">` (geen modulepreload, telt niet);
+- een `static/` met `favicon.svg` en `_headers`, plus de kopieën in de build.
 
 Toetsen:
 1. `staticImports` vindt in de bovenstaande strings precies de statische specifiers, ook met spaties (`import { a } from './x.js'`) en `import * as m from"./m.js"`; nooit `import(`; niet `foo.import"x"`.
@@ -799,7 +870,9 @@ Toetsen:
 4. `maplibre.file` eindigt op `maplibre.e.js`.
 5. `checkBudgets(m, { initialJsGzip: 1, precacheGzip: 1 })` geeft twee meldingen; met `BUDGETS` geeft het `[]`.
 6. Zonder `nodes/0`: probleem `root layout chunk …`. Zonder `X-Client-Info`: probleem `… supabase-js …`. Met `import"../chunks/maplibre.e.js"` in `start`: probleem `MapLibre is in the initial JS`.
-7. CLI: `spawnSync(process.execPath, ['scripts/check-bundle-size.mjs', '--build', dir, '--static', staticDir], { cwd: webRoot })` geeft exit 0. Met `crypto.randomBytes(160_000).toString('base64')` als inhoud van `chunks/x.js` (±213 kB gzip): exit 1, en stderr of stdout bevat `initial JS is`.
+7. CLI: `spawnSync(process.execPath, ['scripts/check-bundle-size.mjs', '--build', dir, '--static', staticDir], { cwd: webRoot })` geeft exit 0. Met `crypto.randomBytes(300_000).toString('base64')` als inhoud van `chunks/x.js`: exit 1, en stderr of stdout bevat `initial JS is`. Base64 van willekeurige bytes comprimeert tot ongeveer 6/8 van zijn lengte: 400.000 tekens worden ±300.000 bytes gzip, ±293 kB. Dat ligt ruim boven 150 kB.
+7a. `modulepreloadFiles`: op de fixture-`index.html` geeft het precies de zeven bestanden van toets 2 (absoluut, gesorteerd); `?v=1` en `./` zijn genormaliseerd; de stylesheet-link telt niet.
+7b. Zonder modulepreload-links in `index.html`: probleem `index.html has no modulepreload links …`. Met een extra `<link rel="modulepreload" href="/_app/immutable/chunks/route.js">`: probleem `modulepreload files missing from the import closure …` met `route.js` erin, en `initial.files` bevat `route.js` (vereniging).
 8. `PRECACHE_EXCLUDED` is gelijk aan `PRECACHE_EXCLUDED_PATHS` uit `src/lib/sw/shell.ts`.
 9. `.github/workflows/ci.yml`: de regels (getrimd) bevatten `- run: node scripts/check-bundle-size.mjs`, ná `- run: npm run build`.
 
@@ -828,17 +901,35 @@ Plus: de CI-job `web` draait het script op de echte build (AC-3, "draait in CI")
   2. `document.title` is "Privacy · Shakka";
   3. de tekst bevat (case-insensitive): `e-mailadres`, `voornaam`, `profiel`, `push-abonnementen`, `Supabase`, `Cloudflare`, `GitHub`, `MapTiler`, `Apple`, `Google`;
   4. de tekst bevat `${FORECAST_RETENTION_HOURS} uur`, `${ALERT_STATE_RETENTION_HOURS} uur` en `${SESSION_RETENTION_DAYS} dagen`;
+  4a. `shakka:return_to` (B-1a): de tekst bevat `gewist zodra je inlogt` en `na ${RETURN_TO_TTL_MINUTES} minuten niet meer, en wist het de eerstvolgende keer dat je Shakka opent` (witruimte genormaliseerd naar één spatie), en matcht niet op `/hoogstens\s*\d+\s*minuten/i`;
+  4b. GitHub (B-1b): het `listitem` dat "GitHub" bevat, bevat `profiel, favorieten, alertinstellingen, push-abonnementen en welke alerts je al kreeg`;
+  4c. grondslag (N-7): `heading` level 2 "Waarom Shakka dit mag" bestaat, en de tekst bevat `dienst te leveren die je zelf aanvraagt` en `vraagt daarom niet om toestemming voor cookies`;
+  4d. browseropslag (N-8): de tekst bevat `kaarttegels` en `scrollpositie`;
+  4e. `docs/PRIVACY.md` (gelezen met `readFileSync(new URL('../../docs/PRIVACY.md', import.meta.url))`):
+     - de regel die met `- GitHub Actions:` begint (na trimmen), bevat `profielen`, `favorieten`, `alertregels`, `push-abonnementen` en `` `alert_state` ``;
+     - de tabelrij die `` `shakka:return_to` `` bevat, bevat `pruneReturnTo` en `takeReturnTo`, en niet `hoogstens`;
+     - het bestand bevat `sessionStorage` en `sveltekit:history-info`;
   5. de tekst bevat geen `/telegram/i`;
   6. er is een link naar `/profiel`;
   7. de link naar de Autoriteit Persoonsgegevens heeft `rel` met `noopener`;
   8. met `PRIVACY_CONTACT_EMAIL` `null` staat er geen `mailto:`-link. Bij gezette waarde: zie E19. Die test mockt `#lib/privacy.js` met `vi.doMock` en een dynamische import.
-- `retention-consistency.test.ts` (node). Leest de bronnen van `../../ingest/src/shakka/jobs/` en haalt met `new RegExp(name + String.raw`: Final = timedelta\((hours|days)=(\d+)\)`)` de waarden op:
+- `retention-consistency.test.ts` (node). Leest de bronnen van `../../ingest/src/shakka/jobs/` en haalt met `new RegExp(String.raw`(?:^|\n)` + name + String.raw`: Final = timedelta\((hours|days)=(\d+)\)`)` de waarden op (het anker voorkomt dat `RETENTION` in `TIDE_RETENTION` matcht):
   - `forecast.py` `RETENTION`, `marine.py` `RETENTION`, `tides.py` `TIDE_RETENTION` en `evaluate.py` `EVALUATION_RETENTION` = `hours`, `FORECAST_RETENTION_HOURS`;
   - `alerts.py` `ALERT_STATE_RETENTION` = `hours`, `ALERT_STATE_RETENTION_HOURS`;
   - `sessions.py` `SESSION_RETENTION` = `days`, `SESSION_RETENTION_DAYS`;
   - de sessie-migratie bevat `interval '${SESSION_RETENTION_DAYS} days'`;
   - `RETURN_TO_TTL_MINUTES` is 60.
-- `layout.test.ts`: de footer heeft een link "Privacy" met `href="/privacy"`.
+- `layout.test.ts`:
+  - de footer heeft een link "Privacy" met `href="/privacy"`;
+  - (A21) uitgelogd (dezelfde opzet als de bestaande test "does nothing while signed out and keeps the key"), met `shakka:return_to` van 61 minuten oud: na `render` is de sleutel weg (`vi.waitFor`) en is `goto` niet aangeroepen;
+  - de bestaande test "does nothing while signed out and keeps the key" (verse sleutel) blijft ongewijzigd groen.
+- `local-prefs.test.ts` (A21), met de bestaande fake storage en `NOW`:
+  1. verse sleutel (`saved_at = NOW`, en ook `NOW - RETURN_TO_TTL_MS`): `pruneReturnTo` geeft `false` en de sleutel staat er nog;
+  2. `saved_at = NOW - RETURN_TO_TTL_MS - 1`: `true`, sleutel weg;
+  3. `saved_at = NOW + 1000` (toekomst), kapotte JSON, `{path: '/elders', saved_at: NOW}` en `{path: 1, saved_at: NOW}`: elk `true`, sleutel weg;
+  4. geen sleutel: `false`, en `removeItem` is niet aangeroepen;
+  5. `undefined` storage, en een storage waarvan `getItem` of `removeItem` gooit: `false`, geen throw;
+  6. de bestaande tests van `takeReturnTo` blijven ongewijzigd groen.
 - `over.test.ts`: er is een link naar `/privacy`.
 - `attribution.test.ts`: de volledige stand bevat "golfmodellen van DWD en ECMWF"; de bestaande tests blijven groen.
 
@@ -885,6 +976,8 @@ Procedure in de RUNBOOK-sectie, punt 5. De verifier noteert de scores die Lars a
 | Lighthouse 12 | PWA-categorie verwijderd; installeerbaarheid via DevTools → Application → Manifest | 15 oktober 2026 | https://github.com/GoogleChrome/lighthouse/releases/tag/v12.0.0, https://developer.chrome.com/blog/update-install-criteria |
 | MapLibre en MapTiler (CSP) | `connect-src` en `img-src` `https://api.maptiler.com`, `img-src data: blob:`, `worker-src 'self'` | Overgenomen uit WP-15 (gecontroleerd daar) | WP-15 blueprint, "Gevolgen voor latere WP's" |
 | Autoriteit Persoonsgegevens | Link in `/privacy` | — | https://autoriteitpersoonsgegevens.nl/ |
+| SvelteKit 3: `sessionStorage` | Sleutels `sveltekit:snapshot`, `sveltekit:navigation-snapshot` (constante), `sveltekit:history-info`; `client.js` schrijft `history-info` en `snapshot` (A24) | 15 oktober 2026, in `node_modules` van de WP-21-worktree | `@sveltejs/kit/src/runtime/client/constants.js`, `client.js` |
+| MapLibre GL JS 6.14.0: tegelcache | Geen `caches.open` en geen `maplibre-tiles` in `dist/`; alleen de in-memory `TileCache` (A24) | 15 oktober 2026, in `node_modules` van de WP-21-worktree | `maplibre-gl/dist/maplibre-gl-dev.mjs`, `maplibre-gl-worker-dev.mjs` |
 
 Geen nieuwe runtime-dependency, geen nieuwe dienst, geen kosten.
 
@@ -936,7 +1029,8 @@ Geen nieuwe runtime-dependency, geen nieuwe dienst, geen kosten.
 - **Elke latere WP met een nieuwe externe origin, een nieuwe tabel of kolom met persoonsgegevens, of een nieuwe `localStorage`-sleutel:** werkt `_headers`, `checkHeaders`, `/privacy` en `docs/PRIVACY.md` bij.
 
 ## Nodig van Lars
-- Akkoord op de privacytekst (A15) en een keuze voor `PRIVACY_CONTACT_EMAIL` (A14).
+- Akkoord op de privacytekst (A15), met nadruk op de sectie "Waarom Shakka dit mag" (A23): dat is een feitelijke tekst, geen juridisch advies. Daarnaast een keuze voor `PRIVACY_CONTACT_EMAIL` (A14).
+- Bewust akkoord dat deelnemers aan sessies van een verwijderd account daarna "Sessie niet gevonden" zien, zonder melding (E7, review N-11). Een alternatief, zoals anonimiseren, is een AC-wijziging.
 - Bevestigen dat het Supabase-project in een EU-regio staat.
 - "Write audit logs to the database" uitzetten (Authentication → Audit Logs).
 - Bevestigen dat Cloudflare Web Analytics uit staat.
@@ -952,16 +1046,23 @@ Werk op branch `wp/WP-23` in `/Users/larst/Dev/Shakka/.claude/worktrees/WP-23`. 
    - de volledige suite is groen.
 
    Zo niet: stop en meld het. Geen commit.
-1. **Database.** Migratie (exact), `09_delete_my_account.test.sql` (23 asserties), en de twee regels in `07_sessions.test.sql`. `supabase db reset && supabase test db` is groen.
+1. **Database.** Migratie (exact), `09_delete_my_account.test.sql` (23 asserties), en de twee regels in `07_sessions.test.sql`. `supabase db reset && supabase test db` is groen, en `cd ingest && uv run pytest` (volledige suite: `test_migrations.py` en `alert_fixtures.py` lezen alle migraties) is groen.
 2. **`account.ts` (tests eerst).**
    - Controleer A11: `grep -n "ignore 404s" node_modules/@supabase/auth-js/dist/module/GoTrueClient.js` (of het pad onder `dist/main`). Geen treffer: `deviations.md`, en stop (R7).
    - Schrijf `account.test.ts`, daarna `account.ts`, en zet `RPC_FILES` in `user-tables.test.ts`.
 3. **Account verwijderen in de UI.** `delete-account.test.ts`, `DeleteAccount.svelte`, de wijziging aan `profiel/+page.svelte`, de uitbreiding van `profile-page.test.ts`, en `.danger` en `.delete-account` in `app.css`.
 4. **Privacy.**
-   - `privacy.ts` (datum invullen), `retention-consistency.test.ts`, `/privacy`, en `privacy-page.test.ts`;
+   - Eerst A21, tests eerst: de nieuwe tests in `local-prefs.test.ts`, dan `freshReturnPath` en `pruneReturnTo` in `local-prefs.ts`; daarna de layouttest en de aanroep in `onMount` van `+layout.svelte`. Alle bestaande tests van `takeReturnTo` en van de terugkeer na inloggen blijven groen;
+   - `privacy.ts` (datum invullen), `retention-consistency.test.ts`, `/privacy`, en `privacy-page.test.ts` zonder toets 4e (die volgt in stap 5);
    - de footerlink, en de links op `/over`, `/login` en in `RsvpPanel`;
    - de tekst in `Attribution` (A18) en de bijbehorende tests.
 5. **`docs/PRIVACY.md`** volgens de inhoud hierboven.
+   - Controleer A24 eerst op de geïnstalleerde versies:
+     - `grep -c "caches.open" node_modules/maplibre-gl/dist/*.mjs` geeft overal 0, en `grep -rl "maplibre-tiles" node_modules/maplibre-gl/dist` vindt niets;
+     - `grep -n "KEY = 'sveltekit:" node_modules/@sveltejs/kit/src/runtime/client/constants.js` toont `sveltekit:snapshot` en `sveltekit:history-info`.
+   - Vindt de eerste grep wel iets, dan voeg je in de browsertabel een rij "Cache API (MapLibre) | `maplibre-tiles` | kaarttegels | beheerd door MapLibre" toe, en vervang je de zin onder de tabel door "MapLibre bewaart kaarttegels ook in de Cache API (`maplibre-tiles`)." De tekst op `/privacy` ("kaarttegels") dekt beide gevallen. Wijken de sleutels van SvelteKit af, dan neem je de echte namen over. Geen van beide is een ontwerpwijziging.
+   - Vul de MapLibre-versie in uit `package-lock.json`;
+   - voeg daarna toets 4e toe aan `privacy-page.test.ts`.
 6. **Toegankelijkheid.**
    - `npm install -D axe-core@^4.14.0`;
    - helpers `axe.ts` en `contrast.ts`;
@@ -976,11 +1077,32 @@ Werk op branch `wp/WP-23` in `/Users/larst/Dev/Shakka/.claude/worktrees/WP-23`. 
 9. **Bundelbudget.**
    - Tests eerst: `bundle-size.test.ts`;
    - daarna `check-bundle-size.mjs`, het `size`-script, en de CI-stap;
-   - draai het op de echte build en noteer de drie getallen. Boven budget: `deviations.md`, en stop (A4).
+   - draai het op de echte build en noteer de drie getallen. Boven budget: `deviations.md`, en stop (A4). Meldt de echte build een modulepreload-probleem (geen links, of bestanden buiten de afsluiting), dan is dat een fout in `staticImports` of `modulepreloadFiles`: herstel de parser. Komt het door het outputformaat van kit, noteer het dan in `deviations.md` en stop.
 10. **Opruimen `browserStorage`** (A19). `rsvp-storage.ts` (eigen `browserStorage` weg, `| null` wordt `| undefined`), de imports in `RsvpPanel.svelte` en `s/[slug]/+page.svelte`, en `rsvp-storage.test.ts`. Verder geen gedragswijziging; alle RSVP-tests blijven groen.
 11. **RUNBOOK.** Nieuwe sectie met de gemeten getallen uit stap 9.
 12. **Eindcontrole.**
     - Vanuit `web/`: `npm run check && npm test && npm run build && npm run verify:build && node scripts/check-bundle-size.mjs`;
     - vanuit de repo-root: `bash scripts/check-no-client-openmeteo.sh`;
     - `supabase test db`;
-    - `cd ingest && uv run pytest tests/test_repo_hygiene.py` (CI-contract; geen wijziging in `ingest/`).
+    - `cd ingest && uv run pytest` (de volledige suite, zoals CI: `test_migrations.py` en `alert_fixtures.py` lezen alle migraties, dus ook de nieuwe; geen wijziging in `ingest/`);
+    - `cd ingest && uv run ruff check . && uv run ruff format --check .`.
+
+## Verwerking review
+Ronde 1 (`review.md`, CHANGES_REQUIRED).
+
+| Punt | Wat ik deed |
+|---|---|
+| **B-1a** `shakka:return_to` | Code en tekst aangepast. Nieuw is `pruneReturnTo` in `local-prefs.ts`. De layout roept die bij elke app-start aan (`onMount`) en wist dan een sleutel die `takeReturnTo` niet meer zou accepteren (A21, Interfaces `local-prefs.ts`, E21-E23). De tekst op `/privacy` zegt nu: gewist zodra je inlogt; zonder inloggen na 60 minuten niet meer gebruikt en gewist bij de eerstvolgende keer dat je Shakka opent. Het woord "hoogstens" is weg. De rij in `docs/PRIVACY.md` zegt hetzelfde. Tests: `local-prefs.test.ts` (6 gevallen), `layout.test.ts` (verlopen sleutel uitgelogd gewist), `privacy-page.test.ts` 4a (eist de nieuwe formulering, weert `/hoogstens\s*\d+\s*minuten/i`) en 4e (PRIVACY.md-rij). Stappenplan stap 4. |
+| **B-1b** GitHub | Tekst op `/privacy`: "profiel, favorieten, alertinstellingen, push-abonnementen en welke alerts je al kreeg". In `docs/PRIVACY.md` sectie 3: profielen, favorieten, alertregels, push-abonnementen en `alert_state`, plus wat de job schrijft (A22, gecontroleerd in `jobs/alerts.py` en `jobs/push.py`). Getoetst in `privacy-page.test.ts` 4b en 4e. |
+| N-1 | A6 en E13 gecorrigeerd: `/_headers` geeft op Pages de SPA-fallback (`index.html`, 200) en geen 404. Weglaten blijft nodig, omdat het geen echt bestand is en anders `index.html` onder `/_headers` in de cache komt. Het commentaar bij `PRECACHE_EXCLUDED_PATHS` zegt nu hetzelfde. Er is geen bestaande bug, dus geen extra prioriteit. |
+| N-2 | Placeholders uit het commentaar van `static/_headers` gehaald. `renderHeaders` gebruikt voorgeschreven `replaceAll` en gooit bij elke resterende `{{`, ook in commentaar. |
+| N-3 | Overgenomen als kruiscontrole: `modulepreloadFiles(html, buildDir)`. De initiële JS is de vereniging van afsluiting en modulepreload-lijst. Een probleem volgt bij geen links, of bij modulepreload-bestanden buiten de afsluiting. `entry/payload` staat nu expliciet in A4 en de meetregels. Tests 7a en 7b, fixture uitgebreid. |
+| N-4 | Toets 7: `randomBytes(300_000)` (±293 kB gzip), met de rekensom (base64 van willekeur ≈ 6/8). |
+| N-5 | Overgenomen (kleine verduidelijking): standaardpaden zijn `<WEB_ROOT>/static/_headers`, `<WEB_ROOT>/build` en `<WEB_ROOT>/static`, met `WEB_ROOT` zoals in `verify-build.mjs`. |
+| N-6 | Stap 1 en stap 12 draaien de volledige `cd ingest && uv run pytest`. Stap 12 draait ook ruff. |
+| N-7 | Sectie "Waarom Shakka dit mag" toegevoegd (A23): uitvoering van de dienst die je zelf aanvraagt, meldingen pas na je eigen keuze, logs voor een veilige dienst, geen tracking en dus geen toestemmingsvraag voor cookies. Feitelijk geformuleerd, geen juridisch advies. Gemarkeerd als tekst die Lars goedkeurt ("Nodig van Lars"). Getoetst in 4c. |
+| N-8 | Gecontroleerd in `node_modules`: SvelteKit 3 gebruikt `sessionStorage` (`sveltekit:history-info`, `sveltekit:snapshot`). MapLibre 6.14.0 heeft geen Cache-API-tegelcache meer; tegels van MapTiler komen hooguit in de gewone HTTP-cache. Dit staat in de inventaris van `docs/PRIVACY.md` (nieuwe browsertabel) en in één alinea op `/privacy` ("scrollpositie", "kaarttegels"). De builder controleert het opnieuw in stap 5, met een vaste uitwijkregel. Getoetst in 4d en 4e (A24). |
+| N-9 | Overgenomen (één regex): anker `(?:^|\n)` vóór de constantenaam in `retention-consistency.test.ts`. |
+| N-10 | Overgenomen: de rij `RsvpPanel.svelte` noemt nu ook de import van `browserStorage` (stap 10). |
+| N-11 | Geen ontwerpwijziging (volgt uit AC-1, staat in E7 en de bevestigingstekst). Toegevoegd aan "Nodig van Lars" als punt om bewust te accepteren. |
+| N-12 | Geen wijziging: de stopregel in stap 9 blijft het vangnet. |
