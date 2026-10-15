@@ -1,6 +1,6 @@
 # Blueprint WP-16: Profiel, favorieten en alertinstellingen
 Status: DRAFT
-Revisie: 1
+Revisie: 2
 
 ## Doel
 Ingelogde gebruikers beheren in de PWA:
@@ -10,7 +10,7 @@ Ingelogde gebruikers beheren in de PWA:
 
 Daarnaast:
 - `#lib/rules.ts` met `effectiveRule()`, een exacte spiegel van Python `resolve_rule` (WP-07);
-- `data/contracts/rule_resolution_cases.json` met 18 gevallen, getoetst door een Python-test en een vitest-test;
+- `data/contracts/rule_resolution_cases.json` met 20 gevallen, getoetst door een Python-test en een vitest-test;
 - formuliervalidatie gelijk aan de DB-constraints, met drifttests tegen de migraties.
 
 De UI schrijft alleen naar `profiles` (uitsluitend `weight_kg`, `level`, `quiver_m2`, `default_min_kn` en `default_max_kn`), `favorites` en `alert_rules`. Uitgelogde gebruikers zien een loginprompt en er gaan dan geen queries naar die drie tabellen.
@@ -25,7 +25,7 @@ Voorstellen waar Lars op kan reageren staan als **Voorstel**.
 
   Verandert de user-id (in- of uitloggen in een ander tabblad), dan laadt de pagina opnieuw. Een token-refresh (nieuw sessie-object, zelfde user-id) laadt niet opnieuw. Dit volgt "Gevolgen voor latere WP's" van WP-13 en WP-14 (`undefined` = nog niet queryen).
 - **A2. Favorietenstore.** `#lib/favorites.ts` houdt de favoriete spot-id's van de ingelogde gebruiker bij in één Svelte-store. De store laadt opnieuw bij de eerste abonnee (dus bij elke paginanavigatie met sterren) en bij een andere user-id; dat is één kleine query. Wijzigen gaat optimistisch: de ster springt direct om en springt terug bij een fout.
-- **A3. Signature van `effectiveRule` iets ruimer dan het contract.** Het contract noemt `effectiveRule(spot: Spot, profile: Profile | null, override: AlertRuleRow | null, defaults: AlertDefaults)`. De parameters worden `Pick`-types van precies die types (`Pick<Spot, 'default_min_kn'>`, `Pick<Profile, 'default_min_kn' | 'default_max_kn'> | null`, `Pick<AlertRuleRow, RuleField> | null`). Elke aanroep met `Spot`, `Profile` en `AlertRuleRow` compileert dus ongewijzigd. Het formulier kan zo een nog niet opgeslagen regel (zonder `user_id` en `updated_at`) controleren.
+- **A3. Signature van `effectiveRule` iets ruimer dan het contract.** Het contract noemt `effectiveRule(spot: Spot, profile: Profile | null, override: AlertRuleRow | null, defaults: AlertDefaults)`. De parameters worden `Pick`-types van precies die types (`Pick<Spot, 'default_min_kn'>`, `Pick<Profile, 'default_min_kn' | 'default_max_kn'> | null`, `Pick<AlertRuleRow, RuleField> | null`). Elke aanroep met `Spot`, `Profile` en `AlertRuleRow` compileert dus ongewijzigd. Het formulier kan zo een nog niet opgeslagen regel (zonder `user_id` en `updated_at`) controleren. Net als Python (`AlertRuleOverride.enabled: bool | None`, `resolve_rule` valt bij `None` terug op `True`) accepteert `effectiveRule` tijdens runtime `enabled: null` en behandelt het als "geen waarde" (bron `system`). Het parametertype houdt `enabled: boolean` (de DB-kolom is `not null default true`); de gedeelde gevallen gaan via een cast.
 - **A4. Het gevallenbestand is handgeschreven en een JSON-lijst**, zoals het contract zegt (`{spot, profile, override, expected}`), met per geval één extra sleutel `name` (voor test-id's). Het wordt niet gegenereerd door `shakka contracts export` en staat dus niet in `CONTRACT_FILES`; `check_contracts` negeert andere bestanden in `data/contracts/` (bestaand gedrag, `test_export_and_check_tmp`). `expected` is een volledige effectieve regel inclusief `sources` (bron per veld), of `{"error": "conflict"}` of `{"error": "invalid"}`. De Python-test leidt de verwachte bronnen af uit `FIELD_SOURCES` van WP-07. Er komt **geen wijziging aan de Python-domeincode**; WP-07 liet een bronfunctie bewust open ("kan WP-16 additief toevoegen als het nodig is") en die is hiermee niet nodig.
 - **A5. Een selectie gelijk aan de default wordt `null`.** Zijn bij richtingen alle drie de rijdbare klassen aangevinkt, of bij dagen alle zeven, dan schrijft het formulier `null` ("standaard"). Zo volgt de regel latere wijzigingen van de default. Een rij die via de CLI expliciet alle drie bevat, wordt bij opslaan `null`; dat betekent hetzelfde.
 - **A6. Een favoriet zonder regel = standaardinstellingen, alert aan.** Zo werkt WP-10 al (`rule_row = None` → defaults, `enabled = True`). Een rij in `alert_rules` ontstaat pas bij "Opslaan". "Standaardinstellingen" verwijdert de rij (delete); dat is gelijk aan een rij met alleen `null`-waarden en `enabled = true`.
@@ -40,6 +40,7 @@ Voorstellen waar Lars op kan reageren staan als **Voorstel**.
 - **A15. Niet-geverifieerde spots.** Hun alertinstellingen zijn te bewerken, maar de kaart toont "Deze spot is nog niet geverifieerd. Je krijgt er pas alerts voor als het spotprofiel is gecontroleerd." (WP-10 verstuurt alleen voor `verified: true`.)
 - **A16. Navigatie.** De header krijgt voor ingelogde gebruikers de links "Alerts" (`/alerts`) en "Profiel" (`/profiel`).
 - **A17. Geen migraties, geen nieuwe packages, geen wijziging aan `ingest/src`.** De rechten bestaan al (WP-01): `profiles` heeft select en een kolomgrant voor update op de vijf kolommen, zonder insert (het profiel maakt de trigger `handle_new_user`). `favorites` en `alert_rules` hebben volledige CRUD op de eigen rijen.
+- **A18. Eén tijdnotatie aan beide kanten.** `normalizeLocalTime` (TS) en `_fmt` in de Python-test geven dezelfde string: `'HH:MM'` als seconden en fractie 0 zijn, anders `'HH:MM:SS'` als de fractie 0 is, anders `'HH:MM:SS.ffffff'` (fractie rechts aangevuld tot 6 cijfers, zoals Python `time.isoformat()`). Invoer volgt de vormen die Postgres voor `time` teruggeeft (`HH:MM:SS` met hoogstens 6 fractiecijfers) plus `HH:MM`. Pydantic accepteert ruimer (bijv. meer dan 6 fractiecijfers, tijdzones die daarna als ongeldig worden geweigerd); die vormen komen uit PostgREST niet voor en vallen buiten de pariteit. Geval 20 in het gevallenbestand legt de pariteit voor seconden en fracties vast.
 
 ## Ontwerp
 
@@ -89,7 +90,7 @@ puur, zonder I/O: #lib/rules.ts, #lib/forms.ts, #lib/labels.ts, #lib/contracts.t
 | `web/test/helpers/fake-favorites.ts` | aanmaken | Nep-`#lib/favorites.js` voor paginatests. |
 | `web/test/fixtures/user-data.ts` | aanmaken | Profiel- en regelfixtures. |
 | `web/test/*.test.ts` | aanmaken/wijzigen | Zie Testplan. |
-| `data/contracts/rule_resolution_cases.json` | aanmaken | 18 gevallen (zie Interfaces). |
+| `data/contracts/rule_resolution_cases.json` | aanmaken | 20 gevallen (zie Interfaces). |
 | `ingest/tests/test_rule_resolution_cases.py` | aanmaken | Python-kant van AC-2. |
 | `docs/RUNBOOK.md` | wijzigen | §11 punt 8 (profiel, favorieten en alerts in de app), §12 één zin. |
 
@@ -157,29 +158,32 @@ export const ALERT_RULE_COLUMNS = [
 ] as const;
 export type AlertRuleValues = Pick<AlertRuleRow, RuleField>;
 
-/** One item of data/contracts/alert_defaults.json (WP-07). */
-export interface AlertDefaultItem<T> {
+/** One item of data/contracts/alert_defaults.json (WP-07). A = element type of `allowed`. */
+export interface AlertDefaultItem<T, A extends string | number = string | number> {
 	field: RuleField;
 	label_nl: string;
 	default: T;
 	sources: RuleSource[];
 	min: number | null;
 	max: number | null;
-	allowed: (string | number)[] | null;
+	allowed: A[] | null;
 	min_span_kn: number | null;
 }
+/** An item whose `allowed` list is guaranteed by parseAlertDefaults. */
+export type AlertDefaultChoiceItem<T, A extends string | number> = AlertDefaultItem<T, A> & { allowed: A[] };
 export interface AlertDefaults {
 	enabled: AlertDefaultItem<boolean>;
 	min_kn: AlertDefaultItem<number>;
 	max_kn: AlertDefaultItem<number>;
-	dir_classes: AlertDefaultItem<DirClass[]>;
-	weekdays: AlertDefaultItem<number[]>;
+	dir_classes: AlertDefaultChoiceItem<DirClass[], DirClass>;
+	weekdays: AlertDefaultChoiceItem<number[], number>;
 	earliest_local: AlertDefaultItem<null>;
 	latest_local: AlertDefaultItem<null>;
 	min_go_hours: AlertDefaultItem<number>;
 	days_ahead: AlertDefaultItem<number>;
 }
 ```
+Zo is `ALERT_DEFAULTS.dir_classes.allowed` van type `DirClass[]` (niet `null`) en bindt `AlertRuleForm` er zonder cast mee; `weekdays.allowed` is `number[]`.
 
 ### `web/src/lib/contracts.ts` (toevoegingen)
 ```ts
@@ -258,11 +262,12 @@ export class RuleError extends Error {
 	// name = 'RuleError'
 }
 
-/** null -> null. Accepts /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d)(\.\d{1,6})?)?$/.
- *  Returns 'HH:MM' when seconds are absent or numerically 0; otherwise the input unchanged.
- *  '24:00' / '24:00:00': latest_local -> null (no upper bound, WP-07 E36);
+/** null -> null. '24:00' / '24:00:00': latest_local -> null (no upper bound, WP-07 E36);
  *  earliest_local -> RuleError('invalid', 'earliest_local') (WP-07 E37).
- *  Anything else -> RuleError('invalid', field). */
+ *  Otherwise must match /^([01]\d|2[0-3]):([0-5]\d)(?::([0-5]\d)(?:\.(\d{1,6}))?)?$/,
+ *  else RuleError('invalid', field). With ss = group 3 ?? '00' and frac = (group 4 ?? '').padEnd(6, '0'):
+ *  ss === '00' && frac === '000000' -> 'HH:MM'; frac === '000000' -> 'HH:MM:SS';
+ *  else 'HH:MM:SS.ffffff' (same string as Python time.isoformat(), see A18). */
 export function normalizeLocalTime(value: string | null, field: 'earliest_local' | 'latest_local'): string | null;
 
 /** Mirror of shakka.domain.alerts.resolve_rule (WP-07). Throws RuleError. */
@@ -276,14 +281,14 @@ export function effectiveRule(
 Algoritme van `effectiveRule` (vergelijk altijd met `!== null`, nooit met `||`, want `days_ahead = 0` is geldig):
 1. **Profiel valideren** (als niet `null`, zoals `ProfileDefaults`). `default_min_kn` en `default_max_kn` zijn `null` of een geheel getal (`Number.isInteger`) binnen `[defaults.min_kn.min, defaults.min_kn.max]` respectievelijk `[defaults.max_kn.min, defaults.max_kn.max]`. Zijn beide gezet, dan geldt `min < max`. Anders `RuleError('invalid', 'default_min_kn' | 'default_max_kn', …)`.
 2. **Override valideren en normaliseren** (als niet `null`, zoals `AlertRuleOverride.from_row`). Een veld dat `undefined` is → `RuleError('invalid', field, 'missing …')`.
-   - `enabled`: `typeof === 'boolean'`.
+   - `enabled`: `null` of `typeof === 'boolean'` (`null` = geen waarde, zoals Python, zie A3).
    - `min_kn`, `max_kn`: `null` of een geheel getal binnen `[min, max]` van het veld. Zijn beide gezet, dan `min_kn < max_kn` (anders invalid op `max_kn`).
    - `dir_classes`: `null`, of een array met minstens één element, elk element in `defaults.dir_classes.allowed`. Ontdubbeld en gesorteerd in de volgorde van `allowed`.
    - `weekdays`: `null`, of een array met minstens één element, elk element een geheel getal in `defaults.weekdays.allowed`. Ontdubbeld en oplopend gesorteerd.
-   - `earliest_local`, `latest_local`: via `normalizeLocalTime`. Zijn beide niet `null`, dan `earliest < latest` als stringvergelijking (anders invalid op `latest_local`). Stringvergelijking klopt omdat de uren en minuten met nullen zijn aangevuld en een kortere `HH:MM` vóór `HH:MM:SS` sorteert.
+   - `earliest_local`, `latest_local`: via `normalizeLocalTime`. Zijn beide niet `null`, dan `earliest < latest` als stringvergelijking van de genormaliseerde waarden (anders invalid op `latest_local`). Stringvergelijking klopt: uren, minuten en seconden zijn met nullen aangevuld, de fractie heeft altijd 6 cijfers, en een weggelaten deel (`:00` of `.000000`) maakt de string een voorvoegsel, dat eerder sorteert.
    - `min_go_hours`, `days_ahead`: `null` of een geheel getal binnen `[min, max]`.
 3. **Per veld oplossen.** Elke regel staat uitgeschreven, net als in WP-07. Bron = het eerste niveau met een waarde die niet `null` is:
-   - `enabled`: regel, anders `defaults.enabled.default` (system);
+   - `enabled`: regel als die niet `null` is, anders `defaults.enabled.default` (system);
    - `min_kn`: regel → `profile.default_min_kn` → `spot.default_min_kn` → `defaults.min_kn.default`;
    - `max_kn`: regel → `profile.default_max_kn` → system `Math.max(defaults.max_kn.default, min_kn + defaults.max_kn.min_span_kn)`;
    - `dir_classes`, `weekdays`, `min_go_hours`, `days_ahead`: regel → system-default (een kopie van de array, gesorteerd zoals in stap 2);
@@ -296,7 +301,7 @@ Een JSON-lijst, 2 spaties inspringing, een newline aan het eind. Elk element hee
 - `spot`: `{"default_min_kn": int | null}`;
 - `profile`: `null` of `{"default_min_kn": int | null, "default_max_kn": int | null}`;
 - `override`: `null` of een rij met exact de negen `RULE_FIELDS` zoals PostgREST ze geeft (tijden als `"17:00:00"`, arrays als lijst);
-- `expected`: ofwel exact `{"enabled", "min_kn", "max_kn", "dir_classes", "weekdays", "earliest_local", "latest_local", "min_go_hours", "days_ahead", "sources"}` (`dir_classes` in contractvolgorde, `weekdays` oplopend, tijden `"HH:MM"` of `null`, `sources` met alle negen velden), ofwel `{"error": "conflict"}` of `{"error": "invalid"}`.
+- `expected`: ofwel exact `{"enabled", "min_kn", "max_kn", "dir_classes", "weekdays", "earliest_local", "latest_local", "min_go_hours", "days_ahead", "sources"}` (`dir_classes` in contractvolgorde, `weekdays` oplopend, tijden genormaliseerd volgens A18 of `null`, `sources` met alle negen velden), ofwel `{"error": "conflict"}` of `{"error": "invalid"}`.
 
 Getallen worden als gehele getallen geschreven (`12`, niet `12.0`).
 
@@ -327,6 +332,8 @@ Notatie in de tabel hieronder:
 | 16 | `invalid_offshore_in_rule` | null | null | R0 + `dir_classes: ["onshore","offshore"]` | `{"error": "invalid"}` |
 | 17 | `invalid_side_offshore_in_rule` | null | null | R0 + `dir_classes: ["side_offshore"]` | `{"error": "invalid"}` |
 | 18 | `invalid_earliest_2400` | null | null | R0 + `earliest_local: "24:00:00"` | `{"error": "invalid"}` |
+| 19 | `rule_enabled_null_falls_back` | null | null | R0 + `enabled: null` | D; S (ook `enabled: system`) |
+| 20 | `times_with_seconds_and_fraction` | null | null | R0 + `earliest_local: "17:00:30"`, `latest_local: "17:00:30.5"` | D met earliest `"17:00:30"`, latest `"17:00:30.500000"`; S met `enabled`, `earliest_local` en `latest_local` op `rule` |
 
 Voorbeeld van één volledig element (geval 2):
 ```json
@@ -346,7 +353,9 @@ Voorbeeld van één volledig element (geval 2):
   }
 }
 ```
-De dekking van de vier prioriteitsniveaus: regel (7–13), profiel (4, 5, 8, 9), spot (2, 3, 6) en systeem (overal, plus 1).
+De dekking van de vier prioriteitsniveaus: regel (7–13, 20), profiel (4, 5, 8, 9), spot (2, 3, 6) en systeem (overal, plus 1 en 19).
+
+Controle geval 20 tegen Python: Pydantic (speedate) leest `"17:00:30.5"` als `time(17, 0, 30, 500000)` ("1 to 6 digits are reflected in the time.microsecond"); `time(17, 0, 30) < time(17, 0, 30, 500000)`; `_fmt` geeft `"17:00:30"` en `"17:00:30.500000"`. In TS: `'17:00:30' < '17:00:30.500000'` (voorvoegsel).
 
 ### `web/src/lib/forms.ts`
 ```ts
@@ -379,6 +388,11 @@ export interface RuleContext {
 	defaults: AlertDefaults;
 }
 export function ruleToForm(row: AlertRuleValues | null, defaults: AlertDefaults): AlertRuleForm;
+/** Step 1 of parseAlertRuleForm, shared with ruleHints. Never throws. `value` holds every field
+ *  that parsed, with null for empty or failed fields AND for the later field of a failed cross-field
+ *  check (max_kn on min >= max, latest_local on earliest >= latest), so `value` always passes
+ *  step 2 of effectiveRule. */
+export function parseRuleFields(f: AlertRuleForm, defaults: AlertDefaults): { value: AlertRuleValues; errors: FieldErrors<RuleField> };
 export function parseAlertRuleForm(f: AlertRuleForm, ctx: RuleContext): FormResult<AlertRuleValues, RuleField>;
 export type HintField = 'min_kn' | 'max_kn' | 'dir_classes' | 'weekdays' | 'earliest_local' | 'latest_local' | 'min_go_hours' | 'days_ahead';
 export function ruleHints(f: AlertRuleForm, ctx: RuleContext): Partial<Record<HintField, string>>;
@@ -402,11 +416,14 @@ export function daysAheadOptions(current: string): string[];
 | `dirEmpty` | `Kies minstens één windrichting.` |
 | `dirInvalid` | `Deze windrichting kun je niet kiezen.` |
 | `weekdaysEmpty` | `Kies minstens één dag.` |
+| `weekdaysInvalid` | `Kies dagen uit de lijst.` |
 | `time` | `Kies een tijd uit de lijst.` |
 | `latestMidnight` | `"Tot 00:00" telt geen enkel uur. Kies een later tijdstip of geen bovengrens.` |
 | `timeOrder` | `"Tot" moet later zijn dan "Vanaf".` |
 | `minGoHours` | `Vul een heel getal tussen 1 en 24 in.` |
 | `daysAhead` | `Kies een waarde uit de lijst.` |
+| `profileInvalid` | `Je profiel heeft ongeldige windgrenzen; pas die aan bij Profiel.` |
+| `ruleInvalid` | `Deze instelling kan niet worden opgeslagen. Controleer de velden.` |
 | `conflict(c)` | `` `Minimale wind ${formatKn(c.min)} kn (${SOURCE_LABEL_NL[c.minSource]}) moet lager zijn dan maximale wind ${formatKn(c.max)} kn (${SOURCE_LABEL_NL[c.maxSource]}).` `` |
 
 **Regels:**
@@ -425,34 +442,36 @@ export function daysAheadOptions(current: string): string[];
 - **`ruleToForm`:**
   - bij `row === null`: `enabled = defaults.enabled.default`; de tekstvelden en selects `''`; `dir_classes` en `weekdays` krijgen een kopie van de default;
   - anders: getallen worden `String(n)`; `dir_classes` of `weekdays` `null` → een kopie van de default; tijden via `normalizeLocalTime`. Gooit die (`earliest_local` 24:00 of een onleesbare tijd) of geeft die `null` (bijv. `latest_local` 24:00), dan wordt het veld `''`.
+- **`parseRuleFields(f, defaults)`** (stap 1 van `parseAlertRuleForm`, gedeeld met `ruleHints`). Begint met `value` = alle negen velden `null` behalve `enabled = f.enabled`, en `errors = {}`. Per veld wordt `value[field]` alleen gezet als het veld geldig is; bij een fout blijft het `null` en komt de melding in `errors[field]`:
+  - `min_kn` en `max_kn` met de `defaults`-bereiken (`kn`). Zijn beide geldig gezet en geldt `min >= max`, dan `minNotBelowMax` op `max_kn` **en** `value.max_kn = null`;
+  - `dir_classes`: leeg → `dirEmpty`; een waarde buiten `defaults.dir_classes.allowed` → `dirInvalid`; als verzameling gelijk aan `defaults.dir_classes.default` → `null` (geen fout); anders ontdubbeld en gesorteerd in de volgorde van `allowed`;
+  - `weekdays`: leeg → `weekdaysEmpty`; een waarde die geen geheel getal uit `defaults.weekdays.allowed` is → `weekdaysInvalid`; gelijk aan de default-verzameling → `null` (geen fout); anders ontdubbeld en oplopend;
+  - tijden: `''` → `null`; anders moet de waarde `/^([01]\d|2[0-3]):[0-5]\d(?::[0-5]\d(?:\.\d{6})?)?$/` matchen (precies de uitvoer van `normalizeLocalTime`, zodat een via de CLI opgeslagen `20:30` of `17:00:30` ongewijzigd terug kan), anders `time`. Een `latest_local` van `'00:00'` → `latestMidnight` (waarde `null`). Zijn beide geldig gezet en geldt `earliest >= latest` (stringvergelijking, zie `effectiveRule` stap 2), dan `timeOrder` op `latest_local` **en** `value.latest_local = null`. Geschreven als `` `${v}:00` `` als `v` de vorm `HH:MM` heeft, anders `v` ongewijzigd;
+  - `min_go_hours` met het `defaults`-bereik (`minGoHours`);
+  - `days_ahead`: `''` → `null`; anders `/^\d$/` en binnen `defaults.days_ahead.min`–`max` (7 is dus geldig als hij al in de database stond), anders `daysAhead`.
+
+  Omdat elk veld dat in `value` staat binnen zijn bereik ligt en beide controles tussen velden zijn toegepast, haalt `value` altijd stap 2 van `effectiveRule`. `parseRuleFields` gooit nooit.
 - **`parseAlertRuleForm`:**
-  1. Velden apart:
-     - `min_kn` en `max_kn` met de `defaults`-bereiken; zijn beide gezet en geldt `min >= max`, dan `minNotBelowMax` op `max_kn`;
-     - `dir_classes`: leeg → `dirEmpty`; een waarde buiten `defaults.dir_classes.allowed` → `dirInvalid`; als verzameling gelijk aan `defaults.dir_classes.default` → `null`; anders gesorteerd in de volgorde van `allowed`;
-     - `weekdays`: leeg → `weekdaysEmpty`; gelijk aan de default-verzameling → `null`; anders oplopend;
-     - tijden: `''` → `null`; anders `/^([01]\d|2[0-3]):[0-5]\d$/`, anders `time`. Een `latest_local` van `'00:00'` → `latestMidnight`. Zijn beide gezet en geldt `earliest >= latest`, dan `timeOrder` op `latest_local`. Geschreven als `` `${hhmm}:00` ``;
-     - `min_go_hours` met het `defaults`-bereik (`minGoHours`);
-     - `days_ahead`: `''` → `null`; anders `/^\d$/` en binnen `defaults.days_ahead.min`–`max` (7 is dus geldig als hij al in de database stond), anders `daysAhead`;
-     - `enabled` blijft zoals het is.
+  1. `{ value, errors } = parseRuleFields(f, ctx.defaults)`.
   2. Zijn er fouten, dan `{ ok: false, errors }`; verder niets.
   3. Daarna `effectiveRule(ctx.spot, ctx.profile, value, ctx.defaults)` in een `try`:
      - `RuleError` met code `conflict` → `{ ok: false, errors: { [c.maxSource === 'rule' ? 'max_kn' : 'min_kn']: conflict(c) } }`;
-     - een andere `RuleError` → `{ ok: false, errors: { min_kn: storedRuleStatus-tekst voor invalid } }`.
+     - `RuleError` met code `invalid` en veld `default_min_kn` of `default_max_kn` (ongeldig profiel; door de DB-constraints niet te verwachten) → `{ ok: false, errors: { min_kn: FORM_MESSAGES.profileInvalid } }`;
+     - elke andere fout → `{ ok: false, errors: { [veld als het een RuleField is, anders 'min_kn']: FORM_MESSAGES.ruleInvalid } }`.
   4. Anders `{ ok: true, value }`, met exact de negen sleutels van `RULE_FIELDS`.
-- **`ruleHints`:**
-  - Eerst een "soepele" override: elk veld apart geparsed zoals hierboven, waarbij elke fout `null` wordt, en lege `dir_classes` of `weekdays` ook `null`.
-  - Dan `eff = effectiveRule(ctx.spot, ctx.profile, lenient, ctx.defaults)`. Gooit dat, dan `eff = effectiveRule(ctx.spot, null, { ...lenient, min_kn: null, max_kn: null }, ctx.defaults)` en `knOk = false`.
-  - Een hint komt er alleen voor velden waarvan de invoer leeg is (`trim() === ''`). Voor `dir_classes` en `weekdays` geldt "leeg" als de selectie gelijk is aan de default.
-  - Teksten:
-    - `min_kn`/`max_kn`: `` `standaard: ${formatKn(eff.x)} kn (${SOURCE_LABEL_NL[eff.sources.x]})` ``, of bij `!knOk` `'standaard: botst met je andere windgrenzen'`;
-    - `dir_classes`: `` `standaard: alle rijdbare richtingen (${SOURCE_LABEL_NL.system})` ``;
-    - `weekdays`: `'standaard: alle dagen (Shakka)'`;
-    - `earliest_local`: `'standaard: geen ondergrens (Shakka)'`;
-    - `latest_local`: `'standaard: geen bovengrens (Shakka)'`;
-    - `min_go_hours`: `` `standaard: ${eff.min_go_hours} uur (Shakka)` ``;
-    - `days_ahead`: `` `standaard: ${daysAheadText(eff.days_ahead)} (Shakka)` ``.
-
-    "Shakka" komt in de code steeds uit `SOURCE_LABEL_NL[eff.sources[field]]`.
+- **`ruleHints`** gooit nooit:
+  - `lenient = parseRuleFields(f, ctx.defaults).value` (fouten genegeerd; zie hierboven: geldig voor stap 2 van `effectiveRule`).
+  - `let eff: EffectiveRule | null = null; try { eff = effectiveRule(ctx.spot, ctx.profile, lenient, ctx.defaults); } catch { eff = null; }`. `effectiveRule` kan hier alleen nog gooien bij een conflict of een ongeldig profiel; de `catch` vangt elke fout.
+  - Er is geen tweede aanroep (de fallback uit revisie 1 vervalt): alleen `min_kn` en `max_kn` hebben `eff` nodig. Voor de andere velden geldt bij lege invoer altijd de systeemwaarde (`FIELD_SOURCES` kent daar alleen `rule` en `system`), dus die hints komen direct uit `ctx.defaults`.
+  - Een hint komt er alleen voor velden waarvan de invoer leeg is (`trim() === ''`). Voor `dir_classes` en `weekdays` geldt "leeg" als de selectie als verzameling gelijk is aan de default.
+  - Teksten (`sys = SOURCE_LABEL_NL.system`):
+    - `min_kn`/`max_kn`: bij `eff !== null` `` `standaard: ${formatKn(eff.x)} kn (${SOURCE_LABEL_NL[eff.sources.x]})` ``, anders `'standaard: botst met je andere windgrenzen'`;
+    - `dir_classes`: `` `standaard: alle rijdbare richtingen (${sys})` ``;
+    - `weekdays`: `` `standaard: alle dagen (${sys})` ``;
+    - `earliest_local`: `` `standaard: geen ondergrens (${sys})` ``;
+    - `latest_local`: `` `standaard: geen bovengrens (${sys})` ``;
+    - `min_go_hours`: `` `standaard: ${ctx.defaults.min_go_hours.default} uur (${sys})` ``;
+    - `days_ahead`: `` `standaard: ${daysAheadText(ctx.defaults.days_ahead.default)} (${sys})` ``.
 - **`ruleSummary(r)`:** de delen hieronder, samengevoegd met `' · '`:
   - `r.enabled ? 'Aan' : 'Uit'`;
   - `` `${formatKn(r.min_kn)}–${formatKn(r.max_kn)} kn` ``;
@@ -465,7 +484,9 @@ export function daysAheadOptions(current: string): string[];
   Voorbeeld met de defaults: `Aan · 12–30 kn · min. 2 uur go · vandaag plus 3 dagen`.
 - **`storedRuleStatus(row, ctx)`:** `effectiveRule` in een `try`.
   - `conflict` → `` `Deze instellingen botsen: minimale wind ${min} kn (${bron}) is niet lager dan maximale wind ${max} kn (${bron}). Voor deze spot komen geen alerts tot je dit aanpast.` `` (met `formatKn` en `SOURCE_LABEL_NL`);
-  - `invalid` → `'De opgeslagen instelling is ongeldig. Voor deze spot komen geen alerts tot je hem opnieuw opslaat.'`.
+  - `invalid` (of een andere fout) → `'De opgeslagen instelling is ongeldig. Voor deze spot komen geen alerts tot je hem opnieuw opslaat.'`;
+  - gelukt, maar `rule.latest_local === '00:00'` (alleen mogelijk zonder "Vanaf"; WP-07 E14: geen enkel uur telt) → `{ ok: false, problem: '"Tot 00:00" telt geen enkel uur. Voor deze spot komen geen alerts tot je dit aanpast.' }`;
+  - anders `{ ok: true, rule }`.
 - **`timeOptions(current)`:** `HOUR_OPTIONS`, plus `current` als die niet leeg is en er niet in staat; lexicografisch gesorteerd.
 - **`daysAheadOptions(current)`:** `'0'` t/m `String(DAYS_AHEAD_UI_MAX)`, plus `current` als die niet leeg is en er niet in staat; numeriek gesorteerd.
 
@@ -558,11 +579,11 @@ Implementatie:
 - **`LoginPrompt.svelte`.** Props `{ reason: string }`. Markup: `<div class="login-prompt"><p>Log in om {reason}.</p><p><a href="/login">Inloggen</a></p></div>`.
 - **`AlertRuleForm.svelte`.** Props `{ userId: string; spot: Spot; profile: Profile | null; row: AlertRuleRow | null; onsaved: (row: AlertRuleRow | null) => void }`.
   - State:
-    - `form = $state(ruleToForm(row, ALERT_DEFAULTS))`;
+    - `let form = $state<AlertRuleFormValues>(untrack(() => ruleToForm(row, ALERT_DEFAULTS)))` (`untrack` uit `'svelte'`), met het commentaar `// initial value only; submit/reset set form explicitly`. De prop `row` staat zo in een closure, wat de compilerwaarschuwing `state_referenced_locally` voorkomt; het formulier neemt bewust alleen de beginwaarde over (na opslaan zet `submit` `form` zelf);
     - `errors = $state<FieldErrors<RuleField>>({})`;
     - `status = $state<'idle' | 'saving' | 'saved' | 'reset' | 'failed'>('idle')`;
     - `failMessage = $state('')`.
-  - `ctx = { spot, profile, defaults: ALERT_DEFAULTS }`, `hints = $derived(ruleHints(form, ctx))`.
+  - `const ctx: RuleContext = $derived({ spot, profile, defaults: ALERT_DEFAULTS })`, `const hints = $derived(ruleHints(form, ctx))`. Het type `AlertRuleForm` uit `forms.ts` wordt geïmporteerd als `type AlertRuleForm as AlertRuleFormValues` om botsing met de componentnaam te voorkomen.
   - Id's: `` `${field}-${spot.id}` ``. Labels komen uit `ALERT_DEFAULTS[field].label_nl`.
   - Markup, in deze volgorde, in `<form novalidate onsubmit={submit} class="rule-form">`:
     1. `<div class="form-field checkbox-row"><input type="checkbox" id=… bind:checked={form.enabled} /><label for=…>Alert aan</label></div>`.
@@ -597,15 +618,22 @@ Implementatie:
     ```ts
     const userId = $derived($session ? $session.user.id : null);
     let page = $state<{ kind: 'idle' } | { kind: 'loading' } | ProfilePageData>({ kind: 'idle' });
+    // /profiel only: form state (not rendered until page.kind === 'ok')
+    let form = $state<ProfileForm>(profileToForm({ weight_kg: null, level: null, quiver_m2: [], default_min_kn: null, default_max_kn: null }));
+    let errors = $state<FieldErrors<ProfileEditableColumn>>({});
+    let status = $state<'idle' | 'saving' | 'saved' | 'failed'>('idle');
+    const saving = $derived(status === 'saving');
     let token = 0;
-    function load(id: string) { const t = ++token; page = { kind: 'loading' }; void loadProfilePage(id).then((r) => { if (t === token) { page = r; if (r.kind === 'ok') form = profileToForm(r.profile); } }); }
+    function load(id: string) { const t = ++token; page = { kind: 'loading' }; void loadProfilePage(id).then((r) => { if (t === token) { page = r; if (r.kind === 'ok') { form = profileToForm(r.profile); errors = {}; status = 'idle'; } } }); }
+    function retry() { if (userId !== null) load(userId); }
     $effect(() => { const id = userId; if (id === null) { token++; page = { kind: 'idle' }; return; } load(id); });
     ```
+    Op `/alerts` vervallen `form`, `errors`, `status` en `saving` (die zitten per favoriet in `AlertRuleForm`), en roept `load` `loadAlertsPage` aan. `retry` is op beide pagina's gelijk.
   - Weergave:
     - `$session === undefined` → `<p class="muted">Laden…</p>`;
     - `$session === null` → `<LoginPrompt reason="je profiel te bewerken" />`;
     - `loading` → `Laden…`;
-    - `error` → `<div class="banner" role="alert"><p>Je profiel kon niet worden geladen. Controleer je verbinding.</p><button type="button" onclick={() => load(userId)}>Opnieuw proberen</button></div>`;
+    - `error` → `<div class="banner" role="alert"><p>Je profiel kon niet worden geladen. Controleer je verbinding.</p><button type="button" onclick={retry}>Opnieuw proberen</button></div>`;
     - `missing` → `<div class="banner" role="alert"><p>Je profiel is niet gevonden. Log uit en weer in. Helpt dat niet, neem dan contact op met de beheerder.</p></div>`;
     - `ok`: eerst `<p class="muted">Shakka gebruikt deze gegevens voor je alerts en voor het kite-advies in je meldingen. Alles is optioneel.</p>`, dan `<form novalidate onsubmit={submit}>` met:
       1. `weight_kg`: label `Gewicht (kg)`, tekstveld (`inputmode="numeric"`), hint `Voor het kite-advies. Leeg = geen kite-advies.`;
@@ -616,11 +644,11 @@ Implementatie:
       6. `<button type="submit" disabled={saving}>Opslaan</button>`; meldingen zoals in `AlertRuleForm` (`Niet opgeslagen: controleer de gemarkeerde velden.`, `Opgeslagen.`, `Opslaan is niet gelukt. Probeer het opnieuw.`).
 
       Foutweergave per veld en `aria-describedby` zoals in `AlertRuleForm`.
-  - `submit`: `parseProfileForm(form, ALERT_DEFAULTS)`; een fout → geen write; anders `updateProfile(userId, value)` → `page = { kind: 'ok', profile: saved }`, `form = profileToForm(saved)`, status `saved`.
+  - `submit(e)`: `e.preventDefault()`; `const id = userId; if (id === null) return;`; `r = parseProfileForm(form, ALERT_DEFAULTS)`; een fout → `errors = r.errors`, `status = 'idle'`, geen write; anders `errors = {}`, `status = 'saving'`, `saved = await updateProfile(id, r.value)` → `page = { kind: 'ok', profile: saved }`, `form = profileToForm(saved)`, `status = 'saved'`. Bij een fout `status = 'failed'` met `Opslaan is niet gelukt. Probeer het opnieuw.`
 - **`/alerts`** (`src/routes/alerts/+page.svelte`, geen `+page.ts`).
   - `<title>Alerts · Shakka</title>`, `<h1>Alerts</h1>`.
   - Bij `undefined` "Laden…"; bij `null` `<LoginPrompt reason="je alerts in te stellen" />`; laden met `loadAlertsPage` zoals op `/profiel`.
-  - Bij `error`: een banner met `De alertinstellingen konden niet worden geladen. Controleer je verbinding.` en "Opnieuw proberen".
+  - Bij `error`: een banner met `De alertinstellingen konden niet worden geladen. Controleer je verbinding.` en `<button type="button" onclick={retry}>Opnieuw proberen</button>`.
   - Bij `ok`:
     1. `<p class="muted">Voor elke favoriete spot staat een alert standaard aan, met de standaardinstellingen. Lege velden volgen de standaard. Je eigen windgrenzen voor alle spots stel je in bij je <a href="/profiel">profiel</a>. Haal je een spot uit je favorieten, dan verdwijnen ook de alertinstellingen voor die spot.</p>`;
     2. `entries.length === 0` → `<p>Je hebt nog geen favorieten. Tik op de ster bij een spot in de <a href="/">lijst</a> om hem toe te voegen.</p>`;
@@ -631,11 +659,11 @@ Implementatie:
          {#if !e.spot.verified}<p class="notice">Deze spot is nog niet geverifieerd. Je krijgt er pas alerts voor als het spotprofiel is gecontroleerd.</p>{/if}
          {#if st.ok}<p class="rule-summary">{ruleSummary(st.rule)}</p>{:else}<p class="banner warning" role="note">{st.problem}</p>{/if}
          <details><summary>Instellingen aanpassen</summary>
-           <AlertRuleForm userId={id} spot={e.spot} profile={data.profile} row={e.rule} onsaved={(row) => (e.rule = row)} />
+           <AlertRuleForm {userId} spot={e.spot} profile={page.profile} row={e.rule} onsaved={(row) => (e.rule = row)} />
          </details>
        </section>
        ```
-       Hierin is `st = storedRuleStatus(e.rule, { spot: e.spot, profile: data.profile, defaults: ALERT_DEFAULTS })`, met `{@const}`. `e.rule = row` werkt op de `$state`-proxy van `page`.
+       Hierin is `st = storedRuleStatus(e.rule, { spot: e.spot, profile: page.profile, defaults: ALERT_DEFAULTS })`, met `{@const}`. `e.rule = row` werkt op de `$state`-proxy van `page`. De `ok`-tak staat binnen `{#if page.kind === 'ok' && userId !== null}`, zodat `userId` daar een `string` is en `page` vernauwd is tot de `ok`-variant; de lus is `{#each page.entries as e (e.spot.id)}`. `<details>` blijft standaard dicht (geen `open`-attribuut); de tests openen hem zelf (zie Testplan, `alerts-page.test.ts`).
 - **`+layout.svelte`.** In `<nav>`, na `Over` en vóór het e-mailadres: `{#if $session}<a href="/alerts">Alerts</a><a href="/profiel">Profiel</a>{/if}`. Daarvoor kan het bestaande `{#if $session}`-blok uitgebreid worden.
 - **`/`.** Na `<a class="spot-link" …>` komt `<FavoriteStar spotId={spot.id} spotName={spot.name} />`.
 - **`/spot/[id]`.** `<h1>{spot.name}</h1>` wordt `<div class="title-row"><h1>{spot.name}</h1><FavoriteStar spotId={spot.id} spotName={spot.name} /></div>`.
@@ -691,12 +719,12 @@ Implementatie:
 | E16 | Spot `default_min_kn` 22, profiel max 20, regel leeg | Kaart: waarschuwing "Deze instellingen botsen…" (`storedRuleStatus`). Opslaan zonder aanpassing geeft `conflict` op `min_kn`; met een lagere `min_kn` of een hogere `max_kn` in de regel lukt het. |
 | E17 | Alle richtingen uitgevinkt | `dirEmpty`, 0 writes. |
 | E18 | Alle drie de richtingen of alle zeven dagen aangevinkt | `null` (standaard) in de payload (A5). |
-| E19 | Tot `00:00` als bestaande waarde (via de CLI) | Extra optie in de lijst. Opslaan geeft `latestMidnight` tot de gebruiker hem wijzigt. |
+| E19 | Tot `00:00` als bestaande waarde (via de CLI), zonder Vanaf | Kaart: waarschuwing `"Tot 00:00" telt geen enkel uur. Voor deze spot komen geen alerts tot je dit aanpast.` (`storedRuleStatus`), geen samenvatting `00:00–00:00`. In het formulier een extra optie `00:00`. Opslaan geeft `latestMidnight` tot de gebruiker hem wijzigt. (Met Vanaf erbij is de rij al `invalid`: `earliest < 00:00` kan niet.) |
 | E20 | `latest_local` `24:00:00` in de database | Het formulier toont "Geen bovengrens". De samenvatting toont `…–24:00`. Opslaan schrijft `null`. |
 | E21 | `earliest_local` `24:00:00` in de database | Kaart: "De opgeslagen instelling is ongeldig…". Het formulier toont "Geen ondergrens". Opslaan herstelt de regel (`null`). |
 | E22 | `earliest_local` `20:30:00` (via de CLI) | Optie `20:30` erbij, geselecteerd. Opslaan schrijft `20:30:00` ongewijzigd. |
 | E23 | `days_ahead` 7 in de database | Optie `7` erbij. 0–6 blijven de normale opties. |
-| E24 | Vanaf `18:00`, Tot `17:00` | `timeOrder` op `latest_local`. |
+| E24 | Vanaf `18:00`, Tot `17:00` (ook: Tot staat al op 17:00 en de gebruiker kiest Vanaf 19:00) | `ruleHints` gooit niet: `parseRuleFields` zet `latest_local` in de soepele waarde op `null`, en `effectiveRule` staat in een `try`. Het formulier blijft staan met de gewone hints. Bij Opslaan `timeOrder` op `latest_local`, 0 writes. |
 | E25 | `days_ahead` 0 | Geldig, "alleen vandaag". Vergelijkingen met `!== null`, nooit met `||`. |
 | E26 | Opslaan nadat de favoriet in een ander tabblad is verwijderd (`23503`) | "Deze spot staat niet meer in je favorieten. Herlaad de pagina." |
 | E27 | Niet-geverifieerde favoriet | Bewerkbaar, met de melding uit A15. |
@@ -705,6 +733,10 @@ Implementatie:
 | E30 | Afgeleide `max_kn` boven 60 (regel min 60) | Hint "standaard: 65 kn (Shakka)", geen fout (WP-07 E3). |
 | E31 | Supabase-foutmelding met details | Komt niet op de pagina en niet in de console (`DataError` bevat alleen operatie en code). |
 | E32 | Tekst met `<script>` in een spotnaam | Svelte escapet; nergens `{@html}`. |
+| E33 | Tijd met seconden of fractie in de database (`17:00:30`, `17:00:30.5`, via de CLI) | `normalizeLocalTime` geeft `17:00:30` resp. `17:00:30.500000` (gelijk aan Python, A18). Het formulier toont die waarde als extra optie; Opslaan schrijft hem ongewijzigd terug. |
+| E34 | Min `20`, max `15` tijdens het typen, of een profiel met ongeldige grenzen | `ruleHints` gooit niet. Bij min ≥ max laat de soepele waarde `max_kn` weg; bij een conflict of ongeldig profiel wordt de kn-hint `standaard: botst met je andere windgrenzen`. |
+| E35 | `enabled` `null` in een rij (niet mogelijk door `not null`, wel in de gevallen) | Zoals Python: geen waarde, dus `true` met bron `system` (geval 19). |
+| E36 | `parseAlertRuleForm` met een ongeldig profiel (bijv. `{20, 20}`; door de DB-constraints niet te verwachten) | Fout op `min_kn`: `Je profiel heeft ongeldige windgrenzen; pas die aan bij Profiel.`, 0 writes. |
 
 ## Testplan
 Alle webtests staan in `web/test/` en draaien met `npm test`. Tests voor pure logica en data komen vóór de implementatie. Mocks volgen WP-13/WP-14 (`vi.hoisted` plus `vi.mock('#lib/…js', async () => …)`), en elk bestand met mocks heeft `beforeEach(() => vi.clearAllMocks())`.
@@ -736,9 +768,9 @@ Alle webtests staan in `web/test/` en draaien met `npm test`. Tests voor pure lo
 
 | Bestand | Tests |
 |---|---|
-| `rules.test.ts` (node) | **(AC-2)** Leest `../../data/contracts/rule_resolution_cases.json` met `node:fs`. `describe('effectiveRule rule_resolution_cases')` met per geval (`it.each`, naam = `name`) `spot = { ...SPOT_VERIFIED, default_min_kn }`, `profile = case.profile ? { ...PROFILE_EMPTY, ...case.profile } : null` en `override = case.override ? { ...ruleRow('test-meer'), ...case.override } : null`. Bij `expected.error`: gooit een `RuleError` met die `code`. Anders: `toEqual(expected)`. Dekking: minstens 8 gevallen, unieke namen, elke bron uit `RULE_SOURCES` komt in minstens één `expected.sources` voor, er is minstens één `conflict` en één `invalid`, en de sleutels van elk element zijn exact `name, spot, profile, override, expected` (override: exact `RULE_FIELDS`). Verder: `FIELD_SOURCES[f]` is gelijk aan `ALERT_DEFAULTS[f].sources` voor elk veld; `normalizeLocalTime`: `'17:00:00'` → `'17:00'`, `'17:00'` → `'17:00'`, `'17:00:30'` blijft gelijk, `'17:00:00.000'` → `'17:00'`, `('24:00:00', 'latest_local')` → `null`, `('24:00', 'earliest_local')` → `RuleError` `invalid`, `'25:00'`, `'7:00'` en `'17:00+02'` → `invalid`; `effectiveRule` met override `min_kn` 4, 61 of 12.5, `days_ahead` 8, `weekdays` `[0]` of `[]`, `dir_classes` `[]`, `enabled` `null`, of een ontbrekend veld → `invalid`; profiel `{20, 20}` → `invalid` met veld `default_max_kn`; conflictgeval 14 heeft `conflict` `{ min: 25, minSource: 'rule', max: 20, maxSource: 'profile' }`; `days_ahead` 0 in de regel geeft 0 (geen terugval op 3). |
+| `rules.test.ts` (node) | **(AC-2)** Leest `../../data/contracts/rule_resolution_cases.json` met `node:fs`. `describe('effectiveRule rule_resolution_cases')` met per geval (`it.each`, naam = `name`) `spot = { ...SPOT_VERIFIED, default_min_kn }`, `profile = case.profile ? { ...PROFILE_EMPTY, ...case.profile } : null` en `override = case.override ? ({ ...ruleRow('test-meer'), ...case.override } as AlertRuleRow) : null` (de cast is nodig voor geval 19, `enabled: null`). Bij `expected.error`: gooit een `RuleError` met die `code`. Anders: `toEqual(expected)`. Dekking: precies 20 gevallen, unieke namen, elke bron uit `RULE_SOURCES` komt in minstens één `expected.sources` voor, er is minstens één `conflict` en één `invalid`, en de sleutels van elk element zijn exact `name, spot, profile, override, expected` (override: exact `RULE_FIELDS`). Verder: `FIELD_SOURCES[f]` is gelijk aan `ALERT_DEFAULTS[f].sources` voor elk veld; `normalizeLocalTime`: `'17:00:00'` → `'17:00'`, `'17:00'` → `'17:00'`, `'17:00:30'` blijft gelijk, `'17:00:00.000'` → `'17:00'`, `'17:00:30.000'` → `'17:00:30'`, `'17:00:30.5'` → `'17:00:30.500000'`, `'17:00:00.5'` → `'17:00:00.500000'`, `'17:00:00.000123'` → `'17:00:00.000123'`, `('24:00:00', 'latest_local')` → `null`, `('24:00', 'earliest_local')` → `RuleError` `invalid`, `'25:00'`, `'7:00'`, `'17:00+02'` en `'17:00:00.1234567'` → `invalid`; `effectiveRule` met override `min_kn` 4, 61 of 12.5, `days_ahead` 8, `weekdays` `[0]` of `[]`, `dir_classes` `[]`, `enabled` `'yes'`, of een ontbrekend veld → `invalid`; `enabled` `null` → `enabled: true` met `sources.enabled === 'system'` (spiegel van Python, A3); earliest `'17:00:30'` en latest `'17:00:30'` → `invalid` op `latest_local`; profiel `{20, 20}` → `invalid` met veld `default_max_kn`; conflictgeval 14 heeft `conflict` `{ min: 25, minSource: 'rule', max: 20, maxSource: 'profile' }`; `days_ahead` 0 in de regel geeft 0 (geen terugval op 3). |
 | `contracts.test.ts` (wijzigen) | `ALERT_DEFAULTS`: de sleutels in `RULE_FIELDS`-volgorde, `dir_classes.allowed` exact `['onshore', 'side_onshore', 'sideshore']`, `min_kn.default === 12`, `max_kn.min_span_kn === 5`. `parseAlertDefaults` gooit `contract alert_defaults is malformed` bij een kopie met `offshore` in `allowed`, met `side_offshore` in `default`, met 8 items, met een verkeerde `field`-volgorde, met een lege `label_nl`, en met `sources` die niet op `system` eindigen. |
-| `forms.test.ts` | Profiel: `parseProfileForm` met gewicht `'25'`, `'201'`, `'75,5'` en `'abc'` → fout `weight`; `'30'` en `'200'` → ok. Quiver `['2,5']`, `['22']` en `['9,123']` → fout `quiver_m2`; 11 maten → `quiverCount`; `['12', '', '10,5', ' 9 ']` → `[9, 10.5, 12]`. Min/max `'20'`/`'20'` → `minNotBelowMax` op `default_max_kn`; `'4'` → `kn`. Het resultaat heeft exact de vijf sleutels. `profileToForm(PROFILE_FULL)` geeft quiver `['9', '12']`, en `[10.5]` geeft `['10,5']`. `profileKnHints` geeft de twee teksten uit Interfaces. Regel: `ruleToForm(null)` geeft de defaults; een rij met `latest_local '24:00:00'` geeft `''`, `earliest_local '24:00:00'` geeft `''` en `'20:30:00'` geeft `'20:30'`. `parseAlertRuleForm`: E14, E15 (fout op `min_kn` met de tekst uit E15), E16 (conflict zonder regelwaarden → `min_kn`; met regel `max_kn` 26 → ok), E17, E18 (`null`), E19, E24, `days_ahead` `'7'` geldig, `'8'` ongeldig, `'0'` → 0; een geldig formulier geeft exact de negen sleutels met tijden `'17:00:00'`; `dir_classes` `['offshore']` (gecast) → `dirInvalid`. `ruleHints`: leeg formulier met `PROFILE_FULL` → `min_kn` `'standaard: 14 kn (je profiel)'` en `max_kn` `'standaard: 26 kn (je profiel)'`; zonder profiel met spot 16 → `'standaard: 16 kn (spotprofiel)'` en `'standaard: 30 kn (Shakka)'`; `min_kn` `'28'`, max leeg, zonder profiel → `max_kn` `'standaard: 33 kn (Shakka)'`; `min_kn` `'60'` → `'standaard: 65 kn (Shakka)'`; `days_ahead` leeg → `'standaard: vandaag plus 3 dagen (Shakka)'`; bij een conflict met het profiel → `'standaard: botst met je andere windgrenzen'`; een ingevuld veld heeft geen hint. `ruleSummary` van de defaults → `'Aan · 12–30 kn · min. 2 uur go · vandaag plus 3 dagen'`; van geval 7 → `'Uit · 18–24 kn · Sideshore (langs de kust) · za, zo · 17:00–21:00 · min. 3 uur go · vandaag plus 5 dagen'`. `storedRuleStatus` geeft bij E16 en E21 de twee teksten uit Interfaces. `timeOptions('')` heeft 23 items van `'01:00'` t/m `'23:00'` en bevat geen `'00:00'` en geen `'24:00'`; `timeOptions('20:30')` bevat `'20:30'` tussen `'20:00'` en `'21:00'`. `daysAheadOptions('')` → `'0'`…`'6'`; `daysAheadOptions('7')` eindigt op `'7'`. |
+| `forms.test.ts` | Profiel: `parseProfileForm` met gewicht `'25'`, `'201'`, `'75,5'` en `'abc'` → fout `weight`; `'30'` en `'200'` → ok. Quiver `['2,5']`, `['22']` en `['9,123']` → fout `quiver_m2`; 11 maten → `quiverCount`; `['12', '', '10,5', ' 9 ']` → `[9, 10.5, 12]`. Min/max `'20'`/`'20'` → `minNotBelowMax` op `default_max_kn`; `'4'` → `kn`. Het resultaat heeft exact de vijf sleutels. `profileToForm(PROFILE_FULL)` geeft quiver `['9', '12']`, en `[10.5]` geeft `['10,5']`. `profileKnHints` geeft de twee teksten uit Interfaces. Regel: `ruleToForm(null)` geeft de defaults; een rij met `latest_local '24:00:00'` geeft `''`, `earliest_local '24:00:00'` geeft `''` en `'20:30:00'` geeft `'20:30'`. `parseAlertRuleForm`: E14, E15 (fout op `min_kn` met de tekst uit E15), E16 (conflict zonder regelwaarden → `min_kn`; met regel `max_kn` 26 → ok), E17, E18 (`null`), E19, E24, `days_ahead` `'7'` geldig, `'8'` ongeldig, `'0'` → 0; een geldig formulier geeft exact de negen sleutels met tijden `'17:00:00'`; `dir_classes` `['offshore']` (gecast) → `dirInvalid`. `ruleHints`: leeg formulier met `PROFILE_FULL` → `min_kn` `'standaard: 14 kn (je profiel)'` en `max_kn` `'standaard: 26 kn (je profiel)'`; zonder profiel met spot 16 → `'standaard: 16 kn (spotprofiel)'` en `'standaard: 30 kn (Shakka)'`; `min_kn` `'28'`, max leeg, zonder profiel → `max_kn` `'standaard: 33 kn (Shakka)'`; `min_kn` `'60'` → `'standaard: 65 kn (Shakka)'`; `days_ahead` leeg → `'standaard: vandaag plus 3 dagen (Shakka)'`; bij een conflict met het profiel → `'standaard: botst met je andere windgrenzen'`; een ingevuld veld heeft geen hint. `ruleSummary` van de defaults → `'Aan · 12–30 kn · min. 2 uur go · vandaag plus 3 dagen'`; van geval 7 → `'Uit · 18–24 kn · Sideshore (langs de kust) · za, zo · 17:00–21:00 · min. 3 uur go · vandaag plus 5 dagen'`. `storedRuleStatus` geeft bij E16 en E21 de twee teksten uit Interfaces. `timeOptions('')` heeft 23 items van `'01:00'` t/m `'23:00'` en bevat geen `'00:00'` en geen `'24:00'`; `timeOptions('20:30')` bevat `'20:30'` tussen `'20:00'` en `'21:00'`. `daysAheadOptions('')` → `'0'`…`'6'`; `daysAheadOptions('7')` eindigt op `'7'`. **(B-1, E24, E34)** `parseRuleFields` met Vanaf `'18:00'` en Tot `'17:00'` → `errors.latest_local` is `timeOrder`, `value.earliest_local === '18:00:00'`, `value.latest_local === null`; met min `'20'` en max `'15'` → `errors.max_kn` is `minNotBelowMax`, `value.min_kn === 20`, `value.max_kn === null`; met Tot `'00:00'` → `value.latest_local === null`. Voor elk van deze drie formulieren, en voor het lege formulier met profiel `{ default_min_kn: 20, default_max_kn: 20 }` (ongeldig) en met spot 22 en profiel `{ null, 20 }` (conflict): `expect(() => ruleHints(f, ctx)).not.toThrow()`, en `effectiveRule(ctx.spot, null, parseRuleFields(f, ALERT_DEFAULTS).value, ALERT_DEFAULTS)` gooit niet. Vanaf `'18:00'`, Tot `'17:00'`, rest leeg, met `PROFILE_FULL` → `ruleHints(...).min_kn === 'standaard: 14 kn (je profiel)'` en geen hint voor `latest_local`. Het ongeldige profiel en het conflict geven `min_kn` `'standaard: botst met je andere windgrenzen'` en `min_go_hours` `'standaard: 2 uur (Shakka)'`. **(N-5, E36)** `parseAlertRuleForm` met een geldig formulier en profiel `{20, 20}` → `{ ok: false, errors: { min_kn: 'Je profiel heeft ongeldige windgrenzen; pas die aan bij Profiel.' } }`. **(N-4, E19)** `storedRuleStatus(ruleRow('test-meer', { latest_local: '00:00:00' }), ctx)` → `ok: false` met de tekst `"Tot 00:00" telt geen enkel uur. Voor deze spot komen geen alerts tot je dit aanpast.`; met `latest_local: '00:30:00'` → `ok: true`. **(E33)** `ruleToForm` met `earliest_local '17:00:30.5'` → `'17:00:30.500000'`; `parseAlertRuleForm` met Vanaf `'17:00:30.500000'` schrijft `'17:00:30.500000'`, met Vanaf `'17:00:30'` schrijft `'17:00:30'`, met Vanaf `'17:00'` schrijft `'17:00:00'`; Vanaf `'17:0'` → `time`. |
 | `labels.test.ts` (wijzigen) | `LEVEL_LABEL_NL` heeft voor elke waarde uit `LEVELS` een niet-leeg label. `SOURCE_LABEL_NL` heeft alle vier de bronnen. `daysAheadText(0)`, `(1)` en `(3)` geven de teksten uit Interfaces. |
 | `schema-columns.test.ts` (wijzigen) | `PROFILE_COLUMNS` is gelijk aan de kolommen van `profiles` zonder `telegram_chat_id`, in dezelfde volgorde. `FAVORITE_COLUMNS` = `favorites`, `ALERT_RULE_COLUMNS` = `alert_rules`, en `RULE_FIELDS` = `ALERT_RULE_COLUMNS` zonder `user_id`, `spot_id` en `updated_at`, in volgorde. `PROFILE_EDITABLE_COLUMNS` is als set gelijk aan de kolommen in `grant update (…) on table public.profiles to authenticated` uit `20261015090100_m1_security.sql` (regex `/grant update \(([^)]*)\)\s+on table public\.profiles to authenticated/`). De alter-guard dekt ook `profiles`, `favorites` en `alert_rules`. |
 | `form-ranges.test.ts` (node) | Leest alle migraties. `profiles_weight_range` (`between 30 and 200`) = `WEIGHT_RANGE_KG`. Uit `profiles_quiver_valid`: `cardinality(quiver_m2) <= 10` = `MAX_QUIVER_KITES`, `3 <= all` en `21 >= all` = `QUIVER_SIZE_RANGE_M2`. `profiles_min_kn_range`, `profiles_max_kn_range`, `alert_rules_min_kn_range` en `alert_rules_max_kn_range` = `[ALERT_DEFAULTS.min_kn.min, .max]` en `[ALERT_DEFAULTS.max_kn.min, .max]`; `alert_rules_min_go_hours_range` en `alert_rules_days_ahead_range` = de `min`/`max` uit `ALERT_DEFAULTS`. De array in `alert_rules_dir_classes_ridable` = `ALERT_DEFAULTS.dir_classes.allowed` (als set); `alert_rules_weekdays_iso` = `weekdays.allowed`. Zelfde zoekaanpak als WP-07 (fragment van 1500 tekens na de constraintnaam). |
@@ -747,42 +779,126 @@ Alle webtests staan in `web/test/` en draaien met `npm test`. Tests voor pure lo
 | `user-page-data.test.ts` | Mockt `#lib/user-data.js` en `#lib/data.js`. `loadProfilePage`: ok, `missing` (null) en `error` (reject met `new Error('secret detail')` → één `console.warn` zonder die tekst en zonder `USER_ID`). `loadAlertsPage`: favorieten `['test-strand', 'test-meer', 'weg']`, spots `[SPOT_VERIFIED, SPOT_UNVERIFIED]` (lijstvolgorde Testmeer, Teststrand) en een regel voor `test-meer` → entries `[{ spot: SPOT_VERIFIED, rule: R }, { spot: SPOT_UNVERIFIED, rule: null }]`; `'weg'` valt weg; elke functie wordt aangeroepen met `USER_ID`. Een error volgt het patroon hierboven. |
 | `favorites.test.ts` | Mockt `#lib/supabase.js` (fake) en `#lib/auth.js` (fake-session); echte `favorites.ts` en `user-data.ts`. Bij sessie `undefined` en `null` en een abonnement: status `unknown` respectievelijk `signed_out`, 0 aanroepen. Met `SESSION` en een antwoord `[{ spot_id: 'test-meer' }]`: eerst `loading`, daarna `ready` met `{'test-meer'}`. Een nieuw sessie-object met dezelfde id geeft geen nieuwe query; een andere id wel. Opzeggen en opnieuw abonneren geeft een nieuwe query (A2). `toggleFavorite('test-strand')` → direct `ready` met beide id's en een insert-call; bij een insertfout → terug naar `{'test-meer'}` en `false`. `toggleFavorite` bij `signed_out` → `false` en geen call. Een trage load voor gebruiker A die afloopt nadat B is ingelogd, overschrijft B niet. |
 | `favorite-star.test.ts` | **(AC-5)** Zelfde mocks als `favorites.test.ts`. Ingelogd, favorieten `[]`: de knop `Favoriet: Teststrand` met `aria-pressed="false"` (na `findByRole`, niet `disabled`). Klik → een call op `favorites` met ops `[['insert', { user_id: USER_ID, spot_id: 'test-strand' }]]` en `aria-pressed="true"`. Nog een klik → ops `[['delete'], ['eq', 'user_id', USER_ID], ['eq', 'spot_id', 'test-strand']]` en `aria-pressed="false"`. Insertfout → `aria-pressed="false"` en de tekst `Niet opgeslagen`. Uitgelogd (`null`) of onbekend (`undefined`): geen knop en `fake.calls.length === 0`. |
-| `alert-rule-form.test.ts` | Mockt `#lib/supabase.js` (fake). Rendert `AlertRuleForm` met `userId USER_ID`, `spot SPOT_VERIFIED`, `profile PROFILE_FULL`, `row null` en `onsaved vi.fn()`. **(AC-3)** `within(getByRole('group', { name: 'Windrichtingen' })).getAllByRole('checkbox')` heeft exact de waarden `['onshore', 'side_onshore', 'sideshore']` en de toegankelijke namen `Aanlandig`, `Schuin aanlandig` en `Sideshore (langs de kust)`. Nergens in de component staat een checkbox met waarde `side_offshore` of `offshore` (`container.querySelectorAll('input[type=checkbox]')`), en geen label `Aflandig` of `Schuin aflandig`. **(AC-4)** min `20`, max `15`, klik Opslaan → de fout `De maximale wind moet hoger zijn dan de minimale wind.` en `writeCalls(fake.calls).length === 0`. Conflict: min `30` (profielmax 26) → een fout die `je profiel` bevat, 0 writes. Alle richtingen uit → `Kies minstens één windrichting.`, 0 writes. Geldig (min `14`, dagen alleen za en zo, Vanaf `17:00`) → precies één call op `alert_rules` met ops `upsert` (payload `{ user_id: USER_ID, spot_id: 'test-meer', enabled: true, min_kn: 14, max_kn: null, dir_classes: null, weekdays: [6, 7], earliest_local: '17:00:00', latest_local: null, min_go_hours: null, days_ahead: null }`, `{ onConflict: 'user_id,spot_id' }`), `select` en `single`; daarna `Opgeslagen.` en `onsaved` met de teruggegeven rij. Hints: het lege min-veld toont `standaard: 14 kn (je profiel)`. Opties van "Tot": geen `00:00` en geen `24:00`. Opties van "Dagen vooruit": `''` en `0`–`6`, geen `7`; met een `row` met `days_ahead: 7` wel `7`. Met een `row`: de knop `Standaardinstellingen` → een delete-call met `eq('user_id', USER_ID)` en `eq('spot_id', 'test-meer')`, en `onsaved(null)`. Zonder `row` is die knop er niet. |
+| `alert-rule-form.test.ts` | Mockt `#lib/supabase.js` (fake). Rendert `AlertRuleForm` met `userId USER_ID`, `spot SPOT_VERIFIED`, `profile PROFILE_FULL`, `row null` en `onsaved vi.fn()`. **(AC-3)** `within(getByRole('group', { name: 'Windrichtingen' })).getAllByRole('checkbox')` heeft exact de waarden `['onshore', 'side_onshore', 'sideshore']` en de toegankelijke namen `Aanlandig`, `Schuin aanlandig` en `Sideshore (langs de kust)`. Nergens in de component staat een checkbox met waarde `side_offshore` of `offshore` (`container.querySelectorAll('input[type=checkbox]')`), en geen label `Aflandig` of `Schuin aflandig`. **(AC-4)** min `20`, max `15`, klik Opslaan → de fout `De maximale wind moet hoger zijn dan de minimale wind.` en `writeCalls(fake.calls).length === 0`. Conflict: min `30` (profielmax 26) → een fout die `je profiel` bevat, 0 writes. Alle richtingen uit → `Kies minstens één windrichting.`, 0 writes. Geldig (min `14`, dagen alleen za en zo, Vanaf `17:00`) → precies één call op `alert_rules` met ops `upsert` (payload `{ user_id: USER_ID, spot_id: 'test-meer', enabled: true, min_kn: 14, max_kn: null, dir_classes: null, weekdays: [6, 7], earliest_local: '17:00:00', latest_local: null, min_go_hours: null, days_ahead: null }`, `{ onConflict: 'user_id,spot_id' }`), `select` en `single`; daarna `Opgeslagen.` en `onsaved` met de teruggegeven rij. Hints: het lege min-veld toont `standaard: 14 kn (je profiel)`. Opties van "Tot": geen `00:00` en geen `24:00`. Opties van "Dagen vooruit": `''` en `0`–`6`, geen `7`; met een `row` met `days_ahead: 7` wel `7`. Met een `row`: de knop `Standaardinstellingen` → een delete-call met `eq('user_id', USER_ID)` en `eq('spot_id', 'test-meer')`, en `onsaved(null)`. Zonder `row` is die knop er niet. **(B-1, E24)** Met `row = ruleRow('test-meer', { latest_local: '17:00:00' })`: `await user.selectOptions(getByLabelText('Vanaf (lokale tijd)'), '19:00')` (`@testing-library/user-event`, al aanwezig) gooit niet; daarna staan de knop `Opslaan` en de hint `standaard: 14 kn (je profiel)` er nog. Klik Opslaan → de tekst `"Tot" moet later zijn dan "Vanaf".`, `role="alert"` met `Niet opgeslagen: controleer de gemarkeerde velden.` en `writeCalls(fake.calls).length === 0`. Om een onopgevangen fout zichtbaar te maken, faalt de test ook als er tijdens de test een `error`-event op `window` komt (`window.addEventListener('error', spy)`, na afloop `expect(spy).not.toHaveBeenCalled()`). |
 | `profile-page.test.ts` | Mockt `#lib/supabase.js` (fake) en `#lib/auth.js` (fake-session). **(AC-6)** `sessionStore.set(null)` → link `Inloggen` (`href="/login"`), tekst `Log in om je profiel te bewerken.` en `fake.calls.length === 0`. `undefined` → `Laden…` en 0 calls. **(AC-4)** Met `SESSION` en het antwoord `PROFILE_EMPTY` (een `profiles`-response voor `maybeSingle`), na `findByLabelText('Gewicht (kg)')`: gewicht `25` → Opslaan → de `weight`-fout en `writeCalls(...).length === 0`. Idem: "Kite toevoegen" en `25` → de quiverfout; min `20` en max `15` → `minNotBelowMax`. Geldig (gewicht `75`, niveau `Gemiddeld`, kites `9` en `12`) → precies één write: ops `[['update', { weight_kg: 75, level: 'intermediate', quiver_m2: [9, 12], default_min_kn: null, default_max_kn: null }], ['eq', 'user_id', USER_ID], ['select', PROFILE_COLUMNS.join(',')], ['single']]` en `Opgeslagen.`. Lege kn-velden tonen de hints uit `profileKnHints`. `missing` (data `null`) → de melding uit Interfaces. Een loadfout → `role="alert"` en `Opnieuw proberen` doet een nieuwe query. |
-| `alerts-page.test.ts` | Zelfde mocks. **(AC-6)** `null` → `Log in om je alerts in te stellen.`, 0 calls; `undefined` → 0 calls. Met `SESSION` en de antwoorden profiles `PROFILE_FULL`, favorites `[{ spot_id: 'test-meer' }, { spot_id: 'test-strand' }]`, alert_rules `[ruleRow('test-meer', { min_kn: 18 })]` en spots `[SPOT_VERIFIED, SPOT_UNVERIFIED]`: twee secties in de volgorde Testmeer, Teststrand; Testmeer toont `Aan · 18–26 kn · min. 2 uur go · vandaag plus 3 dagen`; Teststrand toont de niet-geverifieerd-melding en `Aan · 14–26 kn · …`. Met profiel `{ default_max_kn: 20 }` en regel `min_kn: 25` voor Testmeer → `role="note"` met `Deze instellingen botsen`. Geen favorieten → de uitleg met een link naar `/`. Na opslaan in het formulier van Testmeer (min `16`) wordt de samenvatting `Aan · 16–26 kn · …`. |
+| `alerts-page.test.ts` | Zelfde mocks. **(AC-6)** `null` → `Log in om je alerts in te stellen.`, 0 calls; `undefined` → 0 calls. Met `SESSION` en de antwoorden profiles `PROFILE_FULL`, favorites `[{ spot_id: 'test-meer' }, { spot_id: 'test-strand' }]`, alert_rules `[ruleRow('test-meer', { min_kn: 18 })]` en spots `[SPOT_VERIFIED, SPOT_UNVERIFIED]`: twee secties in de volgorde Testmeer, Teststrand; Testmeer toont `Aan · 18–26 kn · min. 2 uur go · vandaag plus 3 dagen`; Teststrand toont de niet-geverifieerd-melding en `Aan · 14–26 kn · …`. Met profiel `{ default_max_kn: 20 }` en regel `min_kn: 25` voor Testmeer → `role="note"` met `Deze instellingen botsen`. Geen favorieten → de uitleg met een link naar `/`. Na opslaan in het formulier van Testmeer (min `16`) wordt de samenvatting `Aan · 16–26 kn · …`. **(N-8)** Vóór elke interactie met een formulier opent de test het `<details>`-element van die sectie expliciet: `const details = section.querySelector('details')!; details.open = true; await tick();` (`tick` uit `'svelte'`), en zoekt daarna met `within(section)`. Zo hangt de test niet af van hoe jsdom de inhoud van een dicht `<details>` of een klik op `<summary>` behandelt. Een extra test controleert dat `details.open` bij het laden `false` is. |
 | `layout.test.ts` (wijzigen) | Ingelogd: links `Alerts` (`/alerts`) en `Profiel` (`/profiel`). Uitgelogd en onbekend: geen van beide. |
 | `spot-list.test.ts`, `spot-page.test.ts` (wijzigen) | Extra `vi.mock('#lib/favorites.js', async () => (await import('./helpers/fake-favorites.js')).favoritesModule)`. De mock die een fout geeft bij een import van `#lib/supabase.js` blijft staan. Nieuwe tests: bij `signed_out` geen knop `Favoriet: …`; bij `{ status: 'ready', userId: USER_ID, ids: new Set(['test-meer']) }` heeft de lijst `Favoriet: Testmeer` met `aria-pressed="true"` en `Favoriet: Teststrand` met `false`; een klik roept `toggleFavoriteMock` aan met `'test-strand'`. Op de spotpagina staat de ster in `.title-row` naast de `h1`. De bestaande tests blijven groen. |
 | `no-telegram.test.ts` (node) | **(AC-8)** Geen bestand onder `src/` bevat `/telegram/i`. |
 
 ### Python: `ingest/tests/test_rule_resolution_cases.py`
+De structuur ligt vast; de builder vult alleen de opmaak in (ruff bepaalt de importvolgorde, zoals in `test_windows.py`):
 ```python
 """WP-16 AC-2: shared rule resolution cases (the TypeScript side is web/test/rules.test.ts)."""
+
+import json
+from datetime import time
+from typing import Any
+
+import pytest
+from pydantic import ValidationError
+
+from evaluation_fixtures import make_spot
+from shakka.config import REPO_ROOT
+from shakka.domain.alerts import (
+    FIELD_SOURCES,
+    RULE_FIELDS,
+    AlertRuleOverride,
+    ProfileDefaults,
+    RuleSource,
+    resolve_rule,
+)
+from shakka.domain.direction import DirClass
+from shakka.domain.spot import SpotProfile
+
 CASES_PATH = REPO_ROOT / "data" / "contracts" / "rule_resolution_cases.json"
 CASES: list[dict[str, Any]] = json.loads(CASES_PATH.read_text(encoding="utf-8"))
-DIR_ORDER = [c.value for c in DirClass]
+DIR_ORDER = [c.value for c in DirClass]  # onshore, side_onshore, sideshore, ... (= contract order)
+CASE_KEYS = {"name", "spot", "profile", "override", "expected"}
+
 
 def _fmt(t: time | None) -> str | None:
-    """None -> None; 'HH:MM' when seconds and microseconds are 0, else t.isoformat()."""
+    """None -> None; 'HH:MM' when second and microsecond are 0, else t.isoformat() (A18)."""
+    if t is None:
+        return None
+    if t.second == 0 and t.microsecond == 0:
+        return t.strftime("%H:%M")
+    return t.isoformat()
 
-def _expected_sources(spot, profile, override) -> dict[str, str]:
-    """Per field the first level in FIELD_SOURCES[field] with a non-None input value:
-    RULE -> getattr(override, field) (override may be None); PROFILE -> profile.default_min_kn for
-    min_kn, profile.default_max_kn for max_kn; SPOT -> spot.default_min_kn for min_kn; SYSTEM always."""
+
+def _parse(case: dict[str, Any]) -> tuple[ProfileDefaults | None, AlertRuleOverride | None]:
+    p, o = case["profile"], case["override"]
+    profile = ProfileDefaults.from_row(p) if p is not None else None
+    override = AlertRuleOverride.from_row(o) if o is not None else None
+    return profile, override
+
+
+def _expected_sources(
+    spot: SpotProfile, profile: ProfileDefaults | None, override: AlertRuleOverride | None
+) -> dict[str, str]:
+    """Per field the first level in FIELD_SOURCES[field] whose PARSED input is not None:
+    RULE -> getattr(override, field) (None if override is None; so latest_local 24:00, which
+    from_row turns into None, counts as system, and enabled None too);
+    PROFILE -> profile.default_min_kn / default_max_kn (min_kn / max_kn only);
+    SPOT -> spot.default_min_kn (min_kn only); SYSTEM -> always."""
+    out: dict[str, str] = {}
+    for field in RULE_FIELDS:
+        for source in FIELD_SOURCES[field]:
+            if source is RuleSource.RULE:
+                value = getattr(override, field) if override is not None else None
+            elif source is RuleSource.PROFILE:
+                value = getattr(profile, f"default_{field}") if profile is not None else None
+            elif source is RuleSource.SPOT:
+                value = spot.default_min_kn
+            else:
+                value = True  # SYSTEM always has a value
+            if value is not None:
+                out[field] = source.value
+                break
+    return out
+
 
 @pytest.mark.parametrize("case", CASES, ids=[c["name"] for c in CASES])
-def test_rule_resolution_cases(case: dict[str, Any]) -> None: ...
+def test_rule_resolution_cases(case: dict[str, Any]) -> None:
+    spot = make_spot(default_min_kn=case["spot"]["default_min_kn"])
+    expected = case["expected"]
+    if expected.get("error") == "invalid":
+        with pytest.raises(ValidationError):
+            _parse(case)
+        return
+    profile, override = _parse(case)
+    if expected.get("error") == "conflict":
+        with pytest.raises(ValueError, match="must be below") as exc:
+            resolve_rule(spot, profile, override)
+        assert not isinstance(exc.value, ValidationError)
+        return
+    rule = resolve_rule(spot, profile, override)
+    actual = {
+        "enabled": rule.enabled,
+        "min_kn": rule.min_kn,  # float; == with the int in the file
+        "max_kn": rule.max_kn,
+        "dir_classes": [c.value for c in sorted(rule.dir_classes, key=DIR_ORDER.index)],
+        "weekdays": sorted(rule.weekdays),
+        "earliest_local": _fmt(rule.earliest_local),
+        "latest_local": _fmt(rule.latest_local),
+        "min_go_hours": rule.min_go_hours,
+        "days_ahead": rule.days_ahead,
+    }
+    assert actual == {k: v for k, v in expected.items() if k != "sources"}
+    assert _expected_sources(spot, profile, override) == expected["sources"]
+
 
 def test_rule_resolution_cases_coverage() -> None: ...
 ```
-- `spot = make_spot(default_min_kn=case["spot"]["default_min_kn"])` (uit `evaluation_fixtures`).
-- `expected.error == "invalid"`: `with pytest.raises(ValidationError)` rond `ProfileDefaults.from_row(...)` (als niet `null`) en `AlertRuleOverride.from_row(...)` (als niet `null`).
-- `expected.error == "conflict"`: beide `from_row`-aanroepen slagen, en `resolve_rule` geeft een `ValueError` (geen `ValidationError`) met `"must be below"` in de melding.
-- Anders vergelijkt de test `rule.enabled`, `rule.min_kn`, `rule.max_kn` (`==`, int en float mogen), `sorted(rule.dir_classes, key=DIR_ORDER.index)` als waarden, `sorted(rule.weekdays)`, `_fmt(...)` van beide tijden, `min_go_hours` en `days_ahead` met `expected`, en `_expected_sources(...) == expected["sources"]`. Zo is gecontroleerd dat de bronnen in het bestand kloppen met de tabel `FIELD_SOURCES` van WP-07.
-- Coverage: minstens 8 gevallen, unieke namen, elke `RuleSource`-waarde komt in minstens één `sources` voor, minstens één `conflict` en één `invalid`, exact de vijf sleutels per element, en een override heeft exact `RULE_FIELDS` als sleutels.
+- `rule` komt dus uit `resolve_rule(make_spot(default_min_kn=…), ProfileDefaults.from_row(p) if p else None, AlertRuleOverride.from_row(o) if o else None)`, en `_expected_sources` werkt op dezelfde geparste modellen (niet op de ruwe JSON). Daardoor telt `latest_local` 24:00 in geval 12 en `enabled: null` in geval 19 als `system`.
+- `invalid`: de `ValidationError` komt uit `from_row` (bij een ontbrekende kolom zou het een gewone `ValueError` zijn; die komt in de gevallen niet voor, want een override heeft altijd alle negen velden).
+- `conflict`: beide `from_row`-aanroepen slagen, en `resolve_rule` geeft een `ValueError` die geen `ValidationError` is, met `"must be below"` in de melding.
+- Anders: `actual` (zonder `sources`) is gelijk aan `expected` zonder `sources`, en `_expected_sources(...) == expected["sources"]`. Zo is gecontroleerd dat de bronnen in het bestand kloppen met de tabel `FIELD_SOURCES` van WP-07.
+- Coverage: precies 20 gevallen, unieke namen, elke `RuleSource`-waarde komt in minstens één `sources` voor, minstens één `conflict` en één `invalid`, `set(case) == CASE_KEYS` per element, en een override heeft exact `set(RULE_FIELDS)` als sleutels.
 
 ### Per acceptatiecriterium
 - **AC-1:** `cd web && npm ci && npm run check && npm test && npm run build && npm run verify:build`; vanuit de root `bash scripts/check-no-client-openmeteo.sh`; en `cd ingest && uv run pytest && uv run ruff check . && uv run ruff format --check .`.
-- **AC-2:** `cd ingest && uv run pytest -k rule_resolution_cases` en `cd web && npx vitest run test/rules.test.ts`, allebei op `data/contracts/rule_resolution_cases.json` (18 gevallen, alle vier de niveaus).
+- **AC-2:** `cd ingest && uv run pytest -k rule_resolution_cases` en `cd web && npx vitest run test/rules.test.ts`, allebei op `data/contracts/rule_resolution_cases.json` (20 gevallen, alle vier de niveaus).
 - **AC-3:** `alert-rule-form.test.ts` (groep Windrichtingen).
 - **AC-4:** `profile-page.test.ts` (gewicht, quiver, min ≥ max, 0 writes) en `alert-rule-form.test.ts` (min ≥ max, conflict, 0 writes); ondersteund door `forms.test.ts`.
 - **AC-5:** `favorite-star.test.ts` (insert en delete met `spot_id`); ondersteund door `favorites.test.ts`.
@@ -807,7 +923,9 @@ Gecontroleerd op 15 oktober 2026. **Geen nieuwe packages.** Gebruikt worden de v
 | PostgREST-foutcodes: `PGRST116` (406, geen of meer dan één rij bij een enkelvoudig antwoord), `23505` en `23503` (409), `42501` (403/401) | Foutafhandeling | https://docs.postgrest.org/en/v12/references/errors.html |
 | Kolomgrant: `authenticated` mag in `profiles` alleen `weight_kg`, `level`, `quiver_m2`, `default_min_kn` en `default_max_kn` updaten, zonder insert; `favorites` en `alert_rules` hebben volledige CRUD op de eigen rijen | Schrijfregel | `supabase/migrations/20261015090100_m1_security.sql` (WP-01; E12 en R8 in de WP-01-blueprint) |
 | Svelte stores `readable(initial, start)`: `start` bij de eerste abonnee, de teruggegeven `stop` bij de laatste | `favorites.ts` | https://svelte.dev/docs/svelte/stores |
-| Svelte 5 `bind:group` op checkboxes (een array, met behoud van niet-stringwaarden), `$effect`, `$derived`, `$state` | Formulieren, laden | https://svelte.dev/docs/svelte/bind, https://svelte.dev/docs/svelte/$effect |
+| Svelte 5 `bind:group` op checkboxes (bindt een array van de aangevinkte `value`s; dat niet-stringwaarden zoals de getallen 1–7 behouden blijven, staat in de docs alleen expliciet voor `<select bind:value>`, niet voor `bind:group`, dus R5-fallback), `$effect`, `$derived`, `$state` | Formulieren, laden | https://svelte.dev/docs/svelte/bind, https://svelte.dev/docs/svelte/$effect |
+| Svelte `untrack(fn)` uit `'svelte'` en de compilerwaarschuwing `state_referenced_locally` ("This reference only captures the initial value of …"; oplossing: verwijzen binnen een closure) | Beginwaarde van `form` in `AlertRuleForm` | https://svelte.dev/docs/svelte/svelte, https://svelte.dev/docs/svelte/compiler-warnings |
+| Pydantic 2.14 (lockfile) leest `time` uit strings volgens speedate: `HH:MM`, `HH:MM:SS`, `HH:MM:SS.FFFFFF` ("1 to 6 digits are reflected in the time.microsecond, extra digits are ignored"), optioneel een tijdzone | A18, geval 20 | https://pydantic.dev/docs/validation/latest/api/pydantic/standard_library_types/, https://github.com/pydantic/speedate |
 | Resolutieregels | `effectiveRule` | `docs/wp/WP-07/blueprint.md` (Ontwerp, A6, A7, E36, E37, "Gevolgen", WP-16), `ingest/src/shakka/domain/alerts.py` |
 
 Geen Open-Meteo, geen nieuwe dienst, geen analytics en geen derde partij. Alles loopt via de bestaande Supabase-client met de publishable key.
@@ -817,7 +935,8 @@ Geen Open-Meteo, geen nieuwe dienst, geen analytics en geen derde partij. Alles 
 - **R2. Upsert en kolomrechten tegen de echte database zijn niet unit-getest.** De tests gebruiken een nep-client. Mitigatie: stap 10 van het stappenplan doet een rooktest tegen de lokale stack (`supabase start`, RLS en grants zoals in productie), en AC-7 toetst het end-to-end.
 - **R3. Conflicten via het profiel (A13).** Een profielgrens kan voor één spot een conflict geven dat pas op `/alerts` zichtbaar is. Dan komen er voor die spot geen alerts tot de gebruiker het aanpast. Mitigatie: een duidelijke waarschuwing per favoriet. Blokkeren op `/profiel` zou extra queries en complexere UX vragen.
 - **R4. Ontfavorieten wist de regel (A14).** Onbedoeld werk kan verloren gaan. Mitigatie: de uitleg op `/alerts`. Een bevestigingsdialoog is buiten scope.
-- **R5. Svelte 5-details.** `bind:group` met getallen en het wijzigen van `e.rule` in een `$state`-lijst zijn gedocumenteerd, maar subtiel. De componenttests dekken beide. Werkt `bind:group` met getallen niet zoals verwacht, dan gebruikt de builder string-waarden plus omzetting in `parseAlertRuleForm`, en legt dat vast in `deviations.md`.
+- **R5. Svelte 5-details.** Het wijzigen van `e.rule` in een `$state`-lijst is gedocumenteerd maar subtiel; dat `bind:group` getallen behoudt, staat niet letterlijk in de docs (zie Externe afhankelijkheden). De componenttests dekken beide. Werkt `bind:group` met getallen niet zoals verwacht, dan gebruikt de builder string-waarden plus omzetting naar getallen in `parseRuleFields` (en terug in `ruleToForm`), en legt dat vast in `deviations.md`.
+- **R8. Fouten in afgeleide state breken een component.** Een `throw` in `$derived` die de template gebruikt, laat het formulier crashen (review B-1). Mitigatie: alles wat `AlertRuleForm` in `$derived` aanroept (`ruleHints`, `timeOptions`, `daysAheadOptions`) gooit nooit; `ruleHints` vangt `effectiveRule` af en krijgt een invoer die stap 2 altijd haalt. Tests in `forms.test.ts` en `alert-rule-form.test.ts` (E24, E34).
 - **R6. Optimistische ster en meerdere tabbladen.** Een ster in een ander tabblad kan verouderd zijn tot de volgende navigatie (A2). Gevolgen zijn klein: een dubbele insert geldt als gelukt (E7), en een delete van een niet-bestaande rij is geen fout.
 - **R7. Apparaatklok en tijdzone spelen hier geen rol.** Er is geen datumlogica in deze WP (tijden zijn lokale wandkloktijden als strings), dus de bestaande test `no-local-date-getters` blijft geldig.
 
@@ -838,7 +957,7 @@ Werk in de worktree `/Users/larst/Dev/Shakka/.claude/worktrees/WP-16` op branch 
    - Rood. Breid `src/lib/types.ts` en `src/lib/contracts.ts` uit (`parseAlertDefaults`, `ALERT_DEFAULTS`).
    - Groen.
 2. **Effectieve regel en pariteit (tests eerst).**
-   - Schrijf `data/contracts/rule_resolution_cases.json` (alle 18 elementen voluit, volgens de tabel), `ingest/tests/test_rule_resolution_cases.py` en `web/test/rules.test.ts`.
+   - Schrijf `data/contracts/rule_resolution_cases.json` (alle 20 elementen voluit, volgens de tabel), `ingest/tests/test_rule_resolution_cases.py` en `web/test/rules.test.ts`.
    - Draai eerst de Python-test: die moet groen zijn zonder codewijziging. Is hij rood, dan zit de fout in het JSON-bestand; corrigeer dat, niet `alerts.py`.
    - Maak dan `src/lib/rules.ts`. Groen.
 3. **Labels en formulieren (tests eerst).**
@@ -879,3 +998,33 @@ Werk in de worktree `/Users/larst/Dev/Shakka/.claude/worktrees/WP-16` op branch 
 **Nodig van Lars:**
 - AC-7 (zie Testplan).
 - Een reactie op de voorstellen A9 (niveaulabels) en A10 (bronlabels).
+
+## Verwerking review
+Review ronde 1 (`docs/wp/WP-16/review.md`, CHANGES_REQUIRED). Beslissingen van de orchestrator zijn gevolgd.
+
+**B-1 (blokkerend): `ruleHints` kan gooien bij een omgekeerd tijdvenster.** Overgenomen.
+- Nieuwe functie `parseRuleFields` in `forms.ts` (Interfaces): stap 1 van `parseAlertRuleForm`, gedeeld met `ruleHints`. Hij past ook de controles tussen velden toe en zet dan het latere veld in de soepele waarde op `null`: `earliest >= latest` → `latest_local = null` (`timeOrder`), `min >= max` → `max_kn = null` (`minNotBelowMax`), `latest_local '00:00'` → `null`. Zo haalt de soepele waarde altijd stap 2 van `effectiveRule`.
+- `ruleHints` roept `effectiveRule` één keer aan, in een `try` die elke fout vangt; bij een fout wordt de kn-hint `standaard: botst met je andere windgrenzen`. De tweede aanroep (fallback) uit revisie 1 is vervallen in plaats van in een eigen `try` gezet: alleen `min_kn` en `max_kn` hadden `eff` nodig, en de overige hints zijn bij lege invoer altijd de systeemwaarde, dus die komen nu direct uit `defaults`. Daarmee kan `ruleHints` niet meer gooien, en dat was het doel van de beslissing.
+- Tests: `forms.test.ts` (Vanaf `18:00`/Tot `17:00`, min `20`/max `15`, Tot `00:00`, ongeldig profiel en conflict: `ruleHints` gooit niet; de waarden van `parseRuleFields`) en `alert-rule-form.test.ts` (rij met Tot `17:00`, daarna Vanaf `19:00` kiezen: geen crash, hint blijft, Opslaan toont `timeOrder`, 0 writes, geen `error`-event). Edge cases E24 en E34, risico R8.
+
+**N-1: `enabled: null`.** Overgenomen als exacte spiegel: `effectiveRule` accepteert `null` en valt terug op de default met bron `system` (A3, algoritme stap 2 en 3). Nieuw geval 19 `rule_enabled_null_falls_back` in `rule_resolution_cases.json`; de test "`enabled null` → invalid" in `rules.test.ts` is vervangen door "`enabled null` → `true`, bron `system`", en `'yes'` geeft nu `invalid`. E35.
+
+**N-2: succespad van de Python-test.** Overgenomen. De testopzet staat nu bijna volledig uitgeschreven: imports (`REPO_ROOT` uit `shakka.config`, `make_spot` uit `evaluation_fixtures`), `_parse` met `ProfileDefaults.from_row`/`AlertRuleOverride.from_row`, `rule = resolve_rule(spot, profile, override)`, het `actual`-dict, `_fmt` en `_expected_sources` met implementatie op de geparste modellen (24:00 bij geval 12 en `enabled: null` bij geval 19 tellen als `system`).
+
+**N-3: pariteit bij tijdfracties.** Overgenomen door beide kanten op dezelfde manier te normaliseren (niet door de regex te beperken, want dan zou TS strenger zijn dan Python). A18 legt de vorm vast (`HH:MM`, `HH:MM:SS` of `HH:MM:SS.ffffff`, gelijk aan `time.isoformat()`); `normalizeLocalTime` is daarop aangepast, het stringvergelijk voor `earliest < latest` blijft kloppen. Nieuw geval 20 `times_with_seconds_and_fraction` en extra unit-tests. Het formulier accepteert nu ook die genormaliseerde vormen, zodat een via de CLI opgeslagen `17:00:30` ongewijzigd terug kan (E33). Gecontroleerd tegen de Pydantic- en speedate-documentatie (Externe afhankelijkheden).
+
+**N-4: Tot `00:00` in de database.** Overgenomen. `storedRuleStatus` geeft bij `latest_local === '00:00'` `ok: false` met `"Tot 00:00" telt geen enkel uur. Voor deze spot komen geen alerts tot je dit aanpast.`, dus geen samenvatting `00:00–00:00` meer. E19 en `forms.test.ts` aangepast.
+
+**N-5: tekst bij een ongeldig profiel.** Overgenomen. Nieuwe meldingen `profileInvalid` (`Je profiel heeft ongeldige windgrenzen; pas die aan bij Profiel.`) en `ruleInvalid` (voor elke andere, niet te verwachten fout); `parseAlertRuleForm` stap 3 kiest op basis van `RuleError.field`. E36 en een test in `forms.test.ts`. De tekst van `storedRuleStatus` voor een opgeslagen ongeldige regel blijft ongewijzigd.
+
+**N-6: type- en uitvoeringsdetails.** Overgenomen.
+- `AlertDefaultItem<T, A>` met `allowed: A[] | null`, plus `AlertDefaultChoiceItem` voor `dir_classes` (`DirClass[]`) en `weekdays` (`number[]`), zodat de component zonder cast bindt.
+- "Opnieuw proberen" roept `retry()` aan, met een guard op `userId !== null`; `submit` op `/profiel` heeft dezelfde guard. Op `/alerts` staat de `ok`-tak in `{#if page.kind === 'ok' && userId !== null}`.
+- De beginwaarde van `form`, `errors`, `status` en `saving` op `/profiel` staat nu in Interfaces.
+- `AlertRuleForm` gebruikt `$state(untrack(() => ruleToForm(row, …)))` met commentaar, en `ctx` is `$derived`.
+
+**N-7: `bind:group` in Externe afhankelijkheden.** Genoteerd, en de bewering in de tabel is gecorrigeerd: alleen `<select bind:value>` noemt het behoud van niet-stringwaarden expliciet; R5 verwijst ernaar. Geen ontwerpwijziging.
+
+**N-8: `<details>` in `alerts-page.test.ts`.** Overgenomen als testbare variant: `<details>` blijft standaard dicht (UX ongewijzigd). De test zet `details.open = true` en wacht op `tick()` vóór elke interactie, en controleert in een aparte test dat hij bij het laden dicht is.
+
+**N-9: voorstellen A9/A10 en A13/A14.** Genoteerd; ze wachten op een reactie van Lars en zijn niet gewijzigd.
