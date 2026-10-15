@@ -6,6 +6,7 @@ Praktische handleiding voor lokaal werken aan Shakka. Hier staan alleen namen va
 - uv: `brew install uv` of het installatiescript van astral.sh. uv haalt Python 3.12 zelf op als die ontbreekt.
 - Supabase CLI: `brew install supabase/tap/supabase`.
 - Docker Desktop of OrbStack: alleen nodig voor `supabase start`, vanaf WP-01.
+- Node 24 LTS (bijv. via nvm: `nvm install 24`); `web/.nvmrc` bevat de versie. Vanaf WP-13.
 
 ## 2. Ingest lokaal
 Alle commando's draaien vanuit `ingest/`:
@@ -51,8 +52,10 @@ Wat `uv run shakka doctor` meldt:
 | `TELEGRAM_CHAT_ID` | `.env`, GitHub Secret | ingest: operatormeldingen en testberichten | WP-09 |
 | `APP_BASE_URL` | `.env`, GitHub Actions variable | ingest: "ik ga"-links in berichten | WP-14 |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | `.env`, GitHub Secrets | ingest | WP-17 |
+| `PUBLIC_SUPABASE_URL`, `PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `web/.env`, Cloudflare Pages | web | WP-13 |
+| `NODE_VERSION` | Cloudflare Pages | build | WP-13 |
 
-De Supabase access token en het database-wachtwoord blijven bij Lars en komen nergens in de repo. De `PUBLIC_*`-variabelen voor de web-app komen in `web/.env.example` (WP-13).
+De Supabase access token en het database-wachtwoord blijven bij Lars en komen nergens in de repo. De `PUBLIC_*`-variabelen voor de web-app staan in `web/.env.example`. Gebruik daar nooit de secret key; de build weigert een sleutel die met `sb_secret_` begint.
 
 ## 5. Supabase CLI koppelen
 1. `supabase login`: opent de browser, de token blijft lokaal.
@@ -70,7 +73,7 @@ De Supabase access token en het database-wachtwoord blijven bij Lars en komen ne
 - Optionele pariteitstest van `FakeSupabase` tegen echt PostgREST: neem de lokale secret key over uit `supabase status` en draai vanuit `ingest/`: `SHAKKA_TEST_SUPABASE_URL=http://127.0.0.1:54321 SHAKKA_TEST_SUPABASE_SECRET_KEY=<lokale secret key> uv run pytest tests/test_fake_parity.py`. Die test werkt alleen tegen localhost en wordt anders overgeslagen.
 
 ## 7. CI
-De workflow `.github/workflows/ci.yml` draait op `push` en `pull_request`. Job `ingest` doet `uv sync`, `uv run ruff check .`, `uv run ruff format --check .` en `uv run pytest`. Job `db` draait `supabase start` (zonder de diensten die de tests niet nodig hebben) en `supabase test db`. CI gebruikt geen secrets.
+De workflow `.github/workflows/ci.yml` draait op `push` en `pull_request`. Job `ingest` doet `uv sync`, `uv run ruff check .`, `uv run ruff format --check .` en `uv run pytest`. Job `db` draait `supabase start` (zonder de diensten die de tests niet nodig hebben) en `supabase test db`. Job `web` draait in `web/`: `npm ci`, `npm run check`, `npm test`, `npm run build`, `npm run verify:build` en de Open-Meteo-guard `scripts/check-no-client-openmeteo.sh`. Voor de publieke variabelen gebruikt de job placeholders (geen secrets). CI gebruikt geen secrets.
 
 Laatste run bekijken: `gh run list --workflow ci.yml --limit 1`.
 
@@ -122,3 +125,18 @@ Pas daarna `CAPTURE_URL` en `CAPTURE_DATE` in `ingest/tests/test_openmeteo_forec
 4. Een onbekend extreemtype (bijv. bij dubbel hoogwater) laat het station falen in plaats van iets te raden. Meld het dan als issue.
 5. Bron: Rijkswaterstaat WaterWebservices (DDAPI20), CC0. Geen uptimegarantie. Een storing van een paar dagen is geen probleem, want er staat 8 dagen vooruit in de database.
 6. Fixtures opnieuw vastleggen: `uv run python scripts/capture_rws_fixtures.py`. Daarna de tests bijwerken: `EXPECTED_EXTREMES` in `tests/test_rws_tides.py`.
+
+## 11. Web-app (PWA, vanaf WP-13)
+1. **Lokaal.** `cd web && cp .env.example .env` en vul je waarden in: remote (Dashboard, Project Settings, API) of de lokale stack (`http://127.0.0.1:54321` en de publishable key uit `supabase status`). Daarna `npm ci`, `npm run dev` (http://localhost:5173), `npm run check`, `npm test`, `npm run build`, `npm run verify:build` en vanuit de repo-root `bash scripts/check-no-client-openmeteo.sh`.
+2. **Lokaal inloggen.** Met de lokale stack komt de magic link in Mailpit (`http://127.0.0.1:54324`). `config.toml` staat `http://localhost:5173` als redirect toe. Inloggen werkt alleen voor bestaande gebruikers (`shouldCreateUser: false`, tot WP-22): maak jezelf eenmalig aan via het Supabase Dashboard (Authentication, Users, Add user) of lokaal via Studio.
+3. **Cloudflare Pages (eenmalig, Lars).**
+   - Workers & Pages, Create, Pages, Connect to Git, repo `LarsTout/shakka`;
+   - production branch `main`;
+   - framework preset "None", build command `npm run build`, build output directory `build`, root directory `web`;
+   - Preview branches: alle niet-productiebranches (dus `develop` en `wp/*`);
+   - environment variables voor **Production en Preview**: `PUBLIC_SUPABASE_URL`, `PUBLIC_SUPABASE_PUBLISHABLE_KEY` en `NODE_VERSION=24.22.0` (het standaardimage heeft Node 22.16, en dat is te oud voor SvelteKit 3). Installeert 24.22.0 niet, gebruik dan een eerdere 24.x vanaf 24.15.
+4. **Supabase Auth (Lars).** Authentication, URL Configuration:
+   - Site URL: `https://<project>.pages.dev`;
+   - Redirect URLs: `https://<project>.pages.dev`, `https://<project>.pages.dev/**`, `https://*.<project>.pages.dev`, `https://*.<project>.pages.dev/**`, `http://localhost:5173` en `http://localhost:5173/**`.
+5. **Beperkingen.** De standaard-SMTP mailt alleen naar teamleden van het project, max. 2 per uur. Een inloglink is één keer bruikbaar en verloopt na 1 uur. Op iOS heeft een app op het beginscherm eigen opslag, los van Safari. Een magic link uit de mail logt je in Safari in, niet in de geïnstalleerde app (zie WP-18).
+6. **App-icoon vervangen.** Vervang de PNG's in `web/static/icons/` door bestanden met dezelfde naam en afmeting. `npm run icons` maakt de placeholders opnieuw.

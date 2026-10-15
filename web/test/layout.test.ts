@@ -1,0 +1,82 @@
+import { render, screen, within } from '@testing-library/svelte';
+import userEvent from '@testing-library/user-event';
+import { createRawSnippet } from 'svelte';
+import { writable } from 'svelte/store';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+	initAuth: vi.fn(),
+	signOut: vi.fn(),
+	initialAuthRedirectError: vi.fn(),
+	registerServiceWorker: vi.fn(),
+	linkExpired: 'Deze inloglink is verlopen of al gebruikt. Vraag een nieuwe aan.'
+}));
+const sessionStore = vi.hoisted(() => ({ current: null as unknown }));
+
+vi.mock('#lib/auth.js', async () => {
+	const { writable } = await import('svelte/store');
+	sessionStore.current = writable<unknown>(null);
+	return {
+		session: sessionStore.current,
+		initAuth: mocks.initAuth,
+		signOut: mocks.signOut,
+		initialAuthRedirectError: mocks.initialAuthRedirectError
+	};
+});
+vi.mock('#lib/sw-register.js', () => ({ registerServiceWorker: mocks.registerServiceWorker }));
+
+import Layout from '../src/routes/+layout.svelte';
+
+const children = createRawSnippet(() => ({ render: () => '<p>Kind</p>' }));
+const store = () => sessionStore.current as ReturnType<typeof writable<unknown>>;
+
+beforeEach(() => {
+	vi.clearAllMocks();
+	mocks.initAuth.mockReturnValue(() => {});
+	mocks.initialAuthRedirectError.mockReturnValue(null);
+	store().set(null);
+});
+
+describe('+layout.svelte', () => {
+	it('shows attribution in the footer on every page', () => {
+		render(Layout, { children });
+		const footer = screen.getByRole('contentinfo');
+		expect(
+			within(footer).getAllByRole('link').some((a) => a.getAttribute('href') === 'https://open-meteo.com/')
+		).toBe(true);
+		expect(footer.textContent).toContain('Rijkswaterstaat');
+	});
+	it('renders children', () => {
+		render(Layout, { children });
+		expect(screen.getByText('Kind')).toBeInTheDocument();
+	});
+	it('registers the service worker once, disabled outside production', () => {
+		render(Layout, { children });
+		expect(mocks.registerServiceWorker).toHaveBeenCalledTimes(1);
+		expect(mocks.registerServiceWorker).toHaveBeenCalledWith(navigator, false);
+	});
+	it('shows Inloggen when signed out', () => {
+		render(Layout, { children });
+		expect(screen.getByRole('link', { name: 'Inloggen' })).toHaveAttribute('href', '/login');
+	});
+	it('shows email and Uitloggen when signed in', async () => {
+		store().set({ user: { email: 'lars@example.com' } });
+		render(Layout, { children });
+		expect(screen.getByText('lars@example.com')).toBeInTheDocument();
+		await userEvent.click(screen.getByRole('button', { name: 'Uitloggen' }));
+		expect(mocks.signOut).toHaveBeenCalled();
+	});
+	it('shows neither while auth is unknown', () => {
+		store().set(undefined);
+		render(Layout, { children });
+		expect(screen.queryByText('Inloggen')).toBeNull();
+		expect(screen.queryByText('Uitloggen')).toBeNull();
+	});
+	it('shows and dismisses the magic-link error banner', async () => {
+		mocks.initialAuthRedirectError.mockReturnValue(mocks.linkExpired);
+		render(Layout, { children });
+		expect(await screen.findByRole('alert')).toHaveTextContent(mocks.linkExpired);
+		await userEvent.click(screen.getByRole('button', { name: 'Sluiten' }));
+		expect(screen.queryByRole('alert')).toBeNull();
+	});
+});
