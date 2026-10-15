@@ -1,73 +1,92 @@
-# Review WP-20, ronde 1
-Oordeel: CHANGES_REQUIRED
+# Review WP-20, ronde 2
+Oordeel: APPROVED
+
+Beoordeeld: `docs/wp/WP-20/blueprint.md`, revisie 2, en de verwerking van review ronde 1. Naast WP-20 gelegd: `.claude/worktrees/WP-21/docs/wp/WP-21/blueprint.md` (revisie 2, alleen gelezen).
+
+## Status van ronde 1
+- **B-1 (bestandsnamen): opgelost.** WP-20 houdt `#lib/session-page-data.ts`, `test/session-page-data.test.ts` en `test/fixtures/session-data.ts`. WP-21 revisie 2 heeft deze bestanden echt hernoemd naar `public-session-data.ts`, `public-session-data.test.ts` en `fixtures/public-session.ts` (WP-21 A2, Bestanden, stappenplan r. 1114). Daar staat ook een expliciet verbod op de drie WP-20-namen. Beide blueprints zijn het eens over de volgorde: WP-20 merget eerst, WP-21 rebaset. R1 klopt nu. De overlap is echt beperkt tot `user-tables.test.ts` (andere test in hetzelfde bestand) en `RUNBOOK.md` (andere secties). `app.css` raakt alleen WP-21. De eindcontrole in stap 13 (`grep -E "routes/s/|rsvp|public-session|session-view"`) bewaakt dit.
+- **N-1 t/m N-10: verwerkt.** Gecontroleerd:
+  - `GO_RUN_MIN_HOURS = 1`, met het beslispunt voor Lars;
+  - AC-6 stap 7 is uitvoerbaar;
+  - de wissel naar zomertijd op 28-03-2027 klopt: de laatste zondag van maart 2027, met 02:30 → `[]` en 03:00 → 01:00Z;
+  - `goHref` is gekoppeld aan `GO_URL_DST_*`;
+  - A16 staat achter `{#if $session && runs.length}`;
+  - `PGRST301`/`PGRST303` gaan naar `signedOut`; dat is nagekeken in de PostgREST-bron;
+  - `handledFor` is gekoppeld aan `returnPath`;
+  - N-7 heeft een expliciete override (`EVAL_DARK` bestaat in `spot-data.ts`);
+  - de datumgrens `dateRange` werkt. `2026-07-15 + 365 = 2027-07-15` en `addDaysToKey`/`localDateKey` bestaan in `time.ts`;
+  - `new-session-page.test.ts` zet de klok vast.
+
+## Gecontroleerd en in orde
+- **Terugkeer via `/go`:** blijft veilig.
+  - `isAllowedReturnPath` eist het prefix `/go?` (dat sluit `//evil…` en absolute URL's uit), plus `parseGoParams` en dezelfde origin.
+  - `takeReturnTo` verwijdert de sleutel altijd en gooit nooit. De TTL is 0..60 min.
+  - `goto` navigeert alleen intern.
+  - De loginpagina navigeert zelf niet weg (`login/+page.svelte` heeft geen `goto`), dus er is geen race met het layout-`$effect`.
+  - Dat `/go` uitgelogd blijft werken, past bij A16.
+- **Tikkie-regel (A18):** veilig.
+  - Door het vaste prefix `https://tikkie.me/` volgt na de host direct `/`. Gebruikersnaam, poort, subdomein en lijkende domeinen zijn dus uitgesloten, en `\S+` sluit tab en regeleinde uit.
+  - De controle van `new URL(...)` op hostname, gebruikersnaam en poort is redundant maar onschuldig.
+  - De lengtegrenzen in E26 kloppen: 22 + 178 = 200 tekens.
+  - Wat het WP-20-formulier doorlaat, is een deelverzameling van wat WP-21 `tikkieLink` toont: prefix, minstens één teken, URL parseert, hostname `tikkie.me`. Een sessie die via de app is gemaakt, toont zijn Tikkie dus altijd op `/s/{slug}`.
+  - Het formulier blijft strenger dan de CHECK `^https://[^[:space:]]+$`, `char_length <= 200`.
+- **R9/E50 (een bestaande niet-Tikkie-link blokkeert opslaan):** acceptabel.
+  - Zo'n link kan alleen via SQL ontstaan (alleen Lars).
+  - De melding zegt precies wat er moet gebeuren, en annuleren werkt los daarvan.
+  - WP-21 toont zo'n link toch al niet (WP-21 A14).
+  - Stil wissen of stil doorlaten zou slechter zijn.
+- **Contract `/s/{slug}`:** gelijk in beide blueprints (regex `{10,64}`, geen query of fragment, `sessionPath`).
+- **Importgraaf zonder cyclus:**
+  - `local-prefs` importeert `session-form`, die `session-model` en `time` importeert;
+  - `browser-storage` heeft geen imports;
+  - `session-tables.test.ts` bewaakt dat deze modules puur blijven.
 
 ## Blokkerend
-B-1: WP-20 en WP-21 maken allebei dezelfde drie bestanden aan, met verschillende inhoud. Waar: Bestanden (`web/src/lib/session-page-data.ts`, `web/test/fixtures/session-data.ts`, `web/test/session-page-data.test.ts` in het Testplan), Risico's R1 en "Gevolgen voor latere WP's". De WP-21-blueprint (`.claude/worktrees/WP-21/docs/wp/WP-21/blueprint.md`, Bestanden r. 99, 107 en 112) maakt dezelfde paden aan:
-- `session-page-data.ts` met `SessionPageData`/`loadSessionPage`, gebouwd op `rsvp.ts`;
-- een eigen `fixtures/session-data.ts` (ook met een export `SLUG`, plus `NOW`, `SESSION_INFO` enz.);
-- een eigen `session-page-data.test.ts` met RPC-mocks in plaats van `createFakeSupabase`.
-
-Waarom: wie als tweede merget, krijgt add/add-conflicten op een `src/lib`-module en op een fixturebestand. Die oplossen vraagt ontwerpkeuzes: twee laadlagen samenvoegen (de ene leest tabellen via `user-data`, de andere RPC's via `rsvp`), twee mockstrategieën in één testbestand, en botsende fixturenamen. R1 zegt "inhoudelijk botst er niets" en noemt deze bestanden niet. Dat klopt dus niet, terwijl de parallelle bouw juist op die bewering leunt.
-
-Voorstel: geef de WP-20-bestanden een naam die niet botst, bijvoorbeeld:
-- `#lib/organizer-page-data.ts`;
-- `test/fixtures/organizer-data.ts`;
-- `test/organizer-page-data.test.ts`.
-
-Werk de lagenschets, de tabel Bestanden, het Testplan, het Stappenplan (stap 2 en 5) en "Gevolgen" bij (WP-23 axe-fixtures). Pas R1 aan met de echte gedeelde bestanden: `user-tables.test.ts`, `RUNBOOK.md` en `app.css` (alleen WP-21).
+Geen.
 
 ## Niet-blokkerend
-N-1: A10. De orchestrator noemt "minimaal 2 go-uren", maar de blueprint legt `GO_RUN_MIN_HOURS = 1` vast en vraagt Lars om een keuze. Ik adviseer 1. Dan heeft elk Go-blok op de spotpagina een knop, en is er geen Go-blok zonder knop (dat zou verwarrend zijn). De alertdefault `min_go_hours` is een persoonlijke drempel voor meldingen, geen drempel voor wat je zelf mag plannen. Kiest Lars 2, dan moet ook de spotpaginatest mee: die gebruikt nu één los `EVAL_GO`-uur ("Ik ga 14:00–15:00").
+N-1: **De gedeelde helpers (A17) komen niet overeen met WP-21 revisie 2. Actie voor de orchestrator vóórdat WP-21 wordt goedgekeurd.** Waar: WP-20 A17 en "Gevolgen" (WP-21), tegenover WP-21 A20, "Consistentie" (r. 887) en stap 9 (r. 1152–1154).
 
-N-2: AC-6, procedure stap 6 ("Herhaal stap 2 uitgelogd") kan zo niet worden uitgevoerd. Uitloggen verwijdert het push-abonnement van dit apparaat (WP-18, RUNBOOK §14.14), dus er komt geen nieuwe melding om op te tikken. Beter:
-- uitgelogd op "Ik ga" tikken op de spotpagina, of de `go_url` met de hand openen;
-- na het inloggen meldingen opnieuw aanzetten (RUNBOOK §14.12).
+Beide blueprints zijn tegelijk herzien, en elk nam de namen over die de ander in revisie 1 had. Daardoor kruisen ze nu.
 
-N-3: Tijdtests.
-- Voeg naast de gat-test van 29-03-2026 (al verleden) de eerstvolgende echte wissel toe: `localWallTimeCandidates('2027-03-28','02:30')` → `[]` en `('2027-03-28','03:00')` → `[01:00Z]`.
-- `GO_URL_DST_*` komen niet uit `build_go_url` (`message_fixtures.py` heeft ze niet). Leg het formaat vast met een test als `goHref('test-strand', 2026-10-25T10Z, 14Z)` = `pathname + search` van `GO_URL_DST_DAY` (en idem voor `_NIGHT`). Dan is het formaat via de bewaakte `GO_URL_SUMMER` gekoppeld aan WP-08.
+| Helper | WP-20 rev 2 levert | WP-21 rev 2, stap 9, verwacht |
+|---|---|---|
+| slugregex | `SESSION_SLUG_RE`, `isValidSessionSlug` in `session-model.ts` | `SESSION_SLUG_PATTERN`, `isSessionSlug` in `session-model.ts` |
+| code points | `countCodePoints` | `codePointLength` |
+| opslag | `StorageLike`, `browserStorage(): StorageLike \| undefined` in `browser-storage.ts` | `KeyValueStorage`, `browserStorage(): … \| null` in `local-prefs.ts` |
+| Tikkie | `safeTikkieLink(): { href, host } \| null` ("zelfde vorm als WP-21 `safeHttpsLink`") | `tikkieLink(): string \| null`; `safeHttpsLink` bestaat niet meer |
 
-N-4: In M3 hebben crewleden geen account. "Ik ga" is voor uitgelogde gebruikers zichtbaar en eindigt dan bij een inlogmuur die voor hen niet werkt (A1, R7). Overweeg om de knop alleen te tonen als `$session` waar is: één `{#if $session}`, want `FavoriteStar` leest de sessie al. Een andere optie is een korte hint. Dit is een keuze voor Lars, geen fout.
+Waarom dit niet blokkeert voor WP-20:
+- WP-20 is op zichzelf consistent en uitvoerbaar, en merget eerst.
+- Stap 9 van WP-21 loopt op compileerfouten vast. Volgens WP-21 draait de builder dan per vervanging terug, en blijven de helpers dubbel (zoals bij N-8 van ronde 1). Er ontstaat geen fout in de werking.
 
-N-5: `sessionErrorMessage`. Overweeg ook de JWT-fouten van PostgREST (`PGRST301`, `PGRST303`) op `signedOut` te mappen in plaats van `generic`. Een `42501` kan ook een kolomprivilege-bug zijn; dan klopt "Je bent niet meer ingelogd" niet, maar dat is acceptabel.
+Toch klopt de bewering van WP-20 niet: "zelfde naam en signature als WP-21". En de beweerde vermindering van dubbele code gebeurt zo niet.
 
-N-6: `go/+page.svelte`: `done` wordt niet teruggezet als SvelteKit de component hergebruikt voor een andere `/go`-URL. In de praktijk gebeurt dat niet (`WindowClient.navigate` laadt de pagina volledig). Wie het robuust wil: koppel `done` aan `data.returnPath`.
+Voorstel: pas WP-21 (revisie 3) aan, niet WP-20. Na de merge is de WP-20-code de bron. Stap 9 wordt dan:
+- `session-view.ts` herexporteert `SESSION_SLUG_RE`, `isValidSessionSlug` en `countCodePoints` uit `#lib/session-model.js`;
+- `rsvp-storage.ts` importeert `StorageLike` en `browserStorage` uit `#lib/browser-storage.js`. De parameters worden `StorageLike | undefined` (of `browserStorage() ?? null` op de aanroepplek);
+- de "Consistentie"-alinea van WP-21 noemt de WP-20-namen van revisie 2.
 
-N-7: Spotpaginatest "een dag zonder go-uren heeft geen Ik ga-link". De bestaande `pageData()` heeft op beide dagen een go-uur (`EVAL_GO` en `EVAL_TOMORROW`). Geef de override expliciet op (bijv. `evaluations: [EVAL_GO, EVAL_OFFSHORE, EVAL_LOWCONF]` voor "morgen zonder link"), zodat de builder niet zelf hoeft te kiezen.
+Pas daarna ook de tekst van WP-20 A17 en "Gevolgen" aan: `null` → `undefined`, en de verwijzing naar `safeHttpsLink`. Dat raakt de WP-20-build niet.
 
-N-8: Na de merge van WP-20 en WP-21 bestaan sommige helpers dubbel:
-- `browserStorage` (in `local-prefs.ts` en in `rsvp-storage.ts`);
-- `SESSION_SLUG_PATTERN`/`isSessionSlug` en `SESSION_SLUG_RE`/`isValidSessionSlug`;
-- `formatWindowLocal` en `sessionWindowText`.
+N-2: `safeTikkieLink` heeft in WP-20 geen gebruiker, en WP-21 gebruikt zijn eigen `tikkieLink`, met een andere returnvorm. Eenvoudiger:
+- laat `safeTikkieLink` in WP-20 weg (YAGNI) en houd alleen `isTikkieUrl`;
+- of laat WP-21 `tikkieLink` bouwen als `isTikkieUrl(url) ? new URL(url).href : null`.
 
-Neem in "Gevolgen" op wie dit samenvoegt en wanneer (orchestrator na de merge, of WP-23).
+Dan bestaat de Tikkie-regel op één plek. Kies één van de twee bij de afstemming van N-1. De tests voor `safeTikkieLink` in `session-model.test.ts` vallen dan weg of verhuizen mee.
 
-N-9: De contractafwijkingen in A3 zijn acceptabel:
-- `SessionRow` voorkomt een naamsbotsing met de supabase-js-`Session` in `auth.ts`;
-- `listMySessions(userId, now)` maakt AC-5 te toetsen en voegt naast RLS een expliciet `organizer_id`-filter toe;
-- `cancelSession(id, now?)` breekt geen aanroepen;
-- `getMySession` is een aanvulling.
+N-3: In `isValidOrganizerName` staan U+2028 en U+2029 als **letterlijke** tekens in de regex (r. 377, `…\u009f  ]`). Ze zien eruit als spaties. Plakt een builder die regel, dan is dat een syntaxfout, want een regexliteral mag geen regeleinde bevatten. Of hij typt twee spaties, en dan wordt "Jan Willem" geweigerd. Schrijf ze als `  `, en voeg een test toe dat `'Jan Willem'` geldig is.
 
-De orchestrator werkt `WORK_PACKAGES.md` bij.
+N-4: Is er een verouderde `shakka:return_to` (R4) en opent de gebruiker ingelogd een andere `/go`-URL vanuit een melding? Dan kunnen het layout-`$effect` en het `/go`-`$effect` in dezelfde tick allebei `goto` aanroepen. In de praktijk is dat zeldzaam: de sleutel bestaat hoogstens één uur en wordt bij de eerste sessie al opgenomen. Beide doelen zijn bovendien een geldig `/sessie/nieuw`. Laat het zo, of laat de layout `takeReturnTo` overslaan als de pagina zelf `/go` is.
 
-N-10: Het datumveld heeft geen grenzen. Bij een datum ver in het verleden (vóór 1977 is Amsterdam niet UTC+1/+2) geeft `localWallTimeCandidates` `[]`, en dan verschijnt de misleidende melding `timeNonexistent`. Dat is onschuldig. Optioneel: `min`/`max` op de input, of een datumcontrole van bijvoorbeeld vandaag −1 tot +365 dagen.
-
-Gecontroleerd en in orde (ter informatie):
-- de `/go`-terugkeer is veilig tegen open redirects (`/go?`-prefix, `parseGoParams`, zelfde origin, `goto` alleen intern), en de sleutel wordt altijd verwijderd;
-- de terugkeer werkt via een nieuw tabblad (gedeelde `localStorage`) en via een geplakte link in de iOS-beginschermapp (zelfde opslag als de `/go` uit de pushmelding);
-- `wa.me/?text=` zonder andere parameters, `rel="noopener noreferrer"`, Web Share alleen met `text`;
-- de insert zonder `organizer_id`, slug en `id` past bij de kolomgrants van de migratie;
-- het slugformaat van de trigger (22 tekens base64url uit 16 bytes, zonder `=`) matcht `^[A-Za-z0-9_-]{10,64}$`;
-- de drifttest-parser van `schema-columns.test.ts` geeft op de sessions-tabel precies `SESSION_COLUMNS` (plus `organizer_id` en `recent_rsvp_creates`);
-- de DST-voorbeelden (E12, E13, de kandidaten op 25-10) en de weekdagen (za 18 jul, zo 25 okt, za 7 nov) kloppen;
-- `user-data.ts` blijft de enige schrijfmodule;
-- er wordt nergens een `sb_secret_` gebruikt.
+N-5: Een sessie die via SQL over middernacht loopt (RUNBOOK §16.9) kan in het bewerkformulier niet ongewijzigd worden opgeslagen. Dat komt door `sessionToForm` met één datum (A7) en `endBeforeStart`/`dateRange`. Het is vergelijkbaar met E50, en annuleren werkt wel. Eventueel kan het als extra regel bij E50/R9 worden genoemd.
 
 ## Gecontroleerde bronnen
-- https://svelte.dev/docs/kit/$app-navigation (`goto(url, { replace })`; `replaceState` deprecated; `goto` weigert externe URL's)
-- https://developer.mozilla.org/en-US/docs/Web/API/Navigator/share (alleen `text` is toegestaan; transient activation; `AbortError` en andere rejects)
-- https://developer.mozilla.org/en-US/docs/Web/API/Clipboard/writeText (secure context, `NotAllowedError`)
-- https://quadlayers.com/how-to-create-a-whatsapp-link-wa-me-with-a-pre-filled-message/ en de zoekresultaten over `https://wa.me/?text=urlencodedtext` (een vooraf ingevuld bericht zonder nummer opent de contactkeuze); faq.whatsapp.com laadde niet volledig
-- https://supabase.com/docs/reference/javascript/insert (`.insert(...).select()`)
-- docs.postgrest.org errors (v14): niet te laden (HTTP 429); de PT400-mapping is overgenomen uit de goedgekeurde WP-19-blueprint en de migratie
-- Lokaal: `supabase/migrations/20261015200000_sessions.sql`, `docs/wp/WP-19/blueprint.md`, `docs/wp/WP-21/blueprint.md` (worktree WP-21), `web/src/lib/{time,go,data,user-data,auth,forms}.ts`, `web/src/routes/{+layout.svelte,go/*,login/+page.svelte,spot/[id]/+page.svelte}`, `web/test/{user-tables,schema-columns,go,go-url-fixture,layout}.test.ts`, `web/test/helpers/{fake-supabase,fake-session}.ts`, `web/test/fixtures/spot-data.ts`, `ingest/src/shakka/domain/messages.py`
+- https://raw.githubusercontent.com/PostgREST/postgrest/main/docs/references/errors.rst
+  - `PGRST301` en `PGRST303`: 401, JWT ongeldig of claims;
+  - `PGRST302`: 401, anonieme rol uitgeschakeld;
+  - `RAISE sqlstate 'PT400'`: HTTP 400, met code `PT400` en de eigen message.
+- Uit ronde 1 en niet opnieuw nodig: https://svelte.dev/docs/kit/$app-navigation, https://developer.mozilla.org/en-US/docs/Web/API/Navigator/share, https://developer.mozilla.org/en-US/docs/Web/API/Clipboard/writeText, https://supabase.com/docs/reference/javascript/insert
+- Lokaal:
+  - `.claude/worktrees/WP-21/docs/wp/WP-21/blueprint.md` (revisie 2: A2, A14, A20, A21, `session-view.ts`, `rsvp-storage.ts`, Consistentie, stap 8–9, Verwerking review);
+  - in de worktree van WP-20: `web/src/lib/time.ts` (`parseKey`, `addDaysToKey`, `localDateKey`, `localParts`, `parseGoParams`), `web/src/routes/login/+page.svelte`, `web/test/fixtures/spot-data.ts` (`EVAL_*`, `pageData`, `GO_URL_*`), `web/scripts/verify-build.mjs` (trackermarkers), `supabase/migrations/20261015200000_sessions.sql` (CHECKs voor `organizer_name`, `tikkie_url` en de slug).

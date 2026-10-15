@@ -1,5 +1,5 @@
 # Blueprint WP-20: Sessie aanmaken en delen
-Status: DRAFT
+Status: APPROVED
 Revisie: 2
 
 ## Doel
