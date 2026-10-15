@@ -3,11 +3,13 @@
 	import { onMount } from 'svelte';
 	import FavoriteStar from '#lib/components/FavoriteStar.svelte';
 	import Freshness from '#lib/components/Freshness.svelte';
+	import MapSwitch from '#lib/components/MapSwitch.svelte';
 	import VerdictBadge from '#lib/components/VerdictBadge.svelte';
 	import { daySummaryText, latestOfSummaries, shouldRefreshOnResume } from '#lib/view.js';
 	import type { PageProps } from './$types';
 
 	let { data }: PageProps = $props();
+	let view = $state<'list' | 'map'>('list');
 
 	onMount(() => {
 		const onVisible = () => {
@@ -37,7 +39,8 @@
 	<p>Er staan nog geen spots in de database.</p>
 {:else}
 	<Freshness latest={latestOfSummaries(data.summaries)} now={new Date(data.now)} />
-	<ul class="spot-list">
+	<MapSwitch spots={data.spots} summaries={data.summaries} bind:view />
+	<ul class="spot-list" hidden={view === 'map'}>
 		{#each data.spots as spot (spot.id)}
 			{@const summary = data.summaries[spot.id]}
 			<li class="spot-item" data-spot={spot.id}>
