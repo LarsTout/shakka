@@ -1,10 +1,11 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StorageLike } from '../src/lib/browser-storage.js';
 import {
 	ORGANIZER_NAME_KEY,
 	RETURN_TO_KEY,
 	RETURN_TO_TTL_MS,
 	isAllowedReturnPath,
+	pruneReturnTo,
 	readOrganizerName,
 	saveReturnTo,
 	takeReturnTo,
@@ -112,5 +113,48 @@ describe('organizer name', () => {
 	it('a stored 31-char name reads as empty', () => {
 		s.data.set(ORGANIZER_NAME_KEY, 'a'.repeat(31));
 		expect(readOrganizerName(s)).toBe('');
+	});
+});
+
+describe('pruneReturnTo (WP-23, A21)', () => {
+	const put = (v: string) => s.data.set(RETURN_TO_KEY, v);
+	const entry = (savedAt: number, path: string = PATH) => JSON.stringify({ path, saved_at: savedAt });
+
+	it.each([NOW, NOW - RETURN_TO_TTL_MS])('keeps a fresh key (saved_at %i)', (savedAt) => {
+		put(entry(savedAt));
+		expect(pruneReturnTo(s, NOW)).toBe(false);
+		expect(s.data.has(RETURN_TO_KEY)).toBe(true);
+	});
+	it('removes a key older than the TTL', () => {
+		put(entry(NOW - RETURN_TO_TTL_MS - 1));
+		expect(pruneReturnTo(s, NOW)).toBe(true);
+		expect(s.data.has(RETURN_TO_KEY)).toBe(false);
+	});
+	it.each([
+		['a saved_at in the future', entry(NOW + 1000)],
+		['broken JSON', '{nope'],
+		['a path that is not allowed', entry(NOW, '/elders')],
+		['a path that is not a string', JSON.stringify({ path: 1, saved_at: NOW })]
+	])('removes %s', (_name, raw) => {
+		put(raw);
+		expect(pruneReturnTo(s, NOW)).toBe(true);
+		expect(s.data.has(RETURN_TO_KEY)).toBe(false);
+	});
+	it('does nothing without a key and does not call removeItem', () => {
+		const spy = vi.spyOn(s, 'removeItem');
+		expect(pruneReturnTo(s, NOW)).toBe(false);
+		expect(spy).not.toHaveBeenCalled();
+	});
+	it('never throws on undefined storage or a storage that throws', () => {
+		expect(pruneReturnTo(undefined, NOW)).toBe(false);
+		expect(pruneReturnTo(throwing, NOW)).toBe(false);
+		const getThrows: StorageLike = { ...memory(), getItem: () => { throw new Error('blocked'); } };
+		expect(pruneReturnTo(getThrows, NOW)).toBe(false);
+		const removeThrows = memory();
+		removeThrows.data.set(RETURN_TO_KEY, '{nope');
+		removeThrows.removeItem = () => {
+			throw new Error('blocked');
+		};
+		expect(pruneReturnTo(removeThrows, NOW)).toBe(false);
 	});
 });

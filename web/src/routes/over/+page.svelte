@@ -21,6 +21,6 @@
 	gemarkeerd als niet geverifieerd. Check ter plekke altijd de lokale regels.
 </p>
 <h2>Geen advertenties, geen tracking</h2>
-<p>Shakka heeft geen advertenties en gebruikt geen analytics of trackers van derden.</p>
+<p>Shakka heeft geen advertenties en gebruikt geen analytics of trackers van derden. Lees de <a href="/privacy">privacyverklaring</a>.</p>
 <h2>Bronnen</h2>
 <Attribution />

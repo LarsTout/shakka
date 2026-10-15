@@ -50,6 +50,23 @@ describe('+layout.svelte', () => {
 		).toBe(true);
 		expect(footer.textContent).toContain('Rijkswaterstaat');
 	});
+	it('has a skip link as the first focusable element and a focusable main (WP-23)', async () => {
+		render(Layout, { children });
+		const skip = screen.getByRole('link', { name: 'Naar de inhoud' });
+		expect(skip).toHaveAttribute('href', '#main');
+		await userEvent.tab();
+		expect(skip).toHaveFocus();
+		const main = screen.getByRole('main');
+		expect(main).toHaveAttribute('id', 'main');
+		expect(main).toHaveAttribute('tabindex', '-1');
+	});
+	it('links to the privacy page in the footer (WP-23)', () => {
+		render(Layout, { children });
+		expect(within(screen.getByRole('contentinfo')).getByRole('link', { name: 'Privacy' })).toHaveAttribute(
+			'href',
+			'/privacy'
+		);
+	});
 	it('renders children', () => {
 		render(Layout, { children });
 		expect(screen.getByText('Kind')).toBeInTheDocument();
@@ -140,6 +157,12 @@ describe('+layout.svelte', () => {
 			render(Layout, { children });
 			expect(nav.goto).not.toHaveBeenCalled();
 			expect(localStorage.getItem('shakka:return_to')).not.toBeNull();
+		});
+		it('prunes an expired key at app start while signed out, without navigating', async () => {
+			save(Date.now() - 61 * 60 * 1000);
+			render(Layout, { children });
+			await vi.waitFor(() => expect(localStorage.getItem('shakka:return_to')).toBeNull());
+			expect(nav.goto).not.toHaveBeenCalled();
 		});
 		it('shows Mijn sessies only when signed in', () => {
 			const { unmount } = render(Layout, { children });

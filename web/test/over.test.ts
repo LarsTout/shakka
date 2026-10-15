@@ -10,4 +10,8 @@ describe('over page', () => {
 			screen.getAllByRole('link').some((a) => a.getAttribute('href') === 'https://open-meteo.com/')
 		).toBe(true);
 	});
+	it('links to the privacy statement', () => {
+		render(Over);
+		expect(screen.getAllByRole('link').some((a) => a.getAttribute('href') === '/privacy')).toBe(true);
+	});
 });

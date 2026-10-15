@@ -187,7 +187,7 @@
 			<p class="hint" id="rsvp-privacy">
 				Alleen je voornaam en je vervoerskeuze worden opgeslagen, tot {SESSION_RETENTION_DAYS} dagen na
 				de sessie. Iedereen met deze link kan ze zien. Wijzigen of afmelden kan later alleen in deze
-				browser op dit apparaat.
+				browser op dit apparaat. <a href="/privacy">Meer over privacy</a>
 			</p>
 		{/if}
 		{#if notice}<p class="notice-ok" role="status">{notice}</p>{/if}
