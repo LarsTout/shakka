@@ -1,5 +1,5 @@
 # Blueprint WP-10: Evaluatie- en alertjobs plus beheer-CLI
-Status: DRAFT
+Status: APPROVED
 Revisie: 2
 
 ## Doel
