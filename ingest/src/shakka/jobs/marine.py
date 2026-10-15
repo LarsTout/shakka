@@ -4,17 +4,20 @@ Display only: wave data never feeds evaluations or alerts.
 """
 
 import logging
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Final, Protocol
 
 import httpx
+from pydantic import ValidationError
 
 from shakka.budget import SOURCE_OPEN_METEO_MARINE, BudgetGuard, estimate_call_weight
-from shakka.db import SupabaseRest, iso_utc
+from shakka.config import get_settings
+from shakka.db import DatabaseError, SupabaseRest, iso_utc
 from shakka.domain.forecast import SpotLocation
 from shakka.domain.marine import MarineHour
+from shakka.jobs import runtime
 from shakka.jobs.forecast import load_spot_locations
 from shakka.jobs.inputs import require_aware
 from shakka.openmeteo.marine import (
@@ -117,3 +120,32 @@ def run_marine_ingest(
         errors=errors,
         deleted=deleted,
     )
+
+
+def run_marine_cli(*, echo: Callable[[str], None]) -> int:
+    """Run `shakka marine fetch`. Returns the exit code. Never prints environment values."""
+    try:
+        settings = get_settings()
+    except ValidationError:
+        echo("marine: configuration incomplete; run shakka doctor")
+        return 1
+    db = runtime.open_db(settings)
+    http = runtime.open_http()
+    try:
+        result = run_marine_ingest(db, http, BudgetGuard(db), now=runtime.utcnow())
+    except DatabaseError as exc:
+        echo(f"marine: database error: {exc}")
+        return 1
+    finally:
+        http.close()
+        db.close()
+    echo(
+        f"marine: spots={result.spots} rows={result.rows} calls={result.calls:.2f} "
+        f"deleted={result.deleted} skipped_budget={'yes' if result.skipped_budget else 'no'} "
+        f"errors={len(result.errors)}"
+    )
+    for line in result.errors:
+        echo(f"error   {line}")
+    failed = bool(result.errors) or result.skipped_budget
+    echo("marine: failed" if failed else "marine: ok")
+    return 1 if failed else 0
