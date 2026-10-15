@@ -51,6 +51,7 @@ Wat `uv run shakka doctor` meldt:
 | `APP_BASE_URL` | `.env`, GitHub Actions variable | ingest: "ik ga"-links in berichten | WP-14 |
 | `HOURLY_ENABLED` | GitHub Actions variable | workflow hourly.yml: schedule aan (true) of uit | WP-11 |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | `.env`, GitHub Secrets | ingest | WP-17 |
+| `OPERATOR_USER_ID` | `.env`, GitHub Secret | ingest: push-abonnementen van Lars voor het gebruiksrapport | WP-22 |
 | `PUBLIC_SUPABASE_URL`, `PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `web/.env`, Cloudflare Pages | web | WP-13 |
 | `PUBLIC_MAPTILER_KEY` | `web/.env` (lokale key), Cloudflare Pages (productiekey) | web: kaart (optioneel, publiek) | WP-15 |
 | `PUBLIC_VAPID_PUBLIC_KEY` | `web/.env`, Cloudflare Pages | web: Web Push aanzetten (optioneel, publiek; zelfde waarde als `VAPID_PUBLIC_KEY`) | WP-18 |
@@ -130,7 +131,7 @@ Pas daarna `CAPTURE_URL` en `CAPTURE_DATE` in `ingest/tests/test_openmeteo_forec
 
 ## 11. Web-app (PWA, vanaf WP-13)
 1. **Lokaal.** `cd web && cp .env.example .env` en vul je waarden in: remote (Dashboard, Project Settings, API) of de lokale stack (`http://127.0.0.1:54321` en de publishable key uit `supabase status`). Daarna `npm ci`, `npm run dev` (http://localhost:5173), `npm run check`, `npm test`, `npm run build`, `npm run verify:build` en vanuit de repo-root `bash scripts/check-no-client-openmeteo.sh`. Voor pushmeldingen lokaal: verwijder eerst de lege regel `PUBLIC_VAPID_PUBLIC_KEY=` uit `web/.env` (die komt mee uit `.env.example`). Zet dan de publieke VAPID-sleutel erin zonder hem te tonen, vanuit de repo-root: `grep '^VAPID_PUBLIC_KEY=' .env | sed 's/^/PUBLIC_/' >> web/.env`. In `npm run dev` werken meldingen niet (geen service worker); gebruik `npm run build && npm run preview`.
-2. **Lokaal inloggen.** Met de lokale stack komt de magic link in Mailpit (`http://127.0.0.1:54324`). `config.toml` staat `http://localhost:5173` als redirect toe. Inloggen werkt alleen voor bestaande gebruikers (`shouldCreateUser: false`, tot WP-22): maak jezelf eenmalig aan via het Supabase Dashboard (Authentication, Users, Add user) of lokaal via Studio.
+2. **Lokaal inloggen.** Met de lokale stack komt de magic link in Mailpit (`http://127.0.0.1:54324`). `config.toml` staat `http://localhost:5173` als redirect toe. Inloggen werkt voor bestaande gebruikers. Of een nieuw adres zich kan aanmelden hangt af van de Supabase-instelling "Allow new users to sign up" (vanaf WP-22, zie §17.6). Lokaal staat aanmelden aan; maak jezelf anders eenmalig aan via het Supabase Dashboard (Authentication, Users, Add user) of lokaal via Studio.
 3. **Cloudflare Pages (eenmalig, Lars).**
    - Workers & Pages, Create, Pages, Connect to Git, repo `LarsTout/shakka`;
    - production branch `main`;
@@ -140,7 +141,7 @@ Pas daarna `CAPTURE_URL` en `CAPTURE_DATE` in `ingest/tests/test_openmeteo_forec
 4. **Supabase Auth (Lars).** Authentication, URL Configuration:
    - Site URL: `https://<project>.pages.dev`;
    - Redirect URLs: `https://<project>.pages.dev`, `https://<project>.pages.dev/**`, `https://*.<project>.pages.dev`, `https://*.<project>.pages.dev/**`, `http://localhost:5173` en `http://localhost:5173/**`.
-5. **Beperkingen.** De standaard-SMTP mailt alleen naar teamleden van het project, max. 2 per uur. Een inloglink is één keer bruikbaar en verloopt na 1 uur. Op iOS heeft een app op het beginscherm eigen opslag, los van Safari. Een magic link uit de mail logt je in Safari in, niet in de geïnstalleerde app. In de beginschermapp log je daarom in met 'Inloglink plakken' op de inlogpagina. De link werkt één keer, en een linkvoorvertoning (ingedrukt houden in Mail) laadt de link en gebruikt hem op. Zet daarom eerst de voorvertoningen uit: houd in Mail een link in een ándere mail ingedrukt en kies 'Verberg linkvoorvertoningen' (iOS onthoudt die keuze). Houd daarna de inloglink ingedrukt, kies 'Kopieer link' en plak hem in de app. Alternatief: kopieer de link op je Mac (rechtermuisknop, 'Kopieer link') en plak hem via het gedeelde klembord; niet via WhatsApp of Berichten, want die laden ook een voorvertoning. Met de standaard-SMTP kun je hoogstens 2 links per uur aanvragen, dus wees zuinig met pogingen.
+5. **Beperkingen.** De standaard-SMTP mailt alleen naar teamleden van het project, max. 2 per uur. Die beperking geldt tot je eigen SMTP instelt (§17.6). Een inloglink is één keer bruikbaar en verloopt na 1 uur. Op iOS heeft een app op het beginscherm eigen opslag, los van Safari. Een magic link uit de mail logt je in Safari in, niet in de geïnstalleerde app. In de beginschermapp log je daarom in met 'Inloglink plakken' op de inlogpagina. De link werkt één keer, en een linkvoorvertoning (ingedrukt houden in Mail) laadt de link en gebruikt hem op. Zet daarom eerst de voorvertoningen uit: houd in Mail een link in een ándere mail ingedrukt en kies 'Verberg linkvoorvertoningen' (iOS onthoudt die keuze). Houd daarna de inloglink ingedrukt, kies 'Kopieer link' en plak hem in de app. Alternatief: kopieer de link op je Mac (rechtermuisknop, 'Kopieer link') en plak hem via het gedeelde klembord; niet via WhatsApp of Berichten, want die laden ook een voorvertoning. Met de standaard-SMTP kun je hoogstens 2 links per uur aanvragen, dus wees zuinig met pogingen.
 6. **App-icoon vervangen.** Vervang de PNG's in `web/static/icons/` door bestanden met dezelfde naam en afmeting. `npm run icons` maakt de placeholders opnieuw.
 7. **Spotlijst, spotpagina en `/go` (vanaf WP-14).** De app leest alleen `spots`, `evaluations`, `tide_extremes` en (vanaf WP-12) `marine_hours`. Het oordeel gebruikt de standaardgrenzen van de spot, niet de persoonlijke instellingen. "Ouder dan 3 uur" kijkt naar `evaluated_at`; die is ook vers als alleen de forecast-ingest faalt, dus controleer bij twijfel `ingest_runs` (§13.5). Donkere uren (reden `dark`) zijn op de spotpagina standaard verborgen. `/go?spot=...&start=...&end=...` (de "ik ga"-link in een melding) opent vanaf WP-20 "Sessie aanmaken", vooraf ingevuld. Uitgelogd vraagt de app eerst om in te loggen, en binnen een uur na het inloggen gaat hij terug naar dezelfde link. Ongeldige parameters gaan naar `/`. De app pagineert per 1000 rijen; zet de Supabase-instelling "Max rows" (API settings) niet lager dan 1000.
 8. **Profiel, favorieten en alerts in de app (vanaf WP-16).** Ingelogd zie je een ster bij elke spot (favoriet) en de pagina's Profiel en Alerts. Ze schrijven naar dezelfde tabellen als `shakka admin` (§12). Een favoriet zonder eigen instellingen gebruikt de standaard; "Standaardinstellingen" verwijdert de eigen regel. Een spot uit de favorieten halen verwijdert ook de regel. Ontbreekt een profiel ("Je profiel is niet gevonden"), voer dan in de SQL Editor de backfill uit de migratie uit: `insert into public.profiles (user_id) select id from auth.users on conflict (user_id) do nothing;`. Controle (WP-16 AC-7): zie §12 punt 6 (`admin alerts preview`).
@@ -180,7 +181,7 @@ In M1 worden er nog geen meldingen verstuurd. De alertjob berekent per favoriet 
 10. **Oude `TELEGRAM_*`-variabelen.** Die mag je uit je lokale `.env` halen. Ze worden genegeerd en zijn niet meer nodig.
 
 ## 13. Uurlijkse run (vanaf WP-11)
-1. **Wat draait er.** Elk uur om :17 UTC (geen garantie: GitHub kan vertragen of een run overslaan) draait `shakka run-hourly`: `spots_sync`, `forecast`, `marine`, `tides`, `evaluate`, `alerts`, `sessions_cleanup`, met foutisolatie per stap. De schedule draait de code van `main`, met het workflowbestand van `develop` (de default branch). Alleen als de variable `HOURLY_ENABLED` op `true` staat. Er draait één run tegelijk.
+1. **Wat draait er.** Elk uur om :17 UTC (geen garantie: GitHub kan vertragen of een run overslaan) draait `shakka run-hourly`: `spots_sync`, `forecast`, `marine`, `tides`, `evaluate`, `alerts`, `sessions_cleanup` en `usage_report` (§17.1), met foutisolatie per stap en een tijdsbudget voor de hele run (§17.3). De schedule draait de code van `main`, met het workflowbestand van `develop` (de default branch). Alleen als de variable `HOURLY_ENABLED` op `true` staat. Er draait één run tegelijk.
 2. **Eenmalige setup.**
    - Repo Settings, Secrets and variables, Actions: secrets `SUPABASE_URL` en `SUPABASE_SECRET_KEY`; vanaf WP-17 ook `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` en `VAPID_SUBJECT` (zonder deze secrets geen pushmeldingen, zie §14); de variable `APP_BASE_URL` op de productie-URL zonder pad of slash aan het eind (bijv. `https://<project>.pages.dev`), vanaf WP-14. Daarmee bevat elk alertbericht een werkende "ik ga"-link (`/go`).
    - Settings, Actions, General: Actions aan.
@@ -195,6 +196,7 @@ In M1 worden er nog geen meldingen verstuurd. De alertjob berekent per favoriet 
 6. **Wat een gefaalde run betekent** (mail van GitHub):
    - exitcode 1 bij `failed`: de alertstap faalde, niets werkte, of de run kon niet worden vastgelegd;
    - bij `stale_forecast`: de forecast faalt en de nieuwste is ouder dan 3 uur, dus geen alerts;
+   - bij `run_time_budget`: de run had na 600 s nog stappen te gaan; die zijn `skipped` en staan als `::error::` in de annotaties (§17.3);
    - bij een onvolledige configuratie (secrets);
    - bij de activiteitscheck vanaf 53 dagen (punt 8).
 
@@ -213,14 +215,18 @@ Laatste activiteitscommit: 2026-10-15
 4. **Cloudflare Pages (WP-18).** Zet `PUBLIC_VAPID_PUBLIC_KEY` (Production en Preview) op exact dezelfde waarde als `VAPID_PUBLIC_KEY` en deploy opnieuw. Zonder deze variabele toont de app 'Meldingen zijn in deze versie van Shakka nog niet beschikbaar.' Een andere sleutel dan die van de ingest geeft bij elke aflevering 403 (punt 7 en 10).
 5. **Database.** `supabase db push` na de merge (§8): de migratie maakt `push_subscriptions`.
 6. **Controleren (na WP-18).** `cd ingest && uv run shakka alerts test-push --user-id <id>` stuurt een testmelding naar elk apparaat. Per apparaat `ok`, `failed (<reden>)` (tijdelijk, het abonnement blijft) of `gone (...); subscription removed` (dood, verwijderd). Daarna `sent`, `failed` en `removed`, en `test-push: ok` (minstens één geslaagd) of `test-push: failed` (exitcode 1).
-7. **Tellers in `ingest_runs`** (stap `alerts`): `sent`, `failed`, `no_target`, `deferred`, `removed`, `push_enabled` en `push_failures` (per reden, bijvoorbeeld `{"HTTP 503": 2}`). `deferred` betekent: voor een favoriet slaagde geen aflevering en minstens één fout was tijdelijk; de state is niet opgeslagen en de volgende run probeert het opnieuw. Dat is zichtbaar als `::warning::alerts: <n> favorite(s) deferred ...` in de Actions-log. Staat die warning in elke run en toont `push_failures` `HTTP 403`, controleer dan of `PUBLIC_VAPID_PUBLIC_KEY` in Cloudflare gelijk is aan `VAPID_PUBLIC_KEY` en volg punt 10.
+7. **Tellers in `ingest_runs`** (stap `alerts`): `sent`, `failed`, `no_target`, `deferred`, `push_non_retryable`, `blocked_targets`, `removed`, `push_enabled` en `push_failures` (per reden, bijvoorbeeld `{"HTTP 503": 2}`).
+   - `deferred` komt alleen bij 429, 5xx en netwerkfouten: voor een favoriet slaagde geen aflevering en minstens één fout was tijdelijk. De state is niet opgeslagen en de volgende run probeert het opnieuw. Zichtbaar als `::warning::alerts: <n> favorite(s) deferred ...` in de Actions-log.
+   - `push_non_retryable`: HTTP 400, 401, 403, 413 en andere 4xx (behalve 404, 410 en 429) worden niet herhaald. Het event is voor dat apparaat verloren, de state wordt wel opgeslagen en het abonnement blijft staan. Dan staat er `::warning::alerts: <n> push delivery(ies) failed without retry ...` in de Actions-log en is de stap `partial` (exitcode 0, geen mail).
+   - Staat die warning in elke run en toont `push_failures` `HTTP 403`, controleer dan of `PUBLIC_VAPID_PUBLIC_KEY` in Cloudflare gelijk is aan `VAPID_PUBLIC_KEY` en volg punt 10.
+   - `blocked_targets`: abonnementen op een host buiten de lijst van toegestane push-diensten; zie §17.4.
 8. **Zonder VAPID-secrets** is het kanaal uit: een `::warning::` per run en de state schuift door zonder melding. Een onvolledige of ongeldige configuratie laat de stap `alerts` falen (mail van GitHub).
 9. **Overgang naar push (optioneel).** Wie push aanzet nadat hij al favorieten had (Lars bij de overgang uit M1, maar ook elke latere gebruiker), krijgt de lopende windows niet als melding. Wil je dat voor één gebruiker toch: na het aanzetten van push in de app de SQL `delete from public.alert_state where user_id = '<id>' and status = 'active';` in de SQL Editor; de volgende run pusht de lopende windows als nieuw.
 10. **Sleutels vervangen.** Zet de nieuwe sleutels overal, draai daarna `delete from public.push_subscriptions;` (oude abonnementen werken niet met een nieuwe sleutel) en zet push in de app opnieuw aan.
 11. **Privacy.** Endpoints, sleutels en het subject komen nooit in logs of uitvoer. `shakka alerts run` levert lokaal ook echt af; gebruik `--dry-run` om niets te sturen.
 12. **Meldingen aanzetten (vanaf WP-18).** Android en computer: open Shakka, log in, ga naar Alerts en tik "Meldingen aanzetten". iPhone en iPad (iOS 16.4 of nieuwer): eerst in Safari "Zet op beginscherm", dan Shakka vanaf het beginscherm openen, daar inloggen (inloglink plakken, §11 punt 5) en op Alerts aanzetten. Installeer de productie-URL, want de "ik ga"-links in meldingen wijzen daarheen (`APP_BASE_URL`).
 13. **Na een deploy.** Een nieuwe versie van de service worker wordt pas actief als alle vensters van Shakka dicht zijn. Sluit de app na een deploy helemaal (op iOS: wegvegen in de appkiezer; op Android: uit de recente apps vegen; op een computer: alle tabbladen van Shakka sluiten) en open hem opnieuw. Herhaal dat tot "Meldingen aanzetten" werkt; soms is het twee keer nodig (de eerste keer haalt de browser de nieuwe versie op, de tweede keer wordt die actief). Zegt de app "Er staat een nieuwe versie van Shakka klaar", sluit en open dan nog een keer.
-14. **Uitloggen en gedeelde apparaten.** Uitloggen verwijdert het abonnement van dit apparaat (dat kan tot 5 seconden duren; de knop toont dan "Uitloggen…"); daarna krijgt het apparaat geen meldingen meer. Zet iemand anders op hetzelfde apparaat meldingen aan, dan krijgt het apparaat een nieuw abonnement en gaan de meldingen van het vorige account er niet meer heen. Per account gelden hoogstens 10 apparaten; bij een elfde verdwijnt het oudste.
+14. **Uitloggen en gedeelde apparaten.** Uitloggen verwijdert het abonnement van dit apparaat (dat kan tot 5 seconden duren; de knop toont dan "Uitloggen…"); daarna krijgt het apparaat geen meldingen meer. Zet iemand anders op hetzelfde apparaat meldingen aan, dan krijgt het apparaat een nieuw abonnement en gaan de meldingen van het vorige account er niet meer heen. Per account gelden hoogstens 10 apparaten; bij een elfde verdwijnt het oudste. De database staat er hoogstens 20 per account toe (migratie van WP-22). Bij precies 20 geeft het opnieuw aanmelden van een bestaand apparaat een algemene foutmelding in plaats van "staat al aan"; verwijder dan oude abonnementen in de SQL-editor (`delete from public.push_subscriptions where user_id = '<id>' and last_success_at is null;`, of de oudste).
 15. **Controle (WP-18 AC-5).** Zie punt 6 voor `test-push`. Een tik op de testmelding opent de startpagina. Voor een echte alert: punt 9 (actieve rijen verwijderen) en `uv run shakka alerts run`; tik op de melding, die opent de "ik ga"-link of de spotpagina. Noteer hoeveel van de titel (max. 50 tekens) en de body (max. 150 tekens) zichtbaar is op het vergrendelscherm en in de uitgeklapte melding.
 
 ## 15. Golven (Open-Meteo Marine, vanaf WP-12)
@@ -285,3 +291,100 @@ Laatste activiteitscommit: 2026-10-15
    - account verwijderen met een testaccount (in het dashboard aangemaakt): daarna geen rij meer in `auth.users`, en de pagina toont de melding.
 6. Terugdraaien bij een CSP-probleem in productie: verwijder de regel `Content-Security-Policy` uit `web/static/_headers` (en de check in `checkHeaders` tijdelijk), push en deploy. Andere headers blijven staan.
 7. Na de merge: `supabase db push` voor de migratie `20261016090000_delete_my_account.sql`.
+
+## 18. Hardening en kostenbewaking (vanaf WP-22)
+
+Veldjes die Lars invult staan onderaan §18.6 en §18.9.
+
+1. **Gebruiksrapport en waarschuwingen.**
+   - De laatste stap van de uurlijkse run, `usage_report`, leest elk uur het Open-Meteo-verbruik (`api_usage`) en de databasegrootte (RPC `db_usage`). Het volledige rapport staat in `ingest_runs`, stap `usage_report`, `counts.report`.
+   - Elke maandag tussen 08:00 en 22:00 (Europe/Amsterdam) gaat een korte samenvatting als pushmelding naar de apparaten van Lars (`OPERATOR_USER_ID`), tot het één keer gelukt is. Valt de maandag weg, dan komt het rapport pas de volgende maandag.
+   - Drempels: database boven 300 MB (1 MB = 1024 × 1024 bytes, zoals het dashboard), Open-Meteo boven 7.000 calls op de UTC-dag of boven 210.000 in de UTC-maand (70% van de echte limieten). Een waarschuwing staat elk uur als `::warning::usage_report: usage threshold: ...` in de Actions-log zolang de drempel overschreden is. De pushmelding gaat hoogstens één keer per lokale dag en alleen tussen 08:00 en 22:00. Op maandag bevat het weekrapport de waarschuwingen zelf.
+   - De stap ruimt in de weekrapport-run ook `ingest_runs` op die ouder zijn dan 90 dagen.
+   - Lokaal lezen zonder iets te versturen: `cd ingest && uv run shakka usage show`. Een regel `error   ...` betekent dat een bron niet leesbaar was (exitcode 1).
+   - Ontbreekt `OPERATOR_USER_ID`, of heeft Lars geen abonnement, dan wordt het rapport wel opgeslagen en staat er een note-annotatie. Een ongeldige waarde (geen UUID) maakt de stap `partial`, zonder de waarde te tonen.
+2. **`OPERATOR_USER_ID` instellen.**
+   - Dashboard, Authentication, Users, kopieer de UID van je eigen account.
+   - `gh secret set OPERATOR_USER_ID` (plak de waarde bij de prompt, niet met `--body`) en zet dezelfde waarde in `.env`.
+   - Zet pushmeldingen aan op je telefoon (§14.12). De waarde wordt in logs en in `ingest_runs` geredigeerd.
+3. **Retries en budgetten.**
+   - Alle externe HTTP-aanroepen lopen via één retry-helper (`shakka.http.with_retries`):
+
+     | Bron | Opnieuw bij | Pogingen | Wachttijd (s) |
+     |---|---|---|---|
+     | Open-Meteo | transportfout, 429, 5xx | 3 | 1, 2; `Retry-After` bij 429 (1 tot 30) |
+     | Rijkswaterstaat | transportfout, 429, 5xx | 3 | 1, 2 |
+     | Supabase REST | transportfout, 429, 502, 503, 504, 520 tot 524; alleen select, upsert, update en delete | 3 | 0,5 en 1 |
+     | Web Push | geen retry in de run; de deferral (§14.7) is de retry | - | - |
+
+   - `insert` en `rpc` worden bewust niet herhaald (een insert kan dubbel staan). Is een update of delete wel doorgevoerd maar ging het antwoord verloren, dan geeft de herhaling 0 rijen terug; tellers als `removed` en `deleted` zijn dus indicatief.
+   - Stroomonderbreker: maakt één Supabase-aanroep al zijn pogingen op met een herhaalbare fout, dan doet de rest van die run nog maar één poging per aanroep (log: `db: retries disabled for the rest of this run`).
+   - Tijdsbudget voor de hele run: 600 s, gecontroleerd vóór elke stap. Daarna zijn alle resterende stappen `skipped` met reden `run_time_budget`, met een `::error::` per stap en exitcode 1 (mail van GitHub). Omdat `alerts` na de ingeststappen komt, is dat bij een trage ingest juist de stap die wordt overgeslagen; de volgende run doet hem opnieuw met de dan aanwezige data. De job-timeout is 900 s; het getijbudget van 240 s blijft bestaan.
+   - Veroudering per spot: de evaluatie- en de alertjob laten forecastrijen weg met `fetched_at` ouder dan 3 uur. Een spot met alleen oude rijen krijgt geen nieuwe evaluaties (de app toont dan zelf "verouderd") en een favoriet daarop wordt `ineligible`. Begrensd, niet eerlijk tot op het uur: de forecast achter een oordeel kan tot ongeveer 6 uur oud zijn voordat de app "verouderd" toont (3 uur tot de laatste evaluatie, daarna 3 uur voor de banner).
+4. **Push.**
+   - Alleen deze endpoints krijgen een push: `https://` zonder poort en zonder gebruikersnaam, met host `fcm.googleapis.com` of `jmt17.google.com` (het FCM-stagingendpoint van Chrome Beta, Dev en Canary), of een subdomein van `push.services.mozilla.com`, `push.apple.com` of `notify.windows.com`. `android.googleapis.com` (oude GCM) staat bewust niet in de lijst.
+   - Een abonnement op een andere host wordt overgeslagen en telt in `blocked_targets`, met een `::warning::alerts: <n> push subscription(s) skipped: push service host not allowed`. Herstel: controleer de host van het endpoint (SQL-editor, alleen de host bekijken), voeg hem toe aan `PUSH_SERVICE_HOSTS` of de suffixen in `ingest/src/shakka/notify/base.py` en maak een release.
+   - De database staat hoogstens 20 abonnementen per gebruiker toe (de app houdt er 10).
+5. **Migraties van WP-22.**
+   - `supabase db push` na de merge en vóór de promotie naar `main`. Zonder de migratie is `usage_report` elk uur `partial` (`PGRST202`). Staat de migratie van WP-23 (`20261016090000_...`) al op het remote project, gebruik dan `supabase db push --include-all`, omdat de migraties van WP-22 een eerdere tijdstempel hebben.
+   - Bij `PGRST202` na het pushen: `notify pgrst, 'reload schema';` in de SQL-editor.
+   - De migraties verwijderen de ongebruikte kolom `profiles.telegram_chat_id`, voegen `db_usage()` toe (alleen `service_role`) en twee triggers: de grens van 20 abonnementen en de bovengrens voor `sessions.starts_at` (hoogstens 370 dagen vooruit; de app staat 365 toe). De sessiegrens controleert bestaande rijen niet.
+6. **Eigen SMTP en aanmelden.**
+   - **Eerst, los van deze WP:** controleer in het Supabase Dashboard (Authentication, de algemene instellingen) dat "Allow new users to sign up" **uit** staat. De app stuurt vanaf WP-22 `shouldCreateUser: true`; of een nieuw adres een account krijgt, bepaalt alleen deze serverinstelling. Staat ze uit, dan geeft GoTrue `signup_disabled` en toont de app "nog niet inloggen"; bestaande gebruikers loggen gewoon in.
+   - Eisen aan de maildienst: een gratis tier, open- en kliktracking aantoonbaar uit, een geverifieerde afzender.
+
+     | Dienst | Gratis | Tracking | Eigen domein nodig | Oordeel |
+     |---|---|---|---|---|
+     | Resend | 3.000 per maand, 100 per dag | standaard uit voor alle domeinen | Ja | Voorkeur als er een domein is |
+     | Postmark | 100 per maand | opens en links standaard uit | Ja, plus handmatige goedkeuring | Voldoet, maar 100 per maand is te weinig zodra aanmelden open is |
+     | Gmail (apart Google-account voor Shakka) | 500 per dag | geen tracking-functie; bevestig met de test hieronder | Nee | Voorkeur zonder domein, met kanttekeningen |
+     | Brevo | 300 per dag | bij transactionele mail niet uit te zetten op de gratis tier | Nee | Afgewezen |
+     | SMTP2GO | 1.000 per maand | standaard niet te verifiëren | Onduidelijk | Niet voorgesteld |
+
+   - **Met een eigen domein: Resend.** Host `smtp.resend.com`, poort 465 (SMTPS) of 587 (STARTTLS), gebruiker `resend`, wachtwoord = een Resend-API-sleutel met permission `sending_access`. Zet tracking niet aan. Let op: een domein kost geld (registratie per jaar). Dat is een betaalde dienst en vergt het akkoord van Lars.
+   - **Zonder domein: een apart Gmail-account voor Shakka** (niet je persoonlijke adres), met tweestapsverificatie en een app-wachtwoord. Host `smtp.gmail.com`, poort 465 (SSL) of 587 (TLS), gebruiker = het volledige Gmail-adres, wachtwoord = het app-wachtwoord. Kanttekeningen: Google raadt app-wachtwoorden af en kan ze intrekken (dan stoppen de inloglinks tot er een andere dienst is), de afzender is een `@gmail.com`-adres en Google verwerkt de adressen van de ontvangers.
+   - De keuze is aan Lars. Instellen: Authentication, SMTP Settings: host, poort, gebruiker, wachtwoord of sleutel, afzenderadres, afzendernaam "Shakka".
+   - **Test (AC-6):**
+     1. eigen SMTP is ingesteld, "Allow new users to sign up" staat nog uit;
+     2. maak een testgebruiker aan via Authentication, Add user, mét "Auto Confirm User" (een onbevestigde gebruiker krijgt `signup_disabled` zolang aanmelden uit staat);
+     3. vraag in de app een inloglink aan: de mail komt aan;
+     4. de link in de mail wijst direct naar `https://<project-ref>.supabase.co/auth/v1/verify?...` en niet naar een redirect- of trackingdomein van de maildienst. Controleer dat door de link te kopiëren in plaats van erop te klikken;
+     5. inloggen met die link lukt;
+     6. pas daarna "Allow new users to sign up" aanzetten.
+   - Daarna moet "De maildienst" op `/privacy` en in `docs/PRIVACY.md` de gekozen dienst noemen (bij Gmail ook dat Google de adressen van de ontvangers verwerkt): een kleine vervolgwijziging.
+   - Gekozen SMTP-dienst: nog in te vullen door Lars.
+7. **Rate limits van Supabase Auth.** Instellen onder Authentication, Rate Limits (niet in `config.toml`; lokaal gebruikt de stack Mailpit). Een overschrijding geeft 429; de app toont dan "Te veel inlogpogingen".
+
+   | Limiet | Default | Voorstel |
+   |---|---|---|
+   | E-mails per uur | 30 na het instellen van eigen SMTP | daglimiet van de dienst gedeeld door 24, naar beneden afgerond: 4 bij Resend (100 per dag), 20 bij Gmail (500 per dag) |
+   | Aanmeldingen en inlogpogingen | 30 per 5 minuten per IP | de default |
+   | OTP-aanvragen per gebruiker | 60 s ertussen | de default |
+   | Verificaties | 30 per 5 minuten | de default |
+   | Token refreshes | 150 per 5 minuten | de default |
+
+   Een hogere limiet voor e-mails per uur kan, als je accepteert dat bij misbruik de daglimiet van de dienst bereikt wordt (dan werken inloglinks tot de volgende dag niet). Postmark (100 per maand) valt af zodra aanmelden open is.
+8. **Maandcheck (handmatig, eerste werkdag van de maand).**
+
+   | Dienst | Waar | Gratis grens | Actie bij |
+   |---|---|---|---|
+   | Supabase egress | Dashboard, Usage | 5 GB | > 3,5 GB |
+   | Supabase database | Dashboard, Usage, en het weekrapport | 500 MB | > 300 MB |
+   | Open-Meteo | Weekrapport | 10.000 per dag, 300.000 per maand | warning |
+   | MapTiler | Cloud, Analytics (requests) | 100.000 requests per maand, alleen tiles | > 70.000 |
+   | GitHub Actions | Actions-tab (publieke repo: minuten onbeperkt) | - | Schedule niet actief, of geen run in de laatste 2 uur |
+   | Cloudflare Pages | Builds | 500 per maand | > 350 |
+   | SMTP-dienst | Dashboard van de dienst | Resend 100 per dag en 3.000 per maand; Gmail 500 per dag | > 70% |
+   | Dependencies | `npm audit` en `pip-audit` (punt 10) | - | high of critical |
+   | Actions-pins | Releases van `actions/checkout` en `actions/setup-node` | - | Nieuwe release |
+
+   MapTiler rekent Shakka in requests, omdat de kaart MapLibre GL JS gebruikt en niet de MapTiler-SDK; de grens van 5.000 map sessions uit het projectplan geldt alleen voor die SDK en is hier niet van toepassing. Vergelijk bij de eerste maandcheck ook de databasegrootte in het weekrapport met het dashboard.
+9. **Open-Meteo-bevestiging.** Stuur een korte mail (Engels) aan info@open-meteo.com. Concept:
+
+   > Hello, Shakka is a free public PWA for kitesurfers in the Netherlands, without ads or subscriptions. It reads Open-Meteo forecasts server-side only, caches them per spot, and makes about 40,000 API calls per month. Open-Meteo is credited in the app. We believe this falls under non-commercial use; could you confirm that this is fine?
+
+   Open-Meteo-bevestiging: datum: nog in te vullen door Lars / uitkomst: nog in te vullen door Lars.
+10. **Dependency-audit** (maandelijks, met de hand; geen CI-stap, geen Dependabot).
+    - Web: `cd web && npm audit --omit=dev --audit-level=high`. Los een bevinding op met een minimale update (`npm update <pakket>` of `npm audit fix --omit=dev`, nooit `--force`) en draai daarna `npm run check && npm test && npm run build`.
+    - Ingest: `cd ingest && uv export --format requirements-txt --frozen --no-emit-project -o /tmp/shakka-req.txt && uvx pip-audit --require-hashes --disable-pip -r /tmp/shakka-req.txt`. Bij een bevinding: `uv lock --upgrade-package <pakket>` binnen de grenzen van `pyproject.toml`, dan de volledige test.
+    - GitHub Actions staan vastgezet op een commit-SHA (een test bewaakt dat). Bijwerken: zoek de SHA van de nieuwe release met `gh api repos/<eigenaar>/<repo>/git/ref/tags/<tag> --jq .object.sha` (is `object.type` "tag", dereferentieer dan met `gh api repos/<eigenaar>/<repo>/git/tags/<sha> --jq .object.sha`) en schrijf de versie als commentaar achter de SHA.
