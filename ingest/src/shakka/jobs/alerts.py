@@ -1,8 +1,11 @@
 """Alert job: per favorite the effective rule, windows, deduplication, messages and state.
 
-Nothing is sent in M1 (delivery comes with WP-17). The work per favorite is split in three
-steps so delivery can later sit between 2 and 3: `load_alert_context` (all reads),
-`plan_favorite` (no I/O) and `store_plan` (only writes to alert_state).
+Events are delivered as Web Push (WP-17) when a notifier is given. The work per favorite is
+split in steps: `load_alert_context` (all reads), `plan_favorite` (no I/O), `assign_new_ids`
+and `deliver_plan` (the only network I/O; between planning and storing) and `store_plan` (only
+writes to alert_state). Delivery is all-or-nothing per (user, spot): if no delivery of an
+event succeeded and one failure was not permanent, nothing of that favorite is stored, so
+the next run computes the same diff and delivers again.
 
 Alerts exist only for spots with `verified: true`. A favorite whose planning raises a
 ValueError is `skipped` and nothing is written for it; one broken row never stops the job.
@@ -18,9 +21,10 @@ is covered by WP-11 setting the httpx and httpcore loggers to WARNING.
 """
 
 import logging
+import uuid
 from collections import Counter
-from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from collections.abc import Callable, Collection, Mapping, Sequence
+from dataclasses import dataclass, field, replace
 from datetime import UTC, datetime, timedelta
 from typing import Any, Final, Literal
 
@@ -50,6 +54,7 @@ from shakka.domain.direction import DirClass
 from shakka.domain.evaluation import evaluate_spot
 from shakka.domain.kite import KiteAdvice, RiderProfile, recommend_for_window
 from shakka.domain.messages import AlertMessage, build_go_url, render_alert
+from shakka.domain.push import push_tag
 from shakka.domain.spot import SpotProfile
 from shakka.jobs import runtime
 from shakka.jobs.inputs import (
@@ -59,6 +64,14 @@ from shakka.jobs.inputs import (
     require_aware,
     short_error,
 )
+from shakka.jobs.push import (
+    deliver_event,
+    load_all_targets,
+    update_subscriptions,
+)
+from shakka.jobs.push import load_targets as load_targets  # explicit re-export (contract)
+from shakka.notify.base import WEBPUSH_CHANNEL, DeliveryTarget, Notifier
+from shakka.notify.webpush import notifiers_from_settings
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +102,13 @@ class AlertJobResult:
     write_errors: int = 0
     deleted: int = 0  # alert_state rows removed (window_end < now - 48h)
     errors: tuple[str, ...] = ()  # "spot <id>: ..." -- never a user id
+    sent: int = 0  # successful deliveries (event x subscription)
+    failed: int = 0  # failed deliveries, permanent or not
+    no_target: int = 0  # events of users without a live subscription
+    deferred: int = 0  # favorites not stored because of a retryable failure
+    removed: int = 0  # push subscriptions deleted after 404/410
+    push_enabled: bool = False  # webpush notifier given and not a dry run
+    push_failures: Mapping[str, int] = field(default_factory=dict)  # detail -> count
 
 
 @dataclass(frozen=True, slots=True)
@@ -315,22 +335,129 @@ def delete_old_alert_state(db: SupabaseRest, *, now: datetime) -> int:
     )
 
 
-def run_alerts(
-    db: SupabaseRest, *, now: datetime, base_url: str | None, dry_run: bool = False
-) -> AlertJobResult:
-    """Compute and record alerts for all favorites. Returns the messages; sends nothing.
+def _new_state_id() -> str:
+    return str(uuid.uuid4())
 
-    With `dry_run` nothing is written (not even the cleanup). ValueError for a naive `now` or
-    an invalid `base_url`, before any read or write; DatabaseError while loading propagates.
-    Never writes to stdout or stderr.
+
+def assign_new_ids(plan: FavoritePlan, *, new_id: Callable[[], str] | None = None) -> FavoritePlan:
+    """Give every not yet stored entry an id, so the push tag and the row match."""
+    if plan.outcome != "planned" or plan.diff is None:
+        raise ValueError("only a planned favorite can get ids")
+    new_state = list(plan.diff.new_state)
+    for i in range(len(plan.previous), len(new_state)):
+        if new_state[i].id is None:
+            new_state[i] = new_state[i].model_copy(update={"id": (new_id or _new_state_id)()})
+    return replace(plan, diff=DiffResult(events=plan.diff.events, new_state=new_state))
+
+
+@dataclass(frozen=True, slots=True)
+class PlanDelivery:
+    plan: FavoritePlan  # last_notified_at = now for notified events
+    deferred: bool
+    sent: int = 0
+    failed: int = 0
+    no_target: int = 0
+    ok_ids: frozenset[str] = frozenset()
+    gone_ids: frozenset[str] = frozenset()
+    failures: tuple[str, ...] = ()
+
+
+def deliver_plan(
+    plan: FavoritePlan,
+    notifier: Notifier,
+    targets: Sequence[DeliveryTarget],
+    *,
+    now: datetime,
+    gone: Collection[str] = (),
+) -> PlanDelivery:
+    """Deliver the events of a planned favorite, in order; stop at the first retryable one.
+
+    `gone` are subscription ids already found dead in this run. Every entry with an event must
+    have an id (`assign_new_ids`), because the tag is derived from it.
+    """
+    if plan.outcome != "planned" or plan.diff is None:
+        raise ValueError("only a planned favorite can be delivered")
+    new_state = plan.diff.new_state
+    for index, _ in plan.messages:
+        if new_state[index].id is None:
+            raise ValueError("state id missing; call assign_new_ids first")
+    gone_local = set(gone)
+    gone_ids: set[str] = set()
+    ok_ids: set[str] = set()
+    failures: list[str] = []
+    notified: set[int] = set()
+    sent = failed = no_target = 0
+    for index, message in plan.messages:  # sorted by state_index (WP-10)
+        live = [t for t in targets if t.subscription_id not in gone_local]
+        if not live:
+            no_target += 1
+            continue
+        state_id = new_state[index].id
+        assert state_id is not None
+        d = deliver_event(notifier, live, message, tag=push_tag(state_id))
+        sent += d.sent
+        failed += d.failed
+        failures.extend(d.failures)
+        ok_ids |= d.ok_ids
+        gone_local |= d.gone_ids
+        gone_ids |= d.gone_ids
+        if d.sent:
+            notified.add(index)
+        if d.retryable:
+            return PlanDelivery(
+                plan,
+                deferred=True,
+                sent=sent,
+                failed=failed,
+                no_target=no_target,
+                ok_ids=frozenset(ok_ids),
+                gone_ids=frozenset(gone_ids),
+                failures=tuple(failures),
+            )
+    stamped = [
+        e.model_copy(update={"last_notified_at": now}) if i in notified else e
+        for i, e in enumerate(new_state)
+    ]
+    return PlanDelivery(
+        replace(plan, diff=DiffResult(events=plan.diff.events, new_state=stamped)),
+        deferred=False,
+        sent=sent,
+        failed=failed,
+        no_target=no_target,
+        ok_ids=frozenset(ok_ids),
+        gone_ids=frozenset(gone_ids),
+        failures=tuple(failures),
+    )
+
+
+def run_alerts(
+    db: SupabaseRest,
+    *,
+    now: datetime,
+    base_url: str | None,
+    dry_run: bool = False,
+    notifiers: Mapping[str, Notifier] | None = None,
+) -> AlertJobResult:
+    """Compute, deliver and record alerts for all favorites. Returns the stored messages.
+
+    Delivery needs a "webpush" notifier and is never done with `dry_run`; without a notifier
+    the state is stored without delivery (as in M1). With `dry_run` nothing is written (not
+    even the cleanup). ValueError for a naive `now` or an invalid `base_url`, before any read
+    or write; DatabaseError while loading propagates. Never writes to stdout or stderr.
     """
     require_aware(now)
     base = normalize_base_url(base_url)
     ctx = load_alert_context(db, now=now)
+    push = None if dry_run else (notifiers or {}).get(WEBPUSH_CHANNEL)
+    # One select without a user filter: no user id in a request URL (WP-10 A9).
+    targets = load_all_targets(db) if push is not None and ctx.favorites else {}
 
     messages: list[RenderedAlert] = []
     errors: list[str] = []
     counts: Counter[str] = Counter()
+    failures: Counter[str] = Counter()
+    gone_all: set[str] = set()
+    ok_all: set[str] = set()
     for fav in ctx.favorites:
         plan = plan_favorite(fav, ctx.inputs.get(fav.spot_id), now=now, base_url=base)
         if plan.outcome == "skipped":
@@ -345,6 +472,22 @@ def run_alerts(
         if dry_run:
             ids: list[str | None] = [e.id for e in plan.diff.new_state]
         else:
+            plan = assign_new_ids(plan)
+            if push is not None and plan.messages:
+                d = deliver_plan(plan, push, targets.get(fav.user_id, []), now=now, gone=gone_all)
+                counts["sent"] += d.sent
+                counts["failed"] += d.failed
+                counts["no_target"] += d.no_target
+                gone_all |= d.gone_ids
+                ok_all |= d.ok_ids
+                failures.update(d.failures)
+                if d.deferred:
+                    counts["deferred"] += 1
+                    logger.warning(
+                        "alerts: no delivery succeeded for a favorite; state kept for a retry"
+                    )
+                    continue
+                plan = d.plan
             try:
                 ids = store_plan(db, fav.user_id, plan)
             except DatabaseError as exc:
@@ -355,12 +498,23 @@ def run_alerts(
         for index, message in plan.messages:
             messages.append(RenderedAlert(fav.user_id, ids[index], message))
 
+    removed = 0
+    if push is not None and (gone_all or ok_all):
+        update = update_subscriptions(db, gone=gone_all, ok=ok_all, now=now)
+        removed = update.removed
+        for line in update.errors:
+            counts["write_errors"] += 1
+            errors.append(line)
+        if update.errors:
+            logger.warning("alerts: updating push subscriptions failed (DatabaseError)")
+
     deleted = 0 if dry_run else delete_old_alert_state(db, now=now)
     kinds = Counter(m.message.kind for m in messages)
     users = len({f.user_id for f in ctx.favorites})
     logger.info(
         "alerts: users=%d favorites=%d events=%d new=%d improved=%d worsened=%d cancelled=%d "
-        "ineligible=%d disabled=%d skipped=%d write_errors=%d deleted=%d dry_run=%s",
+        "ineligible=%d disabled=%d skipped=%d write_errors=%d deleted=%d dry_run=%s "
+        "sent=%d failed=%d no_target=%d deferred=%d removed=%d push=%s",
         users,
         len(ctx.favorites),
         len(messages),
@@ -374,6 +528,12 @@ def run_alerts(
         counts["write_errors"],
         deleted,
         dry_run,
+        counts["sent"],
+        counts["failed"],
+        counts["no_target"],
+        counts["deferred"],
+        removed,
+        push is not None,
     )
     return AlertJobResult(
         users=users,
@@ -386,6 +546,13 @@ def run_alerts(
         write_errors=counts["write_errors"],
         deleted=deleted,
         errors=tuple(errors),
+        sent=counts["sent"],
+        failed=counts["failed"],
+        no_target=counts["no_target"],
+        deferred=counts["deferred"],
+        removed=removed,
+        push_enabled=push is not None,
+        push_failures=dict(failures),
     )
 
 
@@ -413,9 +580,16 @@ def run_alerts_cli(*, dry_run: bool, echo: Callable[[str], None]) -> int:
     except ValueError:
         echo("alerts: invalid APP_BASE_URL")
         return 1
+    try:
+        notifiers = notifiers_from_settings(settings)
+    except ValueError as exc:  # a fixed text without values
+        echo(f"alerts: invalid VAPID configuration: {exc}")
+        return 1
     db = runtime.open_db(settings)
     try:
-        result = run_alerts(db, now=runtime.utcnow(), base_url=base, dry_run=dry_run)
+        result = run_alerts(
+            db, now=runtime.utcnow(), base_url=base, dry_run=dry_run, notifiers=notifiers
+        )
     except DatabaseError as exc:
         echo(f"alerts: database error: {exc}")
         return 1
@@ -438,8 +612,17 @@ def run_alerts_cli(*, dry_run: bool, echo: Callable[[str], None]) -> int:
     )
     if dry_run:
         echo("alerts: dry run, nothing stored")
+    if dry_run:
+        echo("push: nothing sent (dry run)")
+    elif not notifiers:
+        echo("push: disabled (no VAPID configuration)")
+    else:
+        echo(
+            f"push: sent={result.sent} failed={result.failed} no_target={result.no_target} "
+            f"deferred={result.deferred} removed={result.removed}"
+        )
     for line in result.errors:
         echo(f"error   {line}")
-    failed = result.skipped > 0 or result.write_errors > 0
+    failed = result.skipped > 0 or result.write_errors > 0 or result.deferred > 0
     echo("alerts: failed" if failed else "alerts: ok")
     return 1 if failed else 0

@@ -12,6 +12,7 @@ from shakka.db import SupabaseRest
 from shakka.logsetup import (
     LOG_DATEFMT,
     LOG_FORMAT,
+    QUIET_LOGGERS,
     RedactingFormatter,
     configure_logging,
     escape_command_data,
@@ -28,7 +29,7 @@ USER = "11111111-1111-4111-8111-111111111111"
 def restore_logging():
     root = logging.getLogger()
     handlers, level = list(root.handlers), root.level
-    quiet = {n: logging.getLogger(n).level for n in ("httpx", "httpcore")}
+    quiet = {n: logging.getLogger(n).level for n in QUIET_LOGGERS}
     yield
     root.handlers[:] = handlers
     root.setLevel(level)
@@ -53,6 +54,19 @@ def test_secret_values():
     assert secret_values(s) == (SECRET, "v" * 10)
     s2 = Settings(supabase_url="http://127.0.0.1:54321", supabase_secret_key=SECRET)
     assert secret_values(s2) == (SECRET,)
+    s3 = Settings(
+        supabase_url="http://127.0.0.1:54321",
+        supabase_secret_key=SECRET,
+        vapid_subject=" mailto:test@example.org ",
+    )
+    assert secret_values(s3) == (SECRET, "mailto:test@example.org")
+    s4 = Settings(
+        supabase_url="http://127.0.0.1:54321",
+        supabase_secret_key=SECRET,
+        vapid_subject="mailto:",
+    )
+    assert "mailto:" in secret_values(s4)
+    assert redact("x mailto: y", secret_values(s4)) == "x mailto: y"  # shorter than 8
 
 
 def test_redacting_formatter():
@@ -93,6 +107,7 @@ def test_httpx_and_httpcore_quiet(restore_logging, caplog):
     assert USER not in caplog.text
     assert logging.getLogger("httpx").level == logging.WARNING
     assert logging.getLogger("httpcore").level == logging.WARNING
+    assert logging.getLogger("urllib3").level == logging.WARNING
 
 
 def test_github_annotation_escapes():

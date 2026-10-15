@@ -14,7 +14,7 @@ from shakka.config import Settings
 
 LOG_FORMAT: Final = "%(asctime)s %(levelname)s %(name)s %(message)s"
 LOG_DATEFMT: Final = "%Y-%m-%dT%H:%M:%SZ"
-QUIET_LOGGERS: Final = ("httpx", "httpcore")
+QUIET_LOGGERS: Final = ("httpx", "httpcore", "urllib3")
 MIN_SECRET_LENGTH: Final = 8
 REDACTED: Final = "***"
 
@@ -31,6 +31,8 @@ def secret_values(settings: Settings) -> tuple[str, ...]:
     values = [settings.supabase_secret_key.get_secret_value()]
     if settings.vapid_private_key is not None:
         values.append(settings.vapid_private_key.get_secret_value())
+    if settings.vapid_subject is not None and settings.vapid_subject.strip():
+        values.append(settings.vapid_subject.strip())  # an e-mail address: personal data
     return tuple(values)
 
 
@@ -48,7 +50,7 @@ class RedactingFormatter(logging.Formatter):
 def configure_logging(
     *, stream: TextIO | None = None, secrets: Iterable[str] = ()
 ) -> logging.Handler:
-    """One stdout handler with redaction; httpx and httpcore on WARNING (they log full URLs)."""
+    """One stdout handler with redaction; httpx, httpcore and urllib3 on WARNING (full URLs)."""
     root = logging.getLogger()
     for old in [h for h in root.handlers if getattr(h, "_shakka_handler", False)]:
         root.removeHandler(old)

@@ -93,10 +93,11 @@ def test_alerts_run_cli(setup):
     assert code == 0
     assert lines[0] == "new test-strand: Go: Teststrand"
     assert lines[1] == "  wo 15 jul 12:00–18:00 · 14–25 kn, vlagen tot 29 kn"
-    assert lines[-2] == (
+    assert lines[-3] == (
         "alerts: users=1 favorites=1 events=1 (new=1 improved=0 worsened=0 cancelled=0) "
         "ineligible=0 disabled=0 skipped=0 write_errors=0 deleted=0"
     )
+    assert lines[-2] == "push: disabled (no VAPID configuration)"
     assert lines[-1] == "alerts: ok"
     assert USER_A not in "\n".join(lines)
 
