@@ -253,3 +253,18 @@ Laatste activiteitscommit: 2026-10-15
 5. Een sessie handmatig verwijderen (bijv. bij misbruik): in de SQL-editor `delete from public.sessions where slug = '<slug>';`. De RSVP's gaan mee. Eén RSVP verwijderen: `delete from public.rsvps where id = '<id>';`.
 6. Geen enkele API-rol mag `rsvps` direct lezen, ook de ingest niet. Ook `sessions` is niet leesbaar voor `service_role` (bewust, zie §8.2). Kijken kan alleen via de SQL-editor (rol `postgres`).
 7. De edit-token van een RSVP gaat alleen in de body van een POST-verzoek (de standaard van supabase-js voor `rpc()`), nooit in een URL, querystring of link: URL's komen in logs van de gateway terecht. In de database staat alleen de sha256-hash. Log de token ook nergens anders.
+8. **Publieke sessiepagina (vanaf WP-21).**
+   - `/s/<slug>` werkt zonder account. Je ziet de sessie, de deelnemers, de carpool en het oordeel per uur, en je meldt je aan met alleen een voornaam.
+   - De edit-token staat alleen in de browser van de bezoeker (`localStorage`, sleutel `shakka:rsvp:<slug>`). Wie een andere browser of de in-app-browser van WhatsApp gebruikt, of de websitedata wist, kan zich daar niet meer afmelden.
+   - Een RSVP verwijderen voor iemand gaat via de SQL-editor (punt 5): zoek eerst de id met `select r.id, r.first_name from public.rsvps r join public.sessions s on s.id = r.session_id where s.slug = '<slug>';`.
+   - De pagina heeft `noindex`. Zoekmachines nemen hem niet op, maar iedereen met de link kan de voornamen zien.
+9. **Controle (WP-21 AC-7).**
+   - Zonder WP-20 maak je een testsessie in de SQL-editor:
+     ```sql
+     insert into public.sessions (slug, spot_id, organizer_id, organizer_name, starts_at, ends_at, seats_free, departure_point)
+     values ('<eigen slug, 10-64 tekens A-Z a-z 0-9 _ ->', '<spot-id>', '<jouw user-id>', 'Lars',
+             date_trunc('hour', now()) + interval '1 day', date_trunc('hour', now()) + interval '1 day 4 hours', 3, 'Utrecht CS');
+     ```
+   - Open `https://<project>.pages.dev/s/<slug>` op een telefoon zonder in te loggen, bijvoorbeeld via een link in WhatsApp. Meld je aan, wijzig je aanmelding (bijvoorbeeld naar "Ik kan mensen meenemen") en meld je af.
+   - Controleer in de SQL-editor dat de RSVP weg is.
+   - Ruim de testsessie op met `delete from public.sessions where slug = '<slug>';`.
