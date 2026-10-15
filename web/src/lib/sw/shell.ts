@@ -10,9 +10,14 @@ export interface FetchLikeEvent {
 }
 export type RequestKind = 'navigate' | 'precached' | 'passthrough';
 
-/** Unique list of absolute paths to precache, always including shellPath. Order: input order, shell last if new. */
+/** Host configuration files in static/ that Cloudflare Pages never serves as files. A request for them gets
+ *  the SPA fallback (index.html, 200), so precaching them would store a useless copy of index.html. */
+export const PRECACHE_EXCLUDED_PATHS: readonly string[] = ['/_headers', '/_redirects'];
+
+/** Unique list of absolute paths to precache, without PRECACHE_EXCLUDED_PATHS, always including shellPath.
+ *  Order: input order, shell last if new. */
 export function precacheList(paths: readonly string[], shellPath: string): string[] {
-	const list = [...new Set(paths)];
+	const list = [...new Set(paths)].filter((p) => !PRECACHE_EXCLUDED_PATHS.includes(p));
 	if (!list.includes(shellPath)) list.push(shellPath);
 	return list;
 }

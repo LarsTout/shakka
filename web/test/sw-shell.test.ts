@@ -58,6 +58,9 @@ describe('precacheList', () => {
 		expect(precacheList(['/a', '/a', '/b'], '/')).toEqual(['/a', '/b', '/']);
 		expect(precacheList(['/', '/a'], '/')).toEqual(['/', '/a']);
 	});
+	it('leaves out host configuration files (WP-23, A6)', () => {
+		expect(precacheList(['/a.js', '/_headers', '/_redirects', '/a.js'], '/')).toEqual(['/a.js', '/']);
+	});
 });
 
 describe('classifyRequest', () => {
