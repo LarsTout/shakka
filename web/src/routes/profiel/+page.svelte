@@ -1,5 +1,7 @@
 <script lang="ts">
+	import DeleteAccount from '#lib/components/DeleteAccount.svelte';
 	import LoginPrompt from '#lib/components/LoginPrompt.svelte';
+	import { ACCOUNT_MESSAGES } from '#lib/account.js';
 	import { session } from '#lib/auth.js';
 	import { ALERT_DEFAULTS } from '#lib/contracts.js';
 	import {
@@ -32,6 +34,7 @@
 	const saving = $derived(status === 'saving');
 	const hints = profileKnHints(ALERT_DEFAULTS);
 	let token = 0;
+	let accountDeleted = $state(false);
 
 	function load(id: string) {
 		const t = ++token;
@@ -91,7 +94,10 @@
 
 <h1>Profiel</h1>
 
-{#if $session === undefined}
+{#if accountDeleted}
+	<p role="status">{ACCOUNT_MESSAGES.deleted}</p>
+	<p><a href="/">Naar de start</a></p>
+{:else if $session === undefined}
 	<p class="muted">Laden…</p>
 {:else if $session === null}
 	<LoginPrompt reason="je profiel te bewerken" />
@@ -217,4 +223,8 @@
 			<p role="alert" class="error">Opslaan is niet gelukt. Probeer het opnieuw.</p>
 		{/if}
 	</form>
+{/if}
+
+{#if $session && !accountDeleted}
+	<DeleteAccount ondeleted={() => (accountDeleted = true)} />
 {/if}

@@ -13,8 +13,18 @@ vi.mock('#lib/supabase.js', async () => {
 	return { supabase: fake.current.client, initialUrlHash: '' };
 });
 vi.mock('#lib/auth.js', async () => (await import('./helpers/fake-session.js')).authModule);
+const account = vi.hoisted(() => ({ deleteMyAccount: null as unknown, cleanUp: null as unknown }));
+vi.mock('#lib/account.js', async (importOriginal) => {
+	const actual = await importOriginal<typeof import('../src/lib/account.js')>();
+	const deleteMyAccount = vi.fn(async () => ({ ok: true }));
+	const cleanUpAfterAccountDeletion = vi.fn(async () => {});
+	account.deleteMyAccount = deleteMyAccount;
+	account.cleanUp = cleanUpAfterAccountDeletion;
+	return { ...actual, deleteMyAccount, cleanUpAfterAccountDeletion };
+});
 
 import Page from '../src/routes/profiel/+page.svelte';
+import { ACCOUNT_MESSAGES } from '../src/lib/account.js';
 import { PROFILE_COLUMNS } from '../src/lib/types.js';
 
 beforeEach(() => {
@@ -151,5 +161,35 @@ describe('profile page', () => {
 		await userEvent.setup().type(weight, '75');
 		await userEvent.setup().click(screen.getByRole('button', { name: 'Opslaan' }));
 		expect(await screen.findByText('Opslaan is niet gelukt. Probeer het opnieuw.')).toBeInTheDocument();
+	});
+
+	describe('account deletion section', () => {
+		it('is present when signed in and loaded', async () => {
+			await loaded();
+			expect(screen.getByRole('region', { name: 'Account verwijderen' })).toBeInTheDocument();
+		});
+		it('is absent when signed out', async () => {
+			sessionStore.set(null);
+			render(Page);
+			await new Promise((r) => setTimeout(r, 0));
+			expect(screen.queryByRole('region', { name: 'Account verwijderen' })).toBeNull();
+		});
+		it('is present when the profile is missing', async () => {
+			fake.current.respond('profiles', { data: null, error: null });
+			sessionStore.set(SESSION);
+			render(Page);
+			await screen.findByText(/Je profiel is niet gevonden/);
+			expect(screen.getByRole('region', { name: 'Account verwijderen' })).toBeInTheDocument();
+		});
+		it('after a deletion shows the status message and no form', async () => {
+			await loaded();
+			const user = userEvent.setup();
+			await user.click(screen.getByRole('button', { name: 'Account verwijderen…' }));
+			await user.click(screen.getByRole('button', { name: 'Ja, verwijder mijn account' }));
+			expect(await screen.findByRole('status')).toHaveTextContent(ACCOUNT_MESSAGES.deleted);
+			expect(screen.queryByLabelText('Gewicht (kg)')).toBeNull();
+			expect(screen.queryByRole('region', { name: 'Account verwijderen' })).toBeNull();
+			expect((account.cleanUp as ReturnType<typeof vi.fn>)).toHaveBeenCalledTimes(1);
+		});
 	});
 });
