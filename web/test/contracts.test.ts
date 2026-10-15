@@ -2,6 +2,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
+	ALERT_DEFAULTS,
+	parseAlertDefaults,
 	CONTRACT_CONFIDENCES,
 	CONTRACT_DIR_CLASSES,
 	CONTRACT_REASON_CODES,
@@ -14,7 +16,7 @@ import {
 	reasonEffect,
 	reasonLabel
 } from '../src/lib/contracts.js';
-import { CONFIDENCES, DIR_CLASSES, REASON_CODES, VERDICTS } from '../src/lib/types.js';
+import { CONFIDENCES, DIR_CLASSES, REASON_CODES, RULE_FIELDS, VERDICTS } from '../src/lib/types.js';
 
 interface Item {
 	code: string;
@@ -66,5 +68,64 @@ describe('contract labels (AC-2)', () => {
 		expect(new Set(CONFIDENCES)).toEqual(new Set(CONTRACT_CONFIDENCES));
 		const effects = new Set(reasons.map((r) => r.effect));
 		expect(new Set([...effects, 'go'])).toEqual(new Set(VERDICTS));
+	});
+});
+
+const alertDefaultsJson = (): { _generated: string; items: Record<string, unknown>[] } =>
+	JSON.parse(
+		readFileSync(new URL('../../data/contracts/alert_defaults.json', import.meta.url), 'utf8')
+	);
+
+describe('ALERT_DEFAULTS', () => {
+	it('has the keys in RULE_FIELDS order', () => {
+		expect(Object.keys(ALERT_DEFAULTS)).toEqual([...RULE_FIELDS]);
+	});
+	it('exposes the ridable classes only and the system defaults', () => {
+		expect([...ALERT_DEFAULTS.dir_classes.allowed]).toEqual(['onshore', 'side_onshore', 'sideshore']);
+		expect(ALERT_DEFAULTS.min_kn.default).toBe(12);
+		expect(ALERT_DEFAULTS.max_kn.min_span_kn).toBe(5);
+	});
+});
+
+describe('parseAlertDefaults', () => {
+	const MALFORMED = 'contract alert_defaults is malformed';
+	const mutate = (fn: (j: ReturnType<typeof alertDefaultsJson>) => void) => {
+		const j = alertDefaultsJson();
+		fn(j);
+		return j;
+	};
+	const item = (j: ReturnType<typeof alertDefaultsJson>, field: string) =>
+		j.items.find((i) => i.field === field)!;
+
+	it('accepts the real file', () => {
+		expect(() => parseAlertDefaults(alertDefaultsJson())).not.toThrow();
+	});
+	it('rejects offshore in allowed', () => {
+		const j = mutate((x) => (item(x, 'dir_classes').allowed as string[]).push('offshore'));
+		expect(() => parseAlertDefaults(j)).toThrow(MALFORMED);
+	});
+	it('rejects side_offshore in default', () => {
+		const j = mutate((x) => (item(x, 'dir_classes').default as string[]).push('side_offshore'));
+		expect(() => parseAlertDefaults(j)).toThrow(MALFORMED);
+	});
+	it('rejects 8 items', () => {
+		const j = mutate((x) => x.items.pop());
+		expect(() => parseAlertDefaults(j)).toThrow(MALFORMED);
+	});
+	it('rejects a wrong field order', () => {
+		const j = mutate((x) => x.items.reverse());
+		expect(() => parseAlertDefaults(j)).toThrow(MALFORMED);
+	});
+	it('rejects an empty label_nl', () => {
+		const j = mutate((x) => (item(x, 'min_kn').label_nl = '  '));
+		expect(() => parseAlertDefaults(j)).toThrow(MALFORMED);
+	});
+	it('rejects sources that do not end in system', () => {
+		const j = mutate((x) => (item(x, 'min_kn').sources = ['system', 'rule']));
+		expect(() => parseAlertDefaults(j)).toThrow(MALFORMED);
+	});
+	it('rejects non-objects', () => {
+		expect(() => parseAlertDefaults(null)).toThrow(MALFORMED);
+		expect(() => parseAlertDefaults({ _generated: 'x', items: 'no' })).toThrow(MALFORMED);
 	});
 });
