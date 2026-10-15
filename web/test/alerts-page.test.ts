@@ -6,6 +6,8 @@ import type { createFakeSupabase } from './helpers/fake-supabase.js';
 import { SPOT_UNVERIFIED, SPOT_VERIFIED } from './fixtures/spot-data.js';
 import { PROFILE_FULL, ruleRow } from './fixtures/user-data.js';
 import { SESSION, sessionStore } from './helpers/fake-session.js';
+import { IPHONE_UA, installPushEnv } from './helpers/fake-push.js';
+import { PUSH_MESSAGES } from '../src/lib/push.js';
 
 const fake = vi.hoisted(() => ({ current: null as unknown as ReturnType<typeof createFakeSupabase> }));
 vi.mock('#lib/supabase.js', async () => {
@@ -13,6 +15,7 @@ vi.mock('#lib/supabase.js', async () => {
 	fake.current = createFakeSupabase();
 	return { supabase: fake.current.client, initialUrlHash: '' };
 });
+vi.mock('$app/env/public', async () => (await import('./helpers/fake-push.js')).publicEnv);
 vi.mock('#lib/auth.js', async () => (await import('./helpers/fake-session.js')).authModule);
 
 import Page from '../src/routes/alerts/+page.svelte';
@@ -119,5 +122,20 @@ describe('alerts page', () => {
 		serve({});
 		await userEvent.setup().click(screen.getByRole('button', { name: 'Opnieuw proberen' }));
 		expect(await screen.findByRole('heading', { name: 'Testmeer' })).toBeInTheDocument();
+	});
+
+	it('AC-4: iPhone in Safari, signed out, sees the install text and the login prompt, no button', async () => {
+		const env = installPushEnv({ userAgent: IPHONE_UA, supported: false });
+		try {
+			sessionStore.set(null);
+			render(Page);
+			await tick();
+			expect(screen.getByText(PUSH_MESSAGES.installFirst)).toBeInTheDocument();
+			expect(screen.getByText('Log in om je alerts in te stellen.')).toBeInTheDocument();
+			expect(screen.queryByRole('button', { name: 'Meldingen aanzetten' })).toBeNull();
+			expect(fake.current.calls).toHaveLength(0);
+		} finally {
+			env.uninstall();
+		}
 	});
 });
