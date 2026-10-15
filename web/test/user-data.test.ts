@@ -16,6 +16,9 @@ import {
 	getProfile,
 	listAlertRules,
 	listFavoriteSpotIds,
+	listOwnPushSubscriptions,
+	addPushSubscription,
+	removePushSubscription,
 	removeFavorite,
 	resetAlertRule,
 	saveAlertRule,
@@ -183,5 +186,65 @@ describe('alert rules', () => {
 				ops: [['delete'], ['eq', 'user_id', USER_ID], ['eq', 'spot_id', 'test-meer']]
 			}
 		]);
+	});
+});
+
+describe('push_subscriptions', () => {
+	const KEYS = { endpoint: 'https://push.example.test/a', p256dh: 'p', auth: 'a' };
+	it('listOwnPushSubscriptions', async () => {
+		const rows = [{ id: '1', endpoint: 'https://push.example.test/a', created_at: 'x' }];
+		fake.current.respond('push_subscriptions', { data: rows, error: null });
+		expect(await listOwnPushSubscriptions()).toEqual(rows);
+		expect(fake.current.calls).toEqual([
+			{
+				table: 'push_subscriptions',
+				ops: [['select', 'id,endpoint,created_at'], ['order', 'created_at', { ascending: false }]]
+			}
+		]);
+	});
+	it('listOwnPushSubscriptions throws a DataError with the code', async () => {
+		fake.current.respond('push_subscriptions', { data: null, error: { code: '42501' } });
+		await expect(listOwnPushSubscriptions()).rejects.toMatchObject({
+			name: 'DataError',
+			operation: 'listOwnPushSubscriptions',
+			code: '42501'
+		});
+	});
+	it('addPushSubscription inserts exactly three keys', async () => {
+		expect(await addPushSubscription({ ...KEYS, user_id: 'u' } as typeof KEYS)).toBe('added');
+		expect(fake.current.calls).toEqual([
+			{ table: 'push_subscriptions', ops: [['insert', KEYS]] }
+		]);
+		expect(Object.keys(fake.current.calls[0]!.ops[0]![1] as object).sort()).toEqual([
+			'auth',
+			'endpoint',
+			'p256dh'
+		]);
+	});
+	it('addPushSubscription maps 23505 to exists and others to DataError', async () => {
+		fake.current.respond('push_subscriptions', { data: null, error: { code: '23505' } });
+		expect(await addPushSubscription(KEYS)).toBe('exists');
+		fake.current.respond('push_subscriptions', { data: null, error: { code: '08006' } });
+		await expect(addPushSubscription(KEYS)).rejects.toMatchObject({
+			operation: 'addPushSubscription',
+			code: '08006'
+		});
+	});
+	it('removePushSubscription deletes by id only', async () => {
+		await removePushSubscription('id-1');
+		expect(fake.current.calls).toEqual([
+			{ table: 'push_subscriptions', ops: [['delete'], ['eq', 'id', 'id-1']] }
+		]);
+		fake.current.respond('push_subscriptions', { data: null, error: { code: '42501' } });
+		await expect(removePushSubscription('id-1')).rejects.toBeInstanceOf(DataError);
+	});
+	it('never filters on user_id or endpoint', async () => {
+		await listOwnPushSubscriptions();
+		await removePushSubscription('id-1');
+		for (const c of fake.current.calls) {
+			for (const op of c.ops) {
+				if (op[0] === 'eq') expect(['user_id', 'endpoint']).not.toContain(op[1]);
+			}
+		}
 	});
 });
