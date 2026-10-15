@@ -4,8 +4,8 @@ Geen afwijking raakt een contract, schema, externe API, dependency of acceptatie
 
 ## Voor orchestrator/WP-23 (review ronde 2)
 
-- **N-1.** De zin in RUNBOOK §17.8 ("de grens van 5.000 map sessions uit het projectplan geldt alleen voor die SDK en is hier niet van toepassing") spreekt `docs/PROJECT_PLAN.md` sectie 2 tegen. De builder raakt `docs/PROJECT_PLAN.md` niet aan. De orchestrator trekt het plan bij de afsluiting van de WP gelijk.
-- **N-2.** Gmail vermeldt "Google verwerkt de adressen van de ontvangers" in RUNBOOK §17.6. Neem dat ook mee in de vervolgwijziging van "De maildienst" op `/privacy` en in `docs/PRIVACY.md` (na de SMTP-keuze van Lars).
+- **N-1.** De zin in RUNBOOK §18.8 ("de grens van 5.000 map sessions uit het projectplan geldt alleen voor die SDK en is hier niet van toepassing") spreekt `docs/PROJECT_PLAN.md` sectie 2 tegen. De builder raakt `docs/PROJECT_PLAN.md` niet aan. De orchestrator trekt het plan bij de afsluiting van de WP gelijk.
+- **N-2.** Gmail vermeldt "Google verwerkt de adressen van de ontvangers" in RUNBOOK §18.6. Neem dat ook mee in de vervolgwijziging van "De maildienst" op `/privacy` en in `docs/PRIVACY.md` (na de SMTP-keuze van Lars).
 - `docs/PRIVACY.md` bestaat niet in deze werkboom (WP-23 is nog niet gemerged) en is niet aangeraakt. Wie als tweede merget, haalt in de rij "Profiel" de bijzin "; plus een ongebruikte, altijd lege legacy-kolom die WP-22 verwijdert" weg.
 - RUNBOOK-nummer: de nieuwe sectie heet nu §17 (WP-23 niet gemerged). Merget WP-23 eerst, dan moeten de verwijzingen naar §17 in de WP-22-tekst (§4 niet; wel §11.2, §11.5, §13.1, §13.6, §14.7, §14.14 en de sectie zelf) worden hernummerd.
 - `07_sessions.test.sql` regels 68 en 69: alleen `db_usage` toegevoegd. Na de merge van beide WP's zie je de eindvorm in de blueprint (Interfaces), met `delete_my_account`.
