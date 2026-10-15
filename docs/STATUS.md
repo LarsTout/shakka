@@ -22,7 +22,7 @@ Opdeling: goedgekeurd.
 | WP-15 | Kaart | done | AC-6 open: MapTiler-keys + check op de gedeployde site (RUNBOOK §11.9) |
 | WP-16 | Profiel, favorieten en alertinstellingen | done | AC-7 open: rooktest in de app door Lars (verification.md O-1) |
 | WP-17 | Web Push: backend (enige meldingskanaal) | done | supabase db push (push_subscriptions) door Lars; echte test-push na WP-18 |
-| WP-18 | Web Push: PWA | building | |
+| WP-18 | Web Push: PWA | verifying | |
 | WP-19 | Sessies: datamodel, RLS en RPC's | todo | |
 | WP-20 | Sessie aanmaken en delen | todo | |
 | WP-21 | Publieke sessiepagina en RSVP zonder account | todo | |
