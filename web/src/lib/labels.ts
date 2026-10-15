@@ -1,6 +1,8 @@
 import { MONTH_ABBR_NL, formatLocal } from './time.js';
 import type {
+	RuleSource,
 	SeasonClosure,
+	SpotLevel,
 	SpotStatus,
 	TideExtreme,
 	TideKind,
@@ -28,6 +30,17 @@ export const TIDE_SENSITIVITY_LABEL_NL: Record<TideSensitivity, string> = {
 export const TIDE_KIND_LABEL_NL: Record<TideKind, string> = {
 	high: 'Hoogwater',
 	low: 'Laagwater'
+};
+export const LEVEL_LABEL_NL: Record<SpotLevel, string> = {
+	beginner: 'Beginner',
+	intermediate: 'Gemiddeld',
+	advanced: 'Gevorderd'
+};
+export const SOURCE_LABEL_NL: Record<RuleSource, string> = {
+	rule: 'je instelling voor deze spot',
+	profile: 'je profiel',
+	spot: 'spotprofiel',
+	system: 'Shakka'
 };
 export const NOT_FILLED_NL = 'Niet ingevuld';
 export const COMPASS_POINTS_NL = [
@@ -100,4 +113,10 @@ export function seasonText(c: SeasonClosure): string {
 
 export function tideText(t: TideExtreme): string {
 	return `${TIDE_KIND_LABEL_NL[t.kind]} ${formatLocal(new Date(t.at), 'time')} (${formatLevelCm(t.level_cm)} cm)`;
+}
+
+/** 0 -> 'alleen vandaag', 1 -> 'vandaag plus 1 dag', n -> `vandaag plus ${n} dagen`. */
+export function daysAheadText(n: number): string {
+	if (n === 0) return 'alleen vandaag';
+	return n === 1 ? 'vandaag plus 1 dag' : `vandaag plus ${n} dagen`;
 }

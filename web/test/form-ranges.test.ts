@@ -2,6 +2,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { ALERT_DEFAULTS } from '../src/lib/contracts.js';
+import { MAX_QUIVER_KITES, QUIVER_SIZE_RANGE_M2, WEIGHT_RANGE_KG } from '../src/lib/forms.js';
 
 const MIGRATIONS = new URL('../../supabase/migrations/', import.meta.url);
 const sql = readdirSync(MIGRATIONS)
@@ -49,5 +50,12 @@ describe('form ranges equal the database constraints', () => {
 		expect(new Set(dirs)).toEqual(new Set(ALERT_DEFAULTS.dir_classes.allowed));
 		const days = list('alert_rules_weekdays_iso', /<@\s*array\[([^\]]*)\]/);
 		expect(new Set(days.map(Number))).toEqual(new Set(ALERT_DEFAULTS.weekdays.allowed));
+	});
+	it('weight and quiver constants', () => {
+		expect(between('profiles_weight_range')).toEqual([...WEIGHT_RANGE_KG]);
+		const frag = fragment('profiles_quiver_valid');
+		expect(Number(/cardinality\(quiver_m2\)\s*<=\s*(\d+)/.exec(frag)![1])).toBe(MAX_QUIVER_KITES);
+		expect(Number(/(\d+)\s*<=\s*all\s*\(quiver_m2\)/.exec(frag)![1])).toBe(QUIVER_SIZE_RANGE_M2[0]);
+		expect(Number(/(\d+)\s*>=\s*all\s*\(quiver_m2\)/.exec(frag)![1])).toBe(QUIVER_SIZE_RANGE_M2[1]);
 	});
 });

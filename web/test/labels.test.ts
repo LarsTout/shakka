@@ -1,8 +1,12 @@
 // @vitest-environment node
 import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { LEVELS, RULE_SOURCES } from '../src/lib/types.js';
 import {
 	COMPASS_POINTS_NL,
+	LEVEL_LABEL_NL,
+	SOURCE_LABEL_NL,
+	daysAheadText,
 	STATUS_UNKNOWN_NL,
 	compassLabel,
 	directionText,
@@ -82,5 +86,22 @@ describe('formatting', () => {
 		expect(verdictLabel('no_go')).toBe('Niet gaan');
 		expect(verdictLabel('go')).toBe('Go');
 		expect(verdictLabel('marginal')).toBe('Twijfel');
+	});
+});
+
+describe('profile and rule labels', () => {
+	it('LEVEL_LABEL_NL covers every level', () => {
+		for (const l of LEVELS) expect(LEVEL_LABEL_NL[l].trim()).not.toBe('');
+	});
+	it('SOURCE_LABEL_NL covers all sources', () => {
+		for (const s of RULE_SOURCES) expect(SOURCE_LABEL_NL[s].trim()).not.toBe('');
+		expect(SOURCE_LABEL_NL.profile).toBe('je profiel');
+		expect(SOURCE_LABEL_NL.spot).toBe('spotprofiel');
+		expect(SOURCE_LABEL_NL.system).toBe('Shakka');
+	});
+	it('daysAheadText', () => {
+		expect(daysAheadText(0)).toBe('alleen vandaag');
+		expect(daysAheadText(1)).toBe('vandaag plus 1 dag');
+		expect(daysAheadText(3)).toBe('vandaag plus 3 dagen');
 	});
 });
