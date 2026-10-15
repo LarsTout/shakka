@@ -24,7 +24,7 @@ from pipeline_fixtures import (
     seed_user,
     write_spots_yaml,
 )
-from push_fixtures import DOWN, KEYS, SUBJECT, FakeNotifier, seed_subs
+from push_fixtures import DOWN, KEYS, SUBJECT, FakeNotifier, seed_subs, sub_row
 from shakka.config import Settings
 from shakka.db import DatabaseError, iso_utc
 from shakka.pipeline import (
@@ -655,6 +655,7 @@ def test_alert_counts_shape():
         "users", "events", "favorites", "ineligible", "disabled", "skipped", "write_errors",
         "deleted", "new", "improved", "worsened", "cancelled", "errors",
         "sent", "failed", "no_target", "deferred", "removed", "push_enabled", "push_failures",
+        "blocked_targets", "push_non_retryable",
     }  # fmt: skip
     assert "messages" not in counts
 
@@ -769,7 +770,7 @@ def test_hourly_with_notifiers(tmp_path):
 def test_hourly_push_failure_leaks_nothing(tmp_path, caplog, capsys, monkeypatch):
     from shakka.logsetup import configure_logging, secret_values
 
-    ep = "https://push.example.test/send/ENDPOINT-SECRET-123"
+    ep = "https://fcm.googleapis.com/fcm/send/ENDPOINT-SECRET-123"
 
     def failing(**kwargs):
         raise Exception(f"{ep} P256DH-SECRET-456 AUTH-SECRET-789 {KEYS.private_key}")
@@ -811,7 +812,7 @@ def test_hourly_push_failure_leaks_nothing(tmp_path, caplog, capsys, monkeypatch
             assert secret not in text
     alerts = step(report, "alerts")
     assert alerts.counts["push_failures"] == {"Exception": 1}
-    assert alerts.status == "partial" and alerts.counts["deferred"] == 1
+    assert alerts.status == "partial" and alerts.counts["push_non_retryable"] == 1
 
 
 def test_hourly_deferred_warning(tmp_path):
@@ -831,3 +832,38 @@ def test_hourly_deferred_warning(tmp_path):
     seed_subs(ok_db, USER_A, 1)
     ok_report = run_real(tmp_path, ok_db, notifiers={"webpush": FakeNotifier()})
     assert not any(a.startswith("::warning::alerts:") for a in ok_report.annotations)
+
+
+def test_non_retryable_push_is_partial_with_warning(tmp_path):
+    from shakka.notify.base import DeliveryResult
+
+    db = FakeSupabase()
+    seed_user(db)
+    (ep,) = seed_subs(db, USER_A, 1)
+    forbidden = DeliveryResult(False, False, "HTTP 403", retryable=False)
+    report = run_real(tmp_path, db, notifiers={"webpush": FakeNotifier({ep: forbidden})})
+    alerts = step(report, "alerts")
+    assert alerts.status == "partial"
+    assert alerts.counts["push_non_retryable"] == 1
+    assert alerts.counts["push_failures"] == {"HTTP 403": 1}
+    assert alerts.counts["deferred"] == 0
+    assert (
+        "::warning::alerts: 1 push delivery(ies) failed without retry; the alert is lost for "
+        "that device (see push_failures in ingest_runs)"
+    ) in report.annotations
+    assert report.exit_code == 0
+
+
+def test_blocked_target_warning(tmp_path):
+    db = FakeSupabase()
+    seed_user(db)
+    db.seed(
+        "push_subscriptions",
+        [{**sub_row(USER_A, 1), "endpoint": "https://evil.example.test/x"}],
+    )
+    report = run_real(tmp_path, db, notifiers={"webpush": FakeNotifier()})
+    alerts = step(report, "alerts")
+    assert alerts.counts["blocked_targets"] == 1
+    assert (
+        "::warning::alerts: 1 push subscription(s) skipped: push service host not allowed"
+    ) in report.annotations

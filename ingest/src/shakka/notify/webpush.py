@@ -20,7 +20,14 @@ from pywebpush import WebPushException
 from shakka.config import Settings
 from shakka.domain.messages import AlertMessage
 from shakka.domain.push import PushPayload, build_push_payload
-from shakka.notify.base import WEBPUSH_CHANNEL, DeliveryResult, Notifier, PushTarget
+from shakka.notify.base import (
+    BLOCKED_HOST_DETAIL,
+    WEBPUSH_CHANNEL,
+    DeliveryResult,
+    Notifier,
+    PushTarget,
+    endpoint_allowed,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -107,10 +114,12 @@ class WebPushNotifier:
         try:
             payload = build_push_payload(message, tag=tag)
         except ValueError:
-            return DeliveryResult(False, False, "ValueError")
+            return DeliveryResult(False, False, "ValueError", retryable=False)
         return self.send_payload(target, payload)
 
     def send_payload(self, target: PushTarget, payload: PushPayload) -> DeliveryResult:
+        if not endpoint_allowed(target.endpoint):  # defence in depth: never POST elsewhere
+            return DeliveryResult(False, False, BLOCKED_HOST_DETAIL, retryable=False)
         fn = self._webpush_fn or pywebpush.webpush  # looked up at call time (tests patch it)
         try:
             fn(
@@ -129,10 +138,14 @@ class WebPushNotifier:
             status = exc.status_code
             if status in (404, 410):
                 return DeliveryResult(False, True, f"HTTP {status}")
-            detail = "WebPushException" if status is None else f"HTTP {status}"
-            return DeliveryResult(False, False, detail)
-        except Exception as exc:
+            if status is None:
+                return DeliveryResult(False, False, "WebPushException")
+            retryable = status == 429 or status >= 500
+            return DeliveryResult(False, False, f"HTTP {status}", retryable=retryable)
+        except OSError as exc:  # requests.RequestException is an IOError
             return DeliveryResult(False, False, type(exc).__name__)
+        except Exception as exc:
+            return DeliveryResult(False, False, type(exc).__name__, retryable=False)
         return DeliveryResult(True, False, "ok")
 
 

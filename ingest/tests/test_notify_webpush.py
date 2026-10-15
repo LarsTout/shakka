@@ -68,16 +68,16 @@ def test_fresh_claims_per_call():
     message = AlertMessage(
         spot_id="s", kind=AlertEventKind.NEW, title="Go: S", body="b", go_url=None
     )
-    t1 = PushTarget("a", "https://one.example.test/x", "P", "A")
-    t2 = PushTarget("b", "https://two.example.test/y", "P", "A")
+    t1 = PushTarget("a", "https://fcm.googleapis.com/x", "P", "A")
+    t2 = PushTarget("b", "https://jmt17.google.com/y", "P", "A")
     n.send(t1, message, tag="alert-1")
     n.send(t2, message, tag="alert-1")
     first, second = rec.calls
     assert first["claims_obj"] is not second["claims_obj"]
     assert first["vapid_claims"] == {"sub": SUBJECT}
     assert second["vapid_claims"] == {"sub": SUBJECT}
-    assert first["claims_obj"]["aud"] == "https://one.example.test"
-    assert second["claims_obj"]["aud"] == "https://two.example.test"
+    assert first["claims_obj"]["aud"] == "https://fcm.googleapis.com"
+    assert second["claims_obj"]["aud"] == "https://jmt17.google.com"
 
 
 def _payload():
@@ -100,32 +100,45 @@ def test_status_permanent(status):
 def test_status_not_permanent(status):
     exc = WebPushException("Push failed: x", response=FakeResponse(status))
     n = WebPushNotifier(KEYS.private_key, SUBJECT, webpush_fn=RecordingWebpush(raises=exc))
+    retryable = status in (429, 500, 503)
     assert n.send_payload(make_target(), _payload()) == DeliveryResult(
-        False, False, f"HTTP {status}"
+        False, False, f"HTTP {status}", retryable=retryable
     )
 
 
 @pytest.mark.parametrize(
-    ("exc", "detail"),
+    ("exc", "detail", "retryable"),
     [
-        (WebPushException("Push failed", response=None), "WebPushException"),
-        (requests.exceptions.ConnectTimeout("slow"), "ConnectTimeout"),
-        (RuntimeError("boom"), "RuntimeError"),
+        (WebPushException("Push failed", response=None), "WebPushException", True),
+        (requests.exceptions.ConnectTimeout("slow"), "ConnectTimeout", True),
+        (RuntimeError("boom"), "RuntimeError", False),
     ],
 )
-def test_other_failures(exc, detail):
+def test_other_failures(exc, detail, retryable):
     n = WebPushNotifier(KEYS.private_key, SUBJECT, webpush_fn=RecordingWebpush(raises=exc))
-    assert n.send_payload(make_target(), _payload()) == DeliveryResult(False, False, detail)
+    assert n.send_payload(make_target(), _payload()) == DeliveryResult(
+        False, False, detail, retryable=retryable
+    )
 
 
-def test_payload_value_error_is_retryable():
+def test_blocked_host_is_not_posted():
+    rec = RecordingWebpush()
+    n = WebPushNotifier(KEYS.private_key, SUBJECT, webpush_fn=rec)
+    target = PushTarget("a", "https://evil.example.test/x", "P", "A")
+    assert n.send_payload(target, _payload()) == DeliveryResult(
+        False, False, "blocked host", retryable=False
+    )
+    assert rec.calls == []
+
+
+def test_payload_value_error_is_not_retryable():
     rec = RecordingWebpush()
     n = WebPushNotifier(KEYS.private_key, SUBJECT, webpush_fn=rec)
     message = AlertMessage(
         spot_id="s" * 4000, kind=AlertEventKind.NEW, title="Go", body="b", go_url=None
     )
     assert n.send(make_target(), message, tag="alert-1") == DeliveryResult(
-        False, False, "ValueError"
+        False, False, "ValueError", retryable=False
     )
     assert rec.calls == []
 
@@ -283,7 +296,7 @@ def test_notifiers_from_settings_errors_hold_no_values():
 
 def test_failure_detail_has_no_secrets(caplog, capsys):
     caplog.set_level(logging.DEBUG)
-    ep = "https://push.example.test/send/ENDPOINT-SECRET-123"
+    ep = "https://fcm.googleapis.com/fcm/send/ENDPOINT-SECRET-123"
     target = PushTarget("sub-1", ep, "P256DH-SECRET-456", "AUTH-SECRET-789")
     secrets = [ep, "P256DH-SECRET-456", "AUTH-SECRET-789", KEYS.private_key]
     errors = [

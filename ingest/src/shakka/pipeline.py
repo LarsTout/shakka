@@ -246,6 +246,8 @@ def alert_counts(result: AlertJobResult) -> dict[str, Any]:
         "failed": result.failed,
         "no_target": result.no_target,
         "deferred": result.deferred,
+        "blocked_targets": result.blocked_targets,
+        "push_non_retryable": result.push_non_retryable,
         "removed": result.removed,
         "push_enabled": result.push_enabled,
         "push_failures": dict(result.push_failures),
@@ -258,6 +260,13 @@ def deferred_warning(deferred: int) -> str:
     return (
         f"{deferred} favorite(s) deferred: no push delivery succeeded; "
         "retried next run (see push_failures in ingest_runs)"
+    )
+
+
+def non_retryable_warning(count: int) -> str:
+    return (
+        f"{count} push delivery(ies) failed without retry; the alert is lost for that "
+        "device (see push_failures in ingest_runs)"
     )
 
 
@@ -283,7 +292,15 @@ def step_alerts(ctx: PipelineContext) -> StepOutcome:
     )
     if result.deferred:
         warnings.append(deferred_warning(result.deferred))
-    partial = bool(result.skipped or result.write_errors or result.deferred)
+    if result.push_non_retryable:
+        warnings.append(non_retryable_warning(result.push_non_retryable))
+    if result.blocked_targets:
+        warnings.append(
+            f"{result.blocked_targets} push subscription(s) skipped: push service host not allowed"
+        )
+    partial = bool(
+        result.skipped or result.write_errors or result.deferred or result.push_non_retryable
+    )
     return StepOutcome(
         "partial" if partial else "ok", alert_counts(result), warnings=tuple(warnings)
     )

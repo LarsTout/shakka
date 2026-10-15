@@ -65,8 +65,9 @@ from shakka.jobs.inputs import (
     short_error,
 )
 from shakka.jobs.push import (
+    TargetsLoad,
     deliver_event,
-    load_all_targets,
+    load_all_targets_checked,
     update_subscriptions,
 )
 from shakka.jobs.push import load_targets as load_targets  # explicit re-export (contract)
@@ -109,6 +110,8 @@ class AlertJobResult:
     removed: int = 0  # push subscriptions deleted after 404/410
     push_enabled: bool = False  # webpush notifier given and not a dry run
     push_failures: Mapping[str, int] = field(default_factory=dict)  # detail -> count
+    blocked_targets: int = 0  # subscriptions skipped: push service host not allowed
+    push_non_retryable: int = 0  # deliveries that failed without retry; event lost for the device
 
 
 @dataclass(frozen=True, slots=True)
@@ -360,6 +363,7 @@ class PlanDelivery:
     ok_ids: frozenset[str] = frozenset()
     gone_ids: frozenset[str] = frozenset()
     failures: tuple[str, ...] = ()
+    non_retryable: int = 0
 
 
 def deliver_plan(
@@ -386,7 +390,7 @@ def deliver_plan(
     ok_ids: set[str] = set()
     failures: list[str] = []
     notified: set[int] = set()
-    sent = failed = no_target = 0
+    sent = failed = no_target = non_retryable = 0
     for index, message in plan.messages:  # sorted by state_index (WP-10)
         live = [t for t in targets if t.subscription_id not in gone_local]
         if not live:
@@ -397,6 +401,7 @@ def deliver_plan(
         d = deliver_event(notifier, live, message, tag=push_tag(state_id))
         sent += d.sent
         failed += d.failed
+        non_retryable += d.non_retryable
         failures.extend(d.failures)
         ok_ids |= d.ok_ids
         gone_local |= d.gone_ids
@@ -413,6 +418,7 @@ def deliver_plan(
                 ok_ids=frozenset(ok_ids),
                 gone_ids=frozenset(gone_ids),
                 failures=tuple(failures),
+                non_retryable=non_retryable,
             )
     stamped = [
         e.model_copy(update={"last_notified_at": now}) if i in notified else e
@@ -427,6 +433,7 @@ def deliver_plan(
         ok_ids=frozenset(ok_ids),
         gone_ids=frozenset(gone_ids),
         failures=tuple(failures),
+        non_retryable=non_retryable,
     )
 
 
@@ -450,7 +457,10 @@ def run_alerts(
     ctx = load_alert_context(db, now=now)
     push = None if dry_run else (notifiers or {}).get(WEBPUSH_CHANNEL)
     # One select without a user filter: no user id in a request URL (WP-10 A9).
-    targets = load_all_targets(db) if push is not None and ctx.favorites else {}
+    loaded = (
+        load_all_targets_checked(db) if push is not None and ctx.favorites else TargetsLoad({}, 0)
+    )
+    targets = loaded.targets
 
     messages: list[RenderedAlert] = []
     errors: list[str] = []
@@ -481,6 +491,7 @@ def run_alerts(
                 gone_all |= d.gone_ids
                 ok_all |= d.ok_ids
                 failures.update(d.failures)
+                counts["push_non_retryable"] += d.non_retryable
                 if d.deferred:
                     counts["deferred"] += 1
                     logger.warning(
@@ -514,7 +525,7 @@ def run_alerts(
     logger.info(
         "alerts: users=%d favorites=%d events=%d new=%d improved=%d worsened=%d cancelled=%d "
         "ineligible=%d disabled=%d skipped=%d write_errors=%d deleted=%d dry_run=%s "
-        "sent=%d failed=%d no_target=%d deferred=%d removed=%d push=%s",
+        "sent=%d failed=%d no_target=%d deferred=%d removed=%d blocked=%d non_retryable=%d push=%s",
         users,
         len(ctx.favorites),
         len(messages),
@@ -533,6 +544,8 @@ def run_alerts(
         counts["no_target"],
         counts["deferred"],
         removed,
+        loaded.blocked,
+        counts["push_non_retryable"],
         push is not None,
     )
     return AlertJobResult(
@@ -553,6 +566,8 @@ def run_alerts(
         removed=removed,
         push_enabled=push is not None,
         push_failures=dict(failures),
+        blocked_targets=loaded.blocked,
+        push_non_retryable=counts["push_non_retryable"],
     )
 
 
@@ -619,10 +634,12 @@ def run_alerts_cli(*, dry_run: bool, echo: Callable[[str], None]) -> int:
     else:
         echo(
             f"push: sent={result.sent} failed={result.failed} no_target={result.no_target} "
-            f"deferred={result.deferred} removed={result.removed}"
+            f"deferred={result.deferred} non_retryable={result.push_non_retryable} "
+            f"removed={result.removed}"
         )
     for line in result.errors:
         echo(f"error   {line}")
     failed = result.skipped > 0 or result.write_errors > 0 or result.deferred > 0
+    failed = failed or result.push_non_retryable > 0
     echo("alerts: failed" if failed else "alerts: ok")
     return 1 if failed else 0
