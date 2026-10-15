@@ -1,10 +1,10 @@
 # Blueprint WP-21: Publieke sessiepagina en RSVP zonder account
 Status: DRAFT
-Revisie: 1
+Revisie: 2
 
 ## Doel
 Iedereen met een link `/s/{slug}` (meestal gedeeld in WhatsApp) ziet zonder account:
-- de sessie: spotnaam met link naar de spotpagina, datum en tijdvenster in lokale tijd, organisator, notitie, Tikkie-link;
+- de sessie: spotnaam met link naar de spotpagina, datum en tijdvenster in lokale tijd, organisator, notitie, Tikkie-link (alleen `https://tikkie.me/...`);
 - de deelnemerslijst en de carpoolsituatie (vrije plekken en vertrekpunt van de organisator, wie een lift aanbiedt, wie meerijdt, wie een lift zoekt);
 - per uur van het window het oordeel (`HourVerdict` uit WP-14) met de versheid van de data, en `Attribution`;
 - een banner als de sessie geannuleerd of voorbij is.
@@ -20,18 +20,24 @@ Voorstellen waar Lars op kan reageren staan als **Voorstel**.
 - **A2. De pure logica staat los van de I/O.** De bestanden:
   - `#lib/rsvp-types.ts`: types en constanten;
   - `#lib/session-view.ts`: parsers, foutcodes, `RsvpError`, meldingen, formuliervalidatie, carpool en tijdvenster. Puur, zonder I/O;
-  - `#lib/rsvp-storage.ts`: `localStorage`, met een injecteerbare `Storage`;
+  - `#lib/rsvp-storage.ts`: `localStorage`, met een injecteerbare `Storage` en een geheugenfallback (E26);
   - `#lib/rsvp.ts`: de RPC-aanroepen;
-  - `#lib/session-page-data.ts`: de load.
+  - `#lib/public-session-data.ts`: de load.
+
+  Alle nieuwe bestandsnamen botsen niet met WP-20 (B-1 van review ronde 1): WP-20 maakt `session-page-data.ts`, `session-model.ts`, `session-form.ts`, `sessions.ts`, `local-prefs.ts` en `test/fixtures/session-data.ts`; WP-21 maakt geen van die bestanden.
 
   Paginatests mocken alleen `#lib/rsvp.js` en gebruiken de echte opslag en de echte pure logica (zelfde patroon als WP-14 A6).
 - **A3. Laden via een universele `+page.ts`, met een gediscrimineerde unie** (`ok`, `not_found`, `error`), zoals WP-14. De load roept `get_public_session` aan en daarna `getEvaluations` (WP-14) voor het window. Faalt alleen het laden van de evaluaties, dan blijft de pagina bruikbaar met `evaluations: null` en de melding "Het oordeel kon niet worden geladen." Het oordeel is aanvullende informatie; aanmelden moet blijven werken.
 - **A4. De uren van het window.** De uren `[floorHour(starts_at), ends_at)` worden getoond, allemaal, ook donkere uren (de gebruiker koos dit venster zelf; er is geen knop). Een uur `[T, T+1h)` overlapt het window precies als `floorHour(starts_at) <= T < ends_at`. Dat klopt ook voor een begin- of eindtijd die niet op het hele uur valt. Het window is hoogstens 16 uur (WP-19), dus hoogstens 17 rijen. Valt het window over middernacht, dan krijgt elke dag een kop (`formatDateKey(key, 'day')`); bij één dag is er geen dagkop.
-- **A5. "Gesloten" in de browser** is `cancelled || ends_at <= now`, met `now` uit de load (`data.now`). De server beslist (`session_closed`); een afwijkende klok op het apparaat geeft hooguit die melding. Bij een gesloten sessie:
+- **A5. "Gesloten" in de browser** is `cancelled || ends_at <= now`. `now` begint als `data.now` uit de load en wordt bijgewerkt naar `new Date()`:
+  - na elke verversing door het paneel (`applyRefresh`);
+  - door een timer die 1 seconde na `ends_at` afgaat, zolang de pagina open staat.
+
+  De server beslist (`session_closed`). Antwoordt de server `session_closed` terwijl de browser de sessie nog open vindt (klok van het apparaat loopt achter), dan zet het paneel een eigen vlag `serverClosed` en verbergt het formulier en Wijzigen. Bij een gesloten sessie:
   - is er geen formulier om je aan te melden en geen "Wijzigen";
   - blijft "Afmelden" wel staan voor wie een token heeft (WP-19 A10);
   - is de versheidsmelding verborgen.
-- **A6. De token staat alleen in `localStorage`**, als JSON `{"rsvp_id": "<uuid>", "edit_token": "<43 tekens>"}` onder `shakka:rsvp:{slug}`. Niet in een cookie, URL, link, de DOM of een log. RPC's gaan via `supabase.rpc(naam, args)` zonder derde argument. supabase-js doet dan een POST met de argumenten in de body (`get`/`head` staan standaard op `false`), dus de token komt niet in de querystring (WP-19 review N-8, RUNBOOK §16.7).
+- **A6. De token staat alleen in `localStorage`**, als JSON `{"rsvp_id": "<uuid>", "edit_token": "<43 tekens>"}` onder `shakka:rsvp:{slug}`. Niet in een cookie, URL, link, de DOM of een log. RPC's gaan via `supabase.rpc(naam, args)` zonder derde argument. supabase-js doet dan een POST met de argumenten in de body (`get`/`head` staan standaard op `false`), dus de token komt niet in de querystring (WP-19 review N-8, RUNBOOK §16.7). Elke RPC krijgt een timeout van 15 seconden via `.abortSignal(AbortSignal.timeout(15_000))` op de builder; dat blijft een POST. Een afgebroken fetch wordt door postgrest-js opgevangen als fetchfout en resolvet met `status: 0`, dus `network`. Kent de browser `AbortSignal.timeout` niet, dan gaat de RPC zonder timeout.
 - **A7. Wanneer de sleutel verdwijnt:**
   - na een geslaagde of al eerder uitgevoerde afmelding (`rsvp_delete` geeft `true` of `false`);
   - bij `invalid_token` van `rsvp_update`;
@@ -40,42 +46,52 @@ Voorstellen waar Lars op kan reageren staan als **Voorstel**.
   - als de waarde misvormd is.
 
   Daarna kun je je opnieuw aanmelden. De controle bij de eerste load gebeurt maar één keer per slug. Zo wist een verversing (`refreshAll` bij terugkeer) die toevallig gelijktijdig met een aanmelding loopt, de net opgeslagen sleutel niet.
+
+  **Geaccepteerde rand (review N-10).** Twee tabbladen: laadt tabblad B terwijl tabblad A zich net aanmeldt, dan kan het antwoord van B de nieuwe RSVP nog missen. De eerste controle van B wist dan de sleutel die A net schreef. Het venster is een fractie van een seconde. Gevolg: in A staat "Jij gaat" (in het geheugen van A), in B het formulier; bij een volgende load in A verschijnt het formulier weer en kan de bezoeker zich niet meer afmelden (R1-route via Lars). Dit wordt niet opgelost in deze WP.
 - **A8. Na elke mutatie ververst het paneel alleen de sessie**, via `getPublicSession(slug)`, en niet via `refreshAll()`. Dat is één RPC, en de evaluaties en de rest van de pagina blijven staan. De pagina zet de nieuwe `session` en `rsvps` via overschrijfbare `$derived`-waarden (Svelte ≥ 5.25). Een nieuwe load (`data`) zet ze weer terug naar de loadwaarde.
 - **A9. Meerijden (`rides_with`) kies je pas bij "Wijzigen".** `rsvp_create` heeft geen parameter `p_rides_with` (WP-19). Wie zich aanmeldt met "Ik zoek een lift" staat bij "Zoekt een lift". Via Wijzigen kies je daarna een aanbieder uit de lijst ("Rijd mee met"). Bij een aanmelding met `needs_ride` zegt een korte hint dat dit kan.
 - **A10. Plekken bij een liftaanbod: "Weet ik nog niet" (`null`) of 0 t/m 8**, gelijk aan de DB-CHECK. 0 heet "Geen (auto zit vol)". Er is geen controle op capaciteit (WP-19 Buiten scope).
-- **A11. Namen in `<bdi>`.** Elke vrije tekst van gebruikers (voornaam, organisatornaam, vertrekpunt, notitie) wordt gerenderd in een `<bdi>`-element. Zo kan een naam met een rechts-naar-links-teken (U+202E) de tekst eromheen niet omdraaien (WP-19 review N-7). Svelte escapet alle tekst; nergens `{@html}`.
+- **A11. Namen in `<bdi>`.** Elke vrije tekst van gebruikers (voornaam, organisatornaam, vertrekpunt, notitie) wordt gerenderd in een `<bdi>`-element. Zo kan een naam met een rechts-naar-links-teken (U+202E) de tekst eromheen niet omdraaien (WP-19 review N-7). Een `<option>` kan geen elementen bevatten; daar staat de naam tussen U+2068 (FSI) en U+2069 (PDI) via `isolateText` (review N-7). Svelte escapet alle tekst; nergens `{@html}`.
 - **A12. De organisator telt mee in "Deelnemers"** (`rsvps.length + 1`) en staat bovenaan met "organisator". Hij is geen RSVP; zijn vrije plekken staan bij Carpool.
 - **A13. Voorstel: een privacyregel bij het formulier**: "Alleen je voornaam en je vervoerskeuze worden opgeslagen, tot 7 dagen na de sessie. Iedereen met deze link kan ze zien. Wijzigen of afmelden kan later alleen in deze browser op dit apparaat." De 7 dagen komen uit `SESSION_RETENTION_DAYS`. Een drifttest vergelijkt die met de migratie (WP-19 A1; Lars moet de termijn nog bevestigen).
-- **A14. De Tikkie-link** wordt alleen getoond als `new URL(tikkie_url)` slaagt en het protocol `https:` is (de DB eist dat ook). Linktekst "Open betaalverzoek", met `target="_blank" rel="noopener noreferrer"`. Daarnaast staat "(link naar {host})", zodat je ziet waar je heen gaat (WP-19 R5).
-- **A15. Een tweede tabblad maakt geen dubbele RSVP.** Vlak voor `createRsvp` leest het paneel de opslag opnieuw. Staat daar al een sleutel (aangemaakt in een ander tabblad), dan maakt het geen nieuwe RSVP. Het toont dan "Jij gaat" en ververst.
+- **A14. De Tikkie-link** wordt alleen getoond als hij begint met `https://tikkie.me/`, er na die prefix nog minstens één teken volgt, `new URL(tikkie_url)` slaagt en `hostname === 'tikkie.me'` (beslissing orchestrator bij review N-6: alleen `https://tikkie.me/...`; dezelfde regel komt via de orchestrator in de validatie van WP-20). Een echte Tikkie heeft de vorm `https://tikkie.me/pay/<code>`. De prefix sluit een poort, gebruikersnaam, andere host en subdomein uit. Linktekst "Open betaalverzoek", met `target="_blank" rel="noopener noreferrer"`. Daarnaast staat "(link naar tikkie.me)", zodat je ziet waar je heen gaat (WP-19 R5). Een andere `https:`-link (bijvoorbeeld van een sessie die vóór de WP-20-regel is aangemaakt) wordt stil niet getoond.
+- **A15. Een tweede tabblad maakt geen dubbele RSVP.** Vlak voor `createRsvp` leest het paneel de opslag opnieuw. Staat daar al een sleutel (aangemaakt in een ander tabblad), dan maakt het geen nieuwe RSVP. Het toont dan "Jij gaat" en ververst. De omgekeerde rand (B wist de verse sleutel van A) staat bij A7.
 - **A16. Afmelden vraagt een bevestiging in de pagina** ("Weet je zeker dat je je wilt afmelden?" met "Ja, afmelden" en "Nee"), geen `window.confirm`. Dat is beter te testen en werkt ook in in-app-browsers.
 - **A17. De voornaam wordt niet onthouden tussen sessies**, en `shakka:organizer_name` (WP-20) wordt niet gelezen. Minimale persoonsgegevens; elke RSVP is los.
 - **A18. Geen dynamische OG-preview, geen `X-Robots-Tag`-header.** `noindex` staat als `<meta>` in de pagina (via `<svelte:head>`, door JavaScript toegevoegd; Google ondersteunt dat). Crawlers zonder JavaScript krijgen de lege app-shell zonder sessiedata. Een `X-Robots-Tag` voor `/s/*` in `web/static/_headers` is een voorstel voor WP-23, dat dit bestand maakt.
-- **A19. Docker en de lokale stack zijn niet nodig voor de tests.** Alle tests draaien met vitest en mocks. De handmatige rooktest (stap 8) gebruikt de lokale stack als die er is.
+- **A19. Docker en de lokale stack zijn niet nodig voor de tests.** Alle tests draaien met vitest en mocks. De handmatige rooktest (stap 7) gebruikt de lokale stack als die er is.
+- **A20. Volgorde ten opzichte van WP-20: WP-20 merget eerst.** WP-21 wordt parallel gebouwd met eigen kleine helpers. Na de merge van WP-20 rebaset WP-21 op `develop` (stap 9) en vervangt het de helpers die WP-20 identiek levert:
+  - `SESSION_SLUG_RE` en `isValidSessionSlug` door `SESSION_SLUG_PATTERN` en `isSessionSlug` uit `#lib/session-model.ts`;
+  - `countCodePoints` door `codePointLength` uit `#lib/session-model.ts`;
+  - de body van `sessionWindowText` door `formatWindowLocal` uit `#lib/time.ts`;
+  - `browserStorage` en `StorageLike` in `rsvp-storage.ts` door `browserStorage` en `KeyValueStorage` uit `#lib/local-prefs.ts`.
+
+  Om dat mogelijk te maken heeft WP-21 deze helpers nu al met exact het gedrag van WP-20 (zelfde regex, zelfde vensternotatie, `browserStorage()` geeft `null` en niet `undefined`). De WP-21-PR merget pas na stap 9.
+- **A21. De vensternotatie is die van WP-20 en WP-08** (`za 18 jul 14:00–18:00`; over middernacht `za 18 jul 22:00 – zo 19 jul 04:00`). Dezelfde notatie als in de WhatsApp-deeltekst waar de bezoeker vandaan komt, en als in de alerts. De volledige dag- en maandnamen van revisie 1 vervallen (review N-9).
 
 ## Ontwerp
 
 **Lagen.**
 ```
-routes/s/[slug]/+page.ts  ──> #lib/session-page-data.ts ──> #lib/rsvp.ts ──> #lib/supabase.js
-                                                       └──> #lib/data.ts (getEvaluations, bestaand)
+routes/s/[slug]/+page.ts  ──> #lib/public-session-data.ts ──> #lib/rsvp.ts ──> #lib/supabase.js
+                                                         └──> #lib/data.ts (getEvaluations, bestaand)
 routes/s/[slug]/+page.svelte ──> components/SessionParticipants.svelte (deelnemers + carpool, puur)
                              ──> components/RsvpPanel.svelte ──> #lib/rsvp.ts, #lib/rsvp-storage.ts
                                    └──> components/RsvpForm.svelte (validatie via session-view)
                              ──> HourVerdict, Freshness, Attribution (bestaand)
 puur, zonder I/O: #lib/rsvp-types.ts, #lib/session-view.ts (+ bestaande time, view, labels, contracts)
 ```
-- De load (`loadSessionPage`) controleert eerst de vorm van de slug (geen RPC bij een ongeldige slug). Daarna `getPublicSession` en, als die een sessie geeft, `getEvaluations(spot_id, floorHour(starts_at), ends_at)`.
-- De pagina is presentatie plus de opslagstatus. Bij elke nieuwe `data` leest een `$effect` de opgeslagen RSVP. Bij de eerste data van een slug ruimt hij een verouderde sleutel op (A7).
+- De load (`loadPublicSessionPage`) controleert eerst de vorm van de slug (geen RPC bij een ongeldige slug). Daarna `getPublicSession` en, als die een sessie geeft, `getEvaluations(spot_id, floorHour(starts_at), ends_at)`.
+- De pagina is presentatie plus de opslagstatus en de klok (`now`, A5). Bij elke nieuwe `data` leest een `$effect` de opgeslagen RSVP. Bij de eerste data van een slug ruimt hij een verouderde sleutel op (A7).
 - `RsvpPanel` is de toestandsmachine. Er zijn drie toestanden:
   - geen token en open sessie: het aanmeldformulier;
   - wel een token: "Jij gaat", met Wijzigen (alleen bij een open sessie en als de eigen RSVP in de lijst staat) en Afmelden;
   - geen token en gesloten sessie: niets.
 
-  Daarbinnen zijn er de modi `view`, `edit` en `confirm_delete`, plus één `busy`-vlag tegen dubbele verzending. `stored` is een `$bindable` prop, zodat de pagina "(jij)" in de lijst kan tonen.
+  Daarbinnen zijn er de modi `view`, `edit` en `confirm_delete`, plus één `busy`-vlag tegen dubbele verzending en de vlag `serverClosed` (A5). "Gesloten" in het paneel is `closed || serverClosed`. `stored` is een `$bindable` prop, zodat de pagina "(jij)" in de lijst kan tonen. De pagina zet het paneel in `{#key data.slug}`, zodat modus, meldingen en `serverClosed` niet meegaan naar een andere sessie.
 - **Foutafhandeling.** `rsvp.ts` zet elke fout om in `RsvpError` met een `kind`:
   - de vijf contractcodes (alleen bij `code === 'PT400'` en een bekende `message`);
-  - `network` (HTTP-status 0 of een gegooide fout);
+  - `network` (HTTP-status 0, ook na de timeout, of een gegooide fout);
   - `unknown` (al het andere, ook een misvormd antwoord).
 
   De UI kent alleen `kind` en toont `RSVP_MESSAGES[kind]`. De servertekst gaat nergens heen: niet in `Error.message`, niet in de DOM en niet in de console.
@@ -93,31 +109,35 @@ De pure modules maken alle beslissingen (gesloten, carpool, labels, validatie, f
 | Pad | Actie | Inhoud |
 |---|---|---|
 | `web/src/lib/rsvp-types.ts` | aanmaken | Types en constanten (exact, zie Interfaces). |
-| `web/src/lib/session-view.ts` | aanmaken | Pure logica: regexen, `rsvpStorageKey`, `RsvpError`, `rsvpErrorKind`, meldingen, parsers, `isSessionClosed`, `sessionWindowText`, `seatsText`, `rideLabel`, `carpoolView`, `safeHttpsLink`, formulierlogica. |
-| `web/src/lib/rsvp-storage.ts` | aanmaken | `browserStorage`, `readStoredRsvp`, `writeStoredRsvp`, `clearStoredRsvp`. |
-| `web/src/lib/rsvp.ts` | aanmaken | `getPublicSession`, `createRsvp`, `updateRsvp`, `deleteRsvp` (exact, zie Interfaces). |
-| `web/src/lib/session-page-data.ts` | aanmaken | `SessionPageData`, `loadSessionPage`. |
+| `web/src/lib/session-view.ts` | aanmaken | Pure logica: regexen, `rsvpStorageKey`, `RsvpError`, `rsvpErrorKind`, meldingen, parsers, `isSessionClosed`, `sessionWindowText`, `seatsText`, `rideLabel`, `carpoolView`, `tikkieLink`, `isolateText`, formulierlogica. |
+| `web/src/lib/rsvp-storage.ts` | aanmaken | `browserStorage`, `readStoredRsvp`, `writeStoredRsvp`, `clearStoredRsvp`, `resetRsvpMemory`. |
+| `web/src/lib/rsvp.ts` | aanmaken | `RPC_TIMEOUT_MS`, `getPublicSession`, `createRsvp`, `updateRsvp`, `deleteRsvp` (exact, zie Interfaces). |
+| `web/src/lib/public-session-data.ts` | aanmaken | `PublicSessionPageData`, `loadPublicSessionPage`. |
 | `web/src/lib/components/SessionParticipants.svelte` | aanmaken | Deelnemerslijst en carpool. |
 | `web/src/lib/components/RsvpForm.svelte` | aanmaken | Formulier "Ik ook" en "Wijzigen". |
 | `web/src/lib/components/RsvpPanel.svelte` | aanmaken | Toestand "aanmelden / Jij gaat / wijzigen / afmelden". |
-| `web/src/routes/s/[slug]/+page.ts` | aanmaken | Eén regel: `loadSessionPage(params.slug, new Date())`. |
+| `web/src/routes/s/[slug]/+page.ts` | aanmaken | Eén regel: `loadPublicSessionPage(params.slug, new Date())`. |
 | `web/src/routes/s/[slug]/+page.svelte` | aanmaken | De publieke sessiepagina. |
 | `web/src/app.css` | wijzigen | Een blok `/* WP-21: public session page */` aan het eind (zie Stijl). Bestaande regels blijven. |
-| `web/test/helpers/fake-rpc.ts` | aanmaken | Nep-`rpc` met vastgelegde aanroepen, plus een client met een `auth`-teller. |
-| `web/test/fixtures/session-data.ts` | aanmaken | Fixtures (zie Testplan). |
+| `web/test/helpers/fake-rpc.ts` | aanmaken | Nep-`rpc` (thenable builder met `abortSignal`) met vastgelegde aanroepen, plus een client met een `auth`-teller. |
+| `web/test/fixtures/public-session.ts` | aanmaken | Fixtures (zie Testplan). |
 | `web/test/session-view.test.ts` | aanmaken | Zie Testplan. |
 | `web/test/rsvp-storage.test.ts` | aanmaken | Zie Testplan. |
 | `web/test/rsvp.test.ts` | aanmaken | Zie Testplan. |
 | `web/test/rsvp-contract.test.ts` | aanmaken | Zie Testplan. |
-| `web/test/session-page-data.test.ts` | aanmaken | Zie Testplan. |
-| `web/test/session-page.test.ts` | aanmaken | Zie Testplan. |
-| `web/test/session-page-integration.test.ts` | aanmaken | Zie Testplan. |
+| `web/test/public-session-data.test.ts` | aanmaken | Zie Testplan. |
+| `web/test/public-session-page.test.ts` | aanmaken | Zie Testplan. |
+| `web/test/public-session-page-integration.test.ts` | aanmaken | Zie Testplan. |
 | `web/test/rsvp-flow.test.ts` | aanmaken | Zie Testplan. |
 | `web/test/session-no-auth.test.ts` | aanmaken | Zie Testplan. |
 | `web/test/user-tables.test.ts` | wijzigen | Alleen de test `'no file uses .rpc('` wordt vervangen door de allowlist-test (zie Interfaces). De rest blijft. |
 | `docs/RUNBOOK.md` | wijzigen | §16, nieuwe punten 8 en 9 (zie Interfaces). |
 
-Geen wijzigingen in `ingest/`, `supabase/`, `data/`, `.github/`, de service worker, de layout, `types.ts`, `data.ts`, `user-data.ts`, `test/helpers/fake-supabase.ts` of `package.json`. De types staan bewust in een nieuw bestand en de nep-RPC in een nieuwe helper: zo zijn er minder mergeconflicten met WP-20, dat parallel bouwt. `docs/STATUS.md` en `WORK_PACKAGES.md` werkt de orchestrator bij.
+Stap 9 (na de merge van WP-20, A20) wijzigt daarnaast alleen `session-view.ts` en `rsvp-storage.ts` uit deze tabel; geen WP-20-bestanden.
+
+Geen wijzigingen in `ingest/`, `supabase/`, `data/`, `.github/`, de service worker, de layout, `time.ts`, `types.ts`, `data.ts`, `user-data.ts`, `test/helpers/fake-supabase.ts` of `package.json`.
+
+**Overlap met WP-20 (gecontroleerd tegen `.claude/worktrees/WP-20/docs/wp/WP-20/blueprint.md`, tabel "Bestanden" en Testplan).** Geen enkel bestand dat WP-21 aanmaakt, wordt ook door WP-20 aangemaakt: de load heet `public-session-data.ts` (WP-20: `session-page-data.ts`), de fixtures `fixtures/public-session.ts` (WP-20: `fixtures/session-data.ts`), en de paginatests `public-session-*.test.ts` (WP-20: `session-page-data.test.ts`, `session-model.test.ts`, `session-form*.test.ts`, `session-schema.test.ts`, `session-tables.test.ts`). WP-21 raakt `time.ts` en `fake-supabase.ts` niet aan (WP-20 wel). Gewijzigd door beide: alleen `web/test/user-tables.test.ts` (andere tests in hetzelfde bestand) en `docs/RUNBOOK.md` (WP-20 §11, WP-21 §16). `app.css` wijzigt alleen WP-21; WP-20 gebruikt `<style>`-blokken (WP-20, alinea onder "Bestanden"). Zie R3. `docs/STATUS.md` en `WORK_PACKAGES.md` werkt de orchestrator bij.
 
 ## Interfaces en contracten
 Imports gaan via `#lib/<bestand>.js` (WP-13). Alle teksten voor de gebruiker zijn Nederlands. Code, identifiers en `Error`-meldingen zijn Engels. In `web/src` mogen de woorden `plausible` en `cdn.` nergens voorkomen, ook niet in commentaar (de trackerscan uit WP-13). Tijden worden alleen opgemaakt met `formatLocal` en `formatDateKey` uit `time.ts` (`no-local-date-getters`).
@@ -188,8 +208,11 @@ export interface StoredRsvp {
 ### `web/src/lib/session-view.ts`
 ```ts
 import type { PublicRsvp, PublicSession, PublicSessionInfo, Ride, RsvpUpdateInput, StoredRsvp } from './rsvp-types.js';
+import { formatLocal, localDateKey } from './time.js';
 
-export const SESSION_SLUG_RE = /^[A-Za-z0-9_-]{10,64}$/;   // same as the migration
+// Until WP-20 is merged: own copies of SESSION_SLUG_PATTERN/isSessionSlug/codePointLength (session-model.ts)
+// and formatWindowLocal (time.ts), with identical behaviour. Step 9 replaces them (blueprint A20).
+export const SESSION_SLUG_RE = /^[A-Za-z0-9_-]{10,64}$/;   // same as the migration and WP-20 SESSION_SLUG_PATTERN
 export const EDIT_TOKEN_RE = /^[A-Za-z0-9_-]{43}$/;        // same as the migration
 export const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 export const RSVP_STORAGE_PREFIX = 'shakka:rsvp:';
@@ -231,8 +254,13 @@ export function parseStoredRsvp(json: unknown): StoredRsvp | null;
 
 /** cancelled || Date.parse(ends_at) <= now.getTime() */
 export function isSessionClosed(s: Pick<PublicSessionInfo, 'cancelled' | 'ends_at'>, now: Date): boolean;
-/** Same local day (key of start === key of end - 1 ms): 'zaterdag 18 juli, 14:00–18:00';
- *  otherwise 'zaterdag 18 juli 22:00 – zondag 19 juli 04:00'. En dash U+2013. Europe/Amsterdam. */
+/** Same notation as WP-20 formatWindowLocal and WP-08 format_window_local (A21). start = new Date(startsAt),
+ *  end = new Date(endsAt); RangeError('invalid window') when end <= start.
+ *  localDateKey(start) === localDateKey(new Date(end.getTime() - 1)):
+ *    `${formatLocal(start, 'day')} ${formatLocal(start, 'time')}–${formatLocal(end, 'time')}`  -> 'za 18 jul 14:00–18:00'
+ *  otherwise:
+ *    `${formatLocal(start, 'dateTime')} – ${formatLocal(end, 'dateTime')}`                       -> 'za 18 jul 22:00 – zo 19 jul 04:00'
+ *  En dash U+2013 (with spaces only in the two-day form). Europe/Amsterdam via time.ts. */
 export function sessionWindowText(startsAt: string, endsAt: string): string;
 /** null -> 'aantal plekken onbekend'; 0 -> 'geen plek meer'; 1 -> '1 plek'; n -> `${n} plekken`. */
 export function seatsText(n: number | null): string;
@@ -251,10 +279,14 @@ export interface CarpoolView {
 }
 export function carpoolView(session: Pick<PublicSessionInfo, 'seats_free' | 'departure_point'>, rsvps: readonly PublicRsvp[]): CarpoolView;
 
-/** new URL(url) with protocol 'https:' -> { href: url.href, host: url.host }; otherwise null. Never throws. */
-export function safeHttpsLink(url: string): { href: string; host: string } | null;
+export const TIKKIE_PREFIX = 'https://tikkie.me/';
+/** A14: url.startsWith(TIKKIE_PREFIX) && url.length > TIKKIE_PREFIX.length && new URL(url) succeeds
+ *  && parsed.hostname === 'tikkie.me' -> parsed.href; otherwise null. Never throws. */
+export function tikkieLink(url: string | null): string | null;
 /** null, '' or whitespace -> null; otherwise the text unchanged. */
 export function optionalText(s: string | null): string | null;
+/** '⁨' + s + '⁩' (FSI ... PDI): bidi isolation where <bdi> is impossible, e.g. <option> text (A11). */
+export function isolateText(s: string): string;
 
 export type RsvpFormMode = 'create' | 'edit';
 export interface RsvpFormValues { first_name: string; ride: Ride | ''; seats: string; rides_with: string }
@@ -263,7 +295,7 @@ export type RsvpFormResult =
 	| { ok: true; value: RsvpUpdateInput }
 	| { ok: false; errors: Partial<Record<RsvpFormField, string>> };
 
-export function countCodePoints(s: string): number;                 // [...s].length
+export function countCodePoints(s: string): number;                 // [...s].length; step 9: replaced by codePointLength (WP-20)
 export function emptyRsvpForm(): RsvpFormValues;                    // { first_name: '', ride: 'own', seats: '', rides_with: '' }
 /** seats: '' for null, otherwise String(n); rides_with: '' for null. */
 export function rsvpFormFromRsvp(r: PublicRsvp): RsvpFormValues;
@@ -275,7 +307,7 @@ export function parseRsvpForm(values: RsvpFormValues, mode: RsvpFormMode, driver
 | Sleutel | Tekst |
 |---|---|
 | `RSVP_MESSAGES.rate_limited` | `Er melden zich nu veel mensen tegelijk aan. Probeer het over een paar minuten opnieuw.` |
-| `RSVP_MESSAGES.session_full` | `Deze sessie zit vol: er kunnen hoogstens 30 mensen mee.` |
+| `RSVP_MESSAGES.session_full` | `Deze sessie zit vol: naast de organisator kunnen hoogstens 30 mensen zich aanmelden.` |
 | `RSVP_MESSAGES.session_closed` | `Dit kan niet meer: de sessie is geannuleerd of al voorbij.` |
 | `RSVP_MESSAGES.invalid_input` | `Dat ging niet goed. Controleer je voornaam (1 tot 30 tekens) en je vervoerskeuze, en probeer het opnieuw.` |
 | `RSVP_MESSAGES.invalid_token` | `Je aanmelding is niet meer gevonden. Meld je opnieuw aan als je nog mee wilt.` |
@@ -297,7 +329,7 @@ export function parseRsvpForm(values: RsvpFormValues, mode: RsvpFormMode, driver
 **Regels voor de parsers** (`isObj(x)`: een object, niet `null`, geen array):
 - `parsePublicSession(json)`:
   - `json` is een object met `session` (een object) en `rsvps` (een array), anders volgt een fout;
-  - `session`: `slug`, `spot_id`, `organizer_name`, `starts_at` en `ends_at` zijn strings, en `Date.parse` van `starts_at` en `ends_at` is niet `NaN`;
+  - `session`: `slug`, `spot_id`, `organizer_name`, `starts_at` en `ends_at` zijn strings, `Date.parse` van `starts_at` en `ends_at` is niet `NaN`, en `Date.parse(ends_at) > Date.parse(starts_at)` (de DB eist dat ook; zo kan `sessionWindowText` op de pagina niet gooien);
   - `spot_name`, `note`, `departure_point` en `tikkie_url` zijn een string of `null`;
   - `seats_free` is `null` of een geheel getal (`Number.isInteger`);
   - `cancelled` is een boolean;
@@ -322,27 +354,39 @@ export function parseRsvpForm(values: RsvpFormValues, mode: RsvpFormMode, driver
 import { parseStoredRsvp, rsvpStorageKey, isValidSessionSlug } from './session-view.js';
 import type { StoredRsvp } from './rsvp-types.js';
 
+// Same shape and behaviour as WP-20 KeyValueStorage/browserStorage in local-prefs.ts; step 9 reuses those.
 export type StorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
 
-/** globalThis.localStorage, or undefined when unavailable (access can throw a SecurityError). */
-export function browserStorage(): StorageLike | undefined {
+/** globalThis.localStorage, or null when absent or when accessing it throws (SecurityError). */
+export function browserStorage(): StorageLike | null {
 	try {
-		return globalThis.localStorage ?? undefined;
+		return globalThis.localStorage ?? null;
 	} catch {
-		return undefined;
+		return null;
 	}
 }
 
-/** The stored RSVP for this slug, or null. A malformed value is removed. Never throws. */
-export function readStoredRsvp(storage: StorageLike | undefined, slug: string): StoredRsvp | null {
-	if (!storage || !isValidSessionSlug(slug)) return null;
+// Fallback for the lifetime of this page when localStorage is unavailable or full (E26).
+// Lost on reload; never written anywhere else.
+const memory = new Map<string, StoredRsvp>();
+
+/** Tests only: forget the in-memory fallback. */
+export function resetRsvpMemory(): void {
+	memory.clear();
+}
+
+/** The stored RSVP for this slug, else the in-memory fallback, else null. A malformed value is removed. Never throws. */
+export function readStoredRsvp(storage: StorageLike | null, slug: string): StoredRsvp | null {
+	if (!isValidSessionSlug(slug)) return null;
+	const fallback = memory.get(slug) ?? null;
+	if (!storage) return fallback;
 	let raw: string | null;
 	try {
 		raw = storage.getItem(rsvpStorageKey(slug));
 	} catch {
-		return null;
+		return fallback;
 	}
-	if (raw === null) return null;
+	if (raw === null) return fallback;
 	let parsed: StoredRsvp | null = null;
 	try {
 		parsed = parseStoredRsvp(JSON.parse(raw));
@@ -353,19 +397,30 @@ export function readStoredRsvp(storage: StorageLike | undefined, slug: string): 
 	return parsed;
 }
 
-/** Stores exactly {rsvp_id, edit_token}. false when storage is unavailable or full. Never throws. */
-export function writeStoredRsvp(storage: StorageLike | undefined, slug: string, value: StoredRsvp): boolean {
-	if (!storage || !isValidSessionSlug(slug)) return false;
+/** Stores exactly {rsvp_id, edit_token}. true when persisted; false when storage is unavailable or full,
+ *  in which case the value is kept in memory for this page lifetime. Never throws. */
+export function writeStoredRsvp(storage: StorageLike | null, slug: string, value: StoredRsvp): boolean {
+	if (!isValidSessionSlug(slug)) return false;
+	const clean: StoredRsvp = { rsvp_id: value.rsvp_id, edit_token: value.edit_token };
+	if (!storage) {
+		memory.set(slug, clean);
+		return false;
+	}
 	try {
-		storage.setItem(rsvpStorageKey(slug), JSON.stringify({ rsvp_id: value.rsvp_id, edit_token: value.edit_token }));
+		storage.setItem(rsvpStorageKey(slug), JSON.stringify(clean));
+		memory.delete(slug);
 		return true;
 	} catch {
+		memory.set(slug, clean);
 		return false;
 	}
 }
 
-export function clearStoredRsvp(storage: StorageLike | undefined, slug: string): void {
-	if (!storage || !isValidSessionSlug(slug)) return;
+/** Removes the key and the in-memory fallback. Never throws. */
+export function clearStoredRsvp(storage: StorageLike | null, slug: string): void {
+	if (!isValidSessionSlug(slug)) return;
+	memory.delete(slug);
+	if (!storage) return;
 	try {
 		storage.removeItem(rsvpStorageKey(slug));
 	} catch {
@@ -392,6 +447,8 @@ import {
 // nothing here reads or requires an auth session. RPCs go as POST with the arguments in the body
 // (supabase-js default): an edit token never ends up in a URL (RUNBOOK §16.7). Never log tokens.
 
+export const RPC_TIMEOUT_MS = 15_000;
+
 interface RpcResult {
 	data: unknown;
 	error: unknown;
@@ -401,7 +458,13 @@ interface RpcResult {
 async function call(operation: string, fn: string, args: Record<string, unknown>): Promise<unknown> {
 	let res: RpcResult;
 	try {
-		res = (await supabase.rpc(fn, args)) as unknown as RpcResult;
+		const builder = supabase.rpc(fn, args);
+		// postgrest-js catches the rejected fetch (TimeoutError) and resolves with status 0 -> 'network'.
+		const timed =
+			typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+				? builder.abortSignal(AbortSignal.timeout(RPC_TIMEOUT_MS))
+				: builder;
+		res = (await timed) as unknown as RpcResult;
 	} catch {
 		throw new RsvpError('network', operation);
 	}
@@ -452,7 +515,9 @@ Alle vier de parameters (resp. vijf) gaan altijd mee, ook als ze `null` zijn. `J
 
 Lukt de cast naar `RpcResult` niet zonder `as unknown as` door de generics van supabase-js, dan blijft die dubbele cast staan; dat is geen ontwerpwijziging.
 
-### `web/src/lib/session-page-data.ts`
+De timeout geldt per RPC. Een `rsvp_create` die na 15 seconden wordt afgebroken, kan op de server toch zijn gelukt; dat is hetzelfde geval als E25 (R5).
+
+### `web/src/lib/public-session-data.ts`
 ```ts
 import { getEvaluations } from '#lib/data.js';
 import { getPublicSession } from '#lib/rsvp.js';
@@ -461,7 +526,7 @@ import { floorHour } from './time.js';
 import type { Evaluation } from './types.js';
 import type { PublicRsvp, PublicSessionInfo } from './rsvp-types.js';
 
-export type SessionPageData =
+export type PublicSessionPageData =
 	| {
 			kind: 'ok';
 			now: string;              // now.toISOString()
@@ -473,7 +538,7 @@ export type SessionPageData =
 	| { kind: 'not_found'; now: string; slug: string }
 	| { kind: 'error'; now: string; slug: string };
 
-export async function loadSessionPage(slug: string, now: Date): Promise<SessionPageData>;
+export async function loadPublicSessionPage(slug: string, now: Date): Promise<PublicSessionPageData>;
 ```
 Gedrag:
 1. `!isValidSessionSlug(slug)` → `{ kind: 'not_found' }`, zonder aanroep.
@@ -483,28 +548,28 @@ Gedrag:
 
 ### `web/src/routes/s/[slug]/+page.ts` (exact)
 ```ts
-import { loadSessionPage } from '#lib/session-page-data.js';
+import { loadPublicSessionPage } from '#lib/public-session-data.js';
 import type { PageLoad } from './$types';
 
-export const load: PageLoad = ({ params }) => loadSessionPage(params.slug, new Date());
+export const load: PageLoad = ({ params }) => loadPublicSessionPage(params.slug, new Date());
 ```
 
 ### `web/src/routes/s/[slug]/+page.svelte`
 Script:
-- imports: `refreshAll` uit `$app/navigation`; `Attribution`, `Freshness`, `HourVerdict`, `SessionParticipants` en `RsvpPanel`; `browserStorage`, `readStoredRsvp` en `clearStoredRsvp` uit `#lib/rsvp-storage.js`; `isSessionClosed`, `optionalText`, `safeHttpsLink` en `sessionWindowText` uit `#lib/session-view.js`; `formatDateKey` uit `#lib/time.js`; `groupByLocalDay`, `latestEvaluatedAt` en `shouldRefreshOnResume` uit `#lib/view.js`; de types `PublicSession` en `StoredRsvp`. **Niet** `#lib/auth.js`, `#lib/supabase.js` of `#lib/rsvp.js` (die laatste gebruikt alleen `RsvpPanel`).
+- imports: `refreshAll` uit `$app/navigation`; `Attribution`, `Freshness`, `HourVerdict`, `SessionParticipants` en `RsvpPanel`; `browserStorage`, `readStoredRsvp` en `clearStoredRsvp` uit `#lib/rsvp-storage.js`; `isSessionClosed`, `optionalText`, `tikkieLink` en `sessionWindowText` uit `#lib/session-view.js`; `SESSION_RETENTION_DAYS` uit `#lib/rsvp-types.js`; `formatDateKey` uit `#lib/time.js`; `groupByLocalDay`, `latestEvaluatedAt` en `shouldRefreshOnResume` uit `#lib/view.js`; de types `PublicSession` en `StoredRsvp`. **Niet** `#lib/auth.js`, `#lib/supabase.js` of `#lib/rsvp.js` (die laatste gebruikt alleen `RsvpPanel`).
 - `let { data }: PageProps = $props();`
 - Overschrijfbare deriveds (A8):
   - `let session = $derived(data.kind === 'ok' ? data.session : null);`
   - `let rsvps = $derived(data.kind === 'ok' ? data.rsvps : []);`
   - `let gone = $derived(data.kind !== 'ok');` (wordt `true` als een verversing `null` geeft).
 - `let stored = $state<StoredRsvp | null>(null)`, `let storageReady = $state(false)`, en een gewone (niet-reactieve) `let checkedSlug: string | null = null`.
-- `const now = $derived(new Date(data.now));`
+- `let now = $derived(new Date(data.now));` (overschrijfbaar, A5; een nieuwe load zet hem terug op `data.now`)
 - `const closed = $derived(session !== null && isSessionClosed(session, now));`
 - `const ended = $derived(session !== null && !session.cancelled && closed);`
 - `const groups = $derived(data.kind === 'ok' && data.evaluations ? groupByLocalDay(data.evaluations) : []);`
 - `const latest = $derived(data.kind === 'ok' && data.evaluations ? latestEvaluatedAt(data.evaluations) : null);`
 - `const spotName = $derived(session?.spot_name ?? 'Onbekende spot');`
-- `const tikkie = $derived(session?.tikkie_url ? safeHttpsLink(session.tikkie_url) : null);`
+- `const tikkie = $derived(tikkieLink(session?.tikkie_url ?? null));` (een `href` of `null`)
 - `const note = $derived(optionalText(session?.note ?? null));`
 - `$effect` (opslag, A7):
   ```ts
@@ -528,7 +593,20 @@ Script:
   	storageReady = true;
   });
   ```
-- `function applyRefresh(fresh: PublicSession | null) { if (fresh) { session = fresh.session; rsvps = fresh.rsvps; } else { gone = true; } }`
+- `function applyRefresh(fresh: PublicSession | null) { now = new Date(); if (fresh) { session = fresh.session; rsvps = fresh.rsvps; } else { gone = true; } }`
+- `$effect` (klok, A5): sluit het formulier vanzelf na `ends_at`.
+  ```ts
+  $effect(() => {
+  	if (!session || closed) return;
+  	const ms = Date.parse(session.ends_at) - Date.now();
+  	if (ms > 2_147_483_647) return; // beyond the setTimeout range; a later load or resume handles it
+  	const id = setTimeout(() => {
+  		now = new Date();
+  	}, Math.max(0, ms) + 1_000);
+  	return () => clearTimeout(id);
+  });
+  ```
+  De marge van 1 seconde voorkomt dat een timer die een fractie te vroeg afgaat, `now` net vóór `ends_at` zet; `closed` blijft dan `false` en de effect zou niet opnieuw lopen.
 - `onMount`: een `visibilitychange`-listener zoals op de spotpagina: `void refreshAll()` als `document.visibilityState === 'visible' && shouldRefreshOnResume(data.now, Date.now())`. De cleanup verwijdert de listener.
 
 Markup (in deze volgorde):
@@ -540,7 +618,7 @@ Markup (in deze volgorde):
 
 {#if data.kind === 'not_found' || (gone && data.kind === 'ok')}
 	<h1>Sessie niet gevonden</h1>
-	<p>Deze sessie bestaat niet (meer). Sessies verdwijnen 7 dagen na afloop.</p>
+	<p>Deze sessie bestaat niet (meer). Sessies verdwijnen {SESSION_RETENTION_DAYS} dagen na afloop.</p>
 	<p><a href="/">Naar alle spots</a></p>
 {:else if data.kind === 'error'}
 	<h1>Sessie</h1>
@@ -565,13 +643,15 @@ Markup (in deze volgorde):
 	{/if}
 	{#if tikkie}
 		<p class="session-tikkie">
-			Kosten delen: <a href={tikkie.href} target="_blank" rel="noopener noreferrer">Open betaalverzoek</a>
-			<span class="muted">(link naar {tikkie.host})</span>
+			Kosten delen: <a href={tikkie} target="_blank" rel="noopener noreferrer">Open betaalverzoek</a>
+			<span class="muted">(link naar tikkie.me)</span>
 		</p>
 	{/if}
 
 	{#if storageReady}
-		<RsvpPanel slug={data.slug} {rsvps} {closed} bind:stored onrefresh={applyRefresh} />
+		{#key data.slug}
+			<RsvpPanel slug={data.slug} {rsvps} {closed} bind:stored onrefresh={applyRefresh} />
+		{/key}
 	{/if}
 
 	<SessionParticipants {session} {rsvps} myRsvpId={stored?.rsvp_id ?? null} />
@@ -668,7 +748,7 @@ Markup: `<form novalidate onsubmit={submit} class="rsvp-form">` met:
   - `'2'` t/m `'8'` → `n plekken`.
 
   Plus de fout `seats`.
-- Als `mode === 'edit' && values.ride === 'needs_ride'`: `<label for="{prefix}-rides-with">Rijd mee met</label>` en een `<select id="{prefix}-rides-with" bind:value={values.rides_with}>` met `''` → `Nog niemand: ik zoek een lift`, plus per driver `d.id` → `d.first_name`. Plus de fout `rides_with`.
+- Als `mode === 'edit' && values.ride === 'needs_ride'`: `<label for="{prefix}-rides-with">Rijd mee met</label>` en een `<select id="{prefix}-rides-with" bind:value={values.rides_with}>` met `''` → `Nog niemand: ik zoek een lift`, plus per driver `<option value={d.id}>{isolateText(d.first_name)}</option>` (A11, review N-7). Plus de fout `rides_with`.
 - Als `mode === 'create' && values.ride === 'needs_ride'`: `<p class="hint">Rijdt iemand al met een lege plek? Na het aanmelden kun je via Wijzigen kiezen met wie je meerijdt.</p>`
 - Knoppen:
   - `create`: `<button type="submit" disabled={busy}>{busy ? 'Bezig…' : 'Ik ook'}</button>`;
@@ -681,9 +761,11 @@ Toestand:
 - `mode = $state<'view' | 'edit' | 'confirm_delete'>('view')`;
 - `busy = $state(false)`;
 - `error = $state<string | null>(null)`;
-- `notice = $state<string | null>(null)`.
+- `notice = $state<string | null>(null)`;
+- `serverClosed = $state(false)` (A5; wordt nooit terug op `false` gezet; een andere slug geeft een nieuw paneel via `{#key}`).
 
 Afgeleid:
+- `isClosed = $derived(closed || serverClosed)`;
 - `me = $derived(stored ? rsvps.find((r) => r.id === stored!.rsvp_id) ?? null : null)`;
 - `byId = $derived(new Map(rsvps.map((r) => [r.id, r])))`;
 - `drivers = $derived(rsvps.filter((r) => r.ride === 'offers_ride' && r.id !== stored?.rsvp_id))`.
@@ -695,12 +777,12 @@ Functies (allemaal met `busy = true` in een `try` en `busy = false` in `finally`
   1. `const existing = readStoredRsvp(browserStorage(), slug)`. Is er al een sleutel, dan `stored = existing`, `await refresh()` en stoppen (A15).
   2. `const res = await createRsvp(slug, { first_name: value.first_name, ride: value.ride, seats_offered: value.seats_offered })`.
   3. `const ok = writeStoredRsvp(browserStorage(), slug, res); stored = res; notice = ok ? RSVP_NOTICES.created : RSVP_NOTICES.storageFailed; await refresh();`.
-  4. `catch (e)`: `const k = kindOf(e); error = RSVP_MESSAGES[k];`, plus `await refresh()` als `k` `session_closed` of `session_full` is.
+  4. `catch (e)`: `const k = kindOf(e); error = RSVP_MESSAGES[k];`. Bij `k === 'session_closed'` ook `serverClosed = true`. Daarna `await refresh()` als `k` `session_closed` of `session_full` is.
 - `save(value)` (modus `edit`, vereist `stored`):
   1. `await updateRsvp(stored.edit_token, value); mode = 'view'; notice = RSVP_NOTICES.updated; await refresh();`.
   2. `catch (e)`: `k = kindOf(e)`.
      - Bij `invalid_token`: `clearStoredRsvp(...)`, `stored = null`, `mode = 'view'`, `error = RSVP_MESSAGES.invalid_token`, `await refresh()`.
-     - Bij `session_closed`: `mode = 'view'`, `error = RSVP_MESSAGES.session_closed`, `await refresh()`.
+     - Bij `session_closed`: `serverClosed = true`, `mode = 'view'`, `error = RSVP_MESSAGES.session_closed`, `await refresh()`.
      - Anders: `error = RSVP_MESSAGES[k]` (de modus blijft `edit`).
 - `remove()` (vereist `stored`):
   1. `const removed = await deleteRsvp(stored.edit_token); clearStoredRsvp(browserStorage(), slug); stored = null; mode = 'view'; notice = removed ? RSVP_NOTICES.deleted : RSVP_NOTICES.alreadyDeleted; await refresh();`.
@@ -708,7 +790,8 @@ Functies (allemaal met `busy = true` in een `try` en `busy = false` in `finally`
 
 Markup:
 ```svelte
-<section class="rsvp-panel" aria-labelledby="rsvp-heading">
+{#if stored || !isClosed || notice || error}
+<section class="rsvp-panel" aria-labelledby={stored || !isClosed ? 'rsvp-heading' : undefined}>
 	{#if stored}
 		<h2 id="rsvp-heading">Jij gaat</h2>
 		{#if me}
@@ -716,17 +799,17 @@ Markup:
 			<p>Aangemeld als <bdi>{me.first_name}</bdi> · {ride.label}{#if ride.name} <bdi>{ride.name}</bdi>{/if}</p>
 		{/if}
 		<p class="muted">Wijzigen of afmelden kan alleen in deze browser op dit apparaat.</p>
-		{#if mode === 'edit' && me && !closed}
+		{#if mode === 'edit' && me && !isClosed}
 			<RsvpForm mode="edit" initial={rsvpFormFromRsvp(me)} {drivers} {busy} onsubmit={save} oncancel={() => (mode = 'view')} />
 		{:else if mode === 'confirm_delete'}
 			<p>Weet je zeker dat je je wilt afmelden?</p>
 			<button type="button" disabled={busy} onclick={remove}>Ja, afmelden</button>
 			<button type="button" disabled={busy} onclick={() => (mode = 'view')}>Nee</button>
 		{:else}
-			{#if me && !closed}<button type="button" disabled={busy} onclick={() => (mode = 'edit')}>Wijzigen</button>{/if}
+			{#if me && !isClosed}<button type="button" disabled={busy} onclick={() => (mode = 'edit')}>Wijzigen</button>{/if}
 			<button type="button" disabled={busy} onclick={() => (mode = 'confirm_delete')}>Afmelden</button>
 		{/if}
-	{:else if !closed}
+	{:else if !isClosed}
 		<h2 id="rsvp-heading">Ga je mee?</h2>
 		<p>Tik "Ik ook" met alleen je voornaam. Je hebt geen account nodig.</p>
 		<RsvpForm mode="create" initial={emptyRsvpForm()} drivers={[]} {busy} onsubmit={create} />
@@ -735,8 +818,9 @@ Markup:
 	{#if notice}<p class="notice-ok" role="status">{notice}</p>{/if}
 	{#if error}<p class="error" role="alert">{error}</p>{/if}
 </section>
+{/if}
 ```
-Bij `!stored && closed` rendert de sectie alleen een eventuele `notice` of `error`, bijvoorbeeld "Je bent afgemeld." na het afmelden op een gesloten sessie. Zijn beide leeg, dan rendert de builder de `<section>` niet (omhulsel `{#if stored || !closed || notice || error}`).
+Bij `!stored && isClosed` rendert de sectie alleen een eventuele `notice` of `error`, bijvoorbeeld "Je bent afgemeld." na het afmelden op een gesloten sessie, of de melding `session_closed`. Er is dan geen kop, dus ook geen `aria-labelledby` (review N-12). Zijn beide leeg, dan rendert de `<section>` niet.
 
 ### Stijl (`web/src/app.css`, toevoegen aan het eind)
 ```css
@@ -785,7 +869,7 @@ Ze vervangt `it('no file uses .rpc(', …)`. De constante staat boven de `descri
   - Fouten: `code === 'PT400'` met `message` als code (A2 van WP-19). Een onbekende slug geeft bij `rsvp_create` `session_closed` (WP-19 A3). Bij `rsvp_delete` geeft een onbekende token `false` (A10).
   - Afmelden blijft mogelijk op een gesloten sessie (A10). Een gesloten sessie betekent `cancelled` of `ends_at <= now` (A11).
   - De carpoolbetekenis volgt A6: "zoekt een lift" is `needs_ride` zonder geldige `rides_with`.
-  - De Tikkie-host wordt getoond (R5).
+  - De Tikkie-host wordt getoond (R5); strenger dan de DB-CHECK (alleen `https://tikkie.me/...`, A14).
   - Bij `rate_limited` zegt de melding "over een paar minuten" (review N-7). Namen staan in `<bdi>` (N-7).
   - De token gaat alleen via POST (N-8).
 - **WP-14.** Hergebruikt worden `HourVerdict` (props `{ evaluation }`, ongewijzigd), `Freshness`, `getEvaluations`, `groupByLocalDay`, `latestEvaluatedAt`, `shouldRefreshOnResume`, `formatDateKey`, `formatLocal` en `Attribution`. Verder:
@@ -798,18 +882,24 @@ Ze vervangt `it('no file uses .rpc(', …)`. De constante staat boven de `descri
   - De service worker laat POST-verzoeken en Supabase ongemoeid. Offline valt de pagina terug op de shell, de load faalt en de pagina toont de foutmelding met "Opnieuw proberen".
   - `Attribution` staat in de footer van de layout en ook volledig op de pagina.
 - **WP-16.** `user-data.ts` blijft ongewijzigd en de enige schrijfmodule voor gebruikerstabellen. Anonieme RPC's staan in `rsvp.ts` (A1), en `user-tables.test.ts` legt dat vast.
-- **WP-20 (parallel).** Er is geen afhankelijkheid van WP-20-code. Het URL-contract `/s/{slug}` en de slugvorm (`SESSION_SLUG_RE`) zijn gelijk.
+- **WP-20 (parallel, merget eerst, A20).**
+  - Stap 1 tot en met 8 hebben geen WP-20-code nodig. Het URL-contract `/s/{slug}` en de slugvorm zijn gelijk (`SESSION_SLUG_RE.source === SESSION_SLUG_PATTERN.source`).
+  - Gecontroleerd in de WP-20-blueprint (revisie in `.claude/worktrees/WP-20/docs/wp/WP-20/blueprint.md`): `SESSION_SLUG_PATTERN = /^[A-Za-z0-9_-]{10,64}$/` en `isSessionSlug` (`session-model.ts`), `codePointLength(s)` = `[...s].length` (`session-model.ts`), `formatWindowLocal(start: Date, end: Date)` met `za 18 jul 14:00–18:00` / `za 18 jul 22:00 – zo 19 jul 02:00` en `RangeError` bij `start >= end` (`time.ts`), en `browserStorage(): KeyValueStorage | null` met `KeyValueStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>` (`local-prefs.ts`). WP-21 bouwt de eigen varianten met exact dat gedrag, zodat stap 9 ze kan vervangen.
+  - WP-20 laat de test "no file uses .rpc(" in `user-tables.test.ts` staan voor WP-21 (WP-20 "Gevolgen", WP-21). WP-21 vervangt alleen die test.
+  - WP-20 vraagt `/mijn-sessies` geen RSVP-gegevens op (WP-20 A13) en linkt naar `/s/{slug}`.
+  - Tikkie: WP-21 toont alleen `https://tikkie.me/...` (A14). De orchestrator brengt dezelfde regel in de validatie van WP-20.
 
 ### Gevolgen voor latere WP's
 - **WP-20:**
-  - als WP-20 na WP-21 merget en zelf `.rpc(` gebruikt, komt zijn module in `RPC_FILES` in `user-tables.test.ts`. Het kan ook `getPublicSession` uit `#lib/rsvp.js` importeren in plaats van een eigen aanroep; dat heeft de voorkeur;
-  - `/mijn-sessies` en de deelpagina kunnen naar `/s/{slug}` linken; de pagina toont dezelfde informatie voor de organisator.
+  - gebruikt WP-20 later toch een RPC (bijv. het aantal deelnemers op `/mijn-sessies`), dan importeert het `getPublicSession` uit `#lib/rsvp.js`, of komt zijn module in `RPC_FILES` in `user-tables.test.ts`;
+  - de Tikkie-validatie van het sessieformulier wordt `https://tikkie.me/...` (orchestrator, review N-6).
 - **WP-22:** de moderatie-RPC voor de organisator (WP-19 R1) zou in `rsvp.ts` komen of in een eigen module in `RPC_FILES`. De UI-melding bij `rate_limited` blijft gelijk.
 - **WP-23:**
   - `docs/PRIVACY.md` en `/privacy` noemen de `localStorage`-sleutel `shakka:rsvp:{slug}` (`rsvp_id` plus edit-token). Die verdwijnt bij afmelden, en als de sessie bij een volgend bezoek niet meer bestaat; anders blijft hij in de browser staan. Voorstel voor WP-23: een opruimronde over alle `shakka:rsvp:*`-sleutels bij het starten van de app;
   - in `web/static/_headers` komt `X-Robots-Tag: noindex` voor `/s/*` (A18);
   - de CSP blijft gelijk: deze WP voegt geen origin toe;
-  - axe op `/s/[slug]` kan `sessionPageData()` uit `test/fixtures/session-data.ts` gebruiken.
+  - axe op `/s/[slug]` kan `publicSessionPageData()` uit `test/fixtures/public-session.ts` gebruiken.
+- **Opruimpunt na de merge van WP-20 en WP-21:** blijft er na stap 9 een helper dubbel (omdat het gedrag van WP-20 toch afweek en de builder dat in `deviations.md` noteerde), dan voegt een volgende WP of de orchestrator ze samen: één slugregex, één vensterformatter, één `browserStorage`.
 
 ## Edge cases
 
@@ -823,13 +913,13 @@ Ze vervangt `it('no file uses .rpc(', …)`. De constante staat boven de `descri
 | E6 | Evaluaties laden faalt | De pagina werkt verder, met "Het oordeel kon niet worden geladen." en één `console.warn` zonder details. |
 | E7 | Window buiten de horizon van de forecast, of in het verleden zonder rijen | "Er is nog geen oordeel voor dit tijdvenster." |
 | E8 | `starts_at` 12:30Z, `ends_at` 15:30Z | Uren 12:00Z, 13:00Z, 14:00Z en 15:00Z (`gte 12:00Z`, `lt 15:30Z`). |
-| E9 | Window over middernacht (22:00–04:00 lokaal) | `sessionWindowText` in de vorm over twee dagen. Uren gegroepeerd met een dagkop. |
-| E10 | Window eindigt precies om lokale middernacht | Vorm voor één dag: `…, 22:00–00:00`. |
-| E11 | Wintertijdnacht 25-10-2026, `00:00Z`–`03:00Z` | `zondag 25 oktober, 02:00–04:00`. Twee uren tonen `02:00` (het uur komt twee keer voor); geen fout. |
+| E9 | Window over middernacht (22:00–04:00 lokaal) | `za 18 jul 22:00 – zo 19 jul 04:00`. Uren gegroepeerd met een dagkop. |
+| E10 | Window eindigt precies om lokale middernacht | Vorm voor één dag: `za 18 jul 22:00–00:00`. |
+| E11 | Wintertijdnacht 25-10-2026, `00:00Z`–`03:00Z` | `zo 25 okt 02:00–04:00`. Twee uren tonen `02:00` (het uur komt twee keer voor); geen fout. |
 | E12 | Geannuleerde sessie | Banner "Deze sessie is geannuleerd." (`role="alert"`). Geen formulier, geen Wijzigen, geen versheid. Afmelden met een token blijft mogelijk. |
 | E13 | Afgelopen sessie (`ends_at <= now`) | Banner "Deze sessie is voorbij." (`role="note"`). Verder als E12. |
 | E14 | Sessie begonnen maar niet voorbij | Open; aanmelden mogelijk (WP-19 A11). |
-| E15 | Klok van het apparaat loopt voor of achter | Hooguit een verborgen of zichtbaar formulier op het randje. De server antwoordt met `session_closed`; dan volgen de melding en een verversing. |
+| E15 | Klok van het apparaat loopt voor of achter | Hooguit een verborgen of zichtbaar formulier op het randje. Antwoordt de server `session_closed`, dan: de melding, `serverClosed = true` (formulier en Wijzigen weg, Afmelden blijft), een verversing en `now = new Date()`. Een tweede poging is niet meer mogelijk. De banner "voorbij" volgt alleen als de klok van het apparaat dat ook vindt. |
 | E16 | Voornaam `"  Sanne  "` | `rsvp_create` met `p_first_name: 'Sanne'`. |
 | E17 | Lege voornaam, 31 tekens, of een regeleinde | Veldfout, 0 RPC's. 30 emoji (60 UTF-16-eenheden) is geldig (code points). |
 | E18 | Voornaam met U+202E | Toegestaan (geen `Cc`). Gerenderd in `<bdi>`, dus de tekst eromheen draait niet om. |
@@ -840,7 +930,7 @@ Ze vervangt `it('no file uses .rpc(', …)`. De constante staat boven de `descri
 | E23 | Onbekende fout (`PGRST202` na een niet-gepushte migratie, 401 door een verlopen JWT van een ingelogde bezoeker, 500) | `RSVP_MESSAGES.unknown`. |
 | E24 | Netwerkfout bij een mutatie (status 0, of `rpc` gooit) | `RSVP_MESSAGES.network`; de sleutel en de toestand blijven ongewijzigd. |
 | E25 | Create geslaagd, maar het antwoord ging verloren (netwerk) | Melding `network`. De RSVP bestaat zonder token op dit apparaat; een nieuwe poging geeft een tweede RSVP. Dit is geaccepteerd (R5). |
-| E26 | `localStorage` niet beschikbaar of vol (privémodus, cookies geblokkeerd) | Aanmelden lukt. `notice = storageFailed`; zolang de pagina open is werken wijzigen en afmelden (`stored` in het geheugen). |
+| E26 | `localStorage` niet beschikbaar of vol (privémodus, cookies geblokkeerd) | Aanmelden lukt. `notice = storageFailed`. De sleutel staat in de geheugenfallback van `rsvp-storage.ts`, dus wijzigen en afmelden werken zolang de pagina niet herladen wordt, ook na een `refreshAll()` bij hervatten of een navigatie binnen de app. |
 | E27 | Misvormde JSON of een verkeerde vorm onder `shakka:rsvp:{slug}` | Behandeld als geen sleutel; de sleutel wordt verwijderd. |
 | E28 | Opgeslagen `rsvp_id` staat niet in de lijst bij de eerste load | De sleutel wordt verwijderd en het formulier verschijnt (A7). |
 | E29 | Opgeslagen sleutel plus een gesloten sessie | "Jij gaat" met alleen Afmelden. |
@@ -852,7 +942,7 @@ Ze vervangt `it('no file uses .rpc(', …)`. De constante staat boven de `descri
 | E35 | `rides_with` wijst naar een id die niet in de lijst staat | Telt als "Zoekt een lift" (`rideLabel` en `carpoolView`). |
 | E36 | `seats_free = 0` bij de organisator | "Vrije plekken bij Lars: 0". |
 | E37 | `departure_point` of `note` is `''` of alleen witruimte | Niet getoond (`optionalText`). |
-| E38 | `tikkie_url` met `http://`, `javascript:` of iets wat geen URL is | Geen link (`safeHttpsLink` geeft `null`). |
+| E38 | `tikkie_url` met `http://`, `javascript:`, iets wat geen URL is, een andere `https:`-host (`https://evil.example/pay/x`, `https://tikkie.me.evil.example/x`, `https://www.tikkie.me/pay/x`), een poort (`https://tikkie.me:8443/x`), een gebruikersnaam (`https://u@tikkie.me/x`), `HTTPS://TIKKIE.ME/x` of alleen `https://tikkie.me/` | Geen link (`tikkieLink` geeft `null`). |
 | E39 | `spot_name` is `null` (kan niet volgens WP-19) | "Onbekende spot". |
 | E40 | De verversing na een mutatie geeft `null` (sessie net verwijderd) | De sleutel wordt verwijderd en de pagina toont "Sessie niet gevonden". |
 | E41 | PWA of tabblad uren later hervat | `refreshAll()` bij een zichtbaar document en data ouder dan 10 minuten (WP-14 A11). |
@@ -860,12 +950,16 @@ Ze vervangt `it('no file uses .rpc(', …)`. De constante staat boven de `descri
 | E43 | Offline | Shell uit de SW-cache, de load faalt, dan E3. |
 | E44 | 30 deelnemers | De lijst toont ze allemaal. Een nieuwe aanmelding geeft `session_full`. |
 | E45 | De token in de DOM, de URL of de console | Nooit: de tests controleren `document.body.innerHTML`, `window.location.href` en de console-spies. |
+| E46 | Pagina blijft open tot na `ends_at` | 1 seconde na `ends_at` zet de klok-`$effect` `now`; het formulier en Wijzigen verdwijnen, de banner "voorbij" verschijnt, de versheidsmelding verdwijnt. |
+| E47 | Een RPC hangt (slechte mobiele verbinding) | Na 15 seconden wordt de fetch afgebroken: `status: 0`, melding `network`, `busy` weer `false`. |
+| E48 | Browser zonder `AbortSignal.timeout` (oudere browsers; de methode is "Baseline 2024") | De RPC gaat zonder timeout; verder gelijk. |
+| E49 | Naam met U+202E in de keuzelijst "Rijd mee met" | Optietekst tussen FSI en PDI (`isolateText`), dus de rest van de optie draait niet om. |
 
 ## Testplan
-Alle tests staan in `web/test/` en draaien met `npm test`. Pure logica komt eerst: eerst de test (rood), dan de implementatie, voor `session-view`, `rsvp-storage`, `rsvp`, het contract en `session-page-data`. Elk bestand met mocks heeft `beforeEach(() => vi.clearAllMocks())`. Tests die `localStorage` gebruiken doen in `beforeEach` `localStorage.clear()` en in `afterEach` `vi.restoreAllMocks()`. Mocks volgen het WP-13/WP-14-patroon (`vi.hoisted` plus `vi.mock('#lib/…js', …)`; lost `#lib` in `vi.mock` niet op, gebruik dan het relatieve pad).
+Alle tests staan in `web/test/` en draaien met `npm test`. Pure logica komt eerst: eerst de test (rood), dan de implementatie, voor `session-view`, `rsvp-storage`, `rsvp`, het contract en `public-session-data`. Elk bestand met mocks heeft `beforeEach(() => vi.clearAllMocks())`. Tests die `localStorage` gebruiken doen in `beforeEach` `localStorage.clear()` en `resetRsvpMemory()` (echte module), en in `afterEach` `vi.restoreAllMocks()` en `vi.useRealTimers()`. Mocks volgen het WP-13/WP-14-patroon (`vi.hoisted` plus `vi.mock('#lib/…js', …)`; lost `#lib` in `vi.mock` niet op, gebruik dan het relatieve pad).
 
-### Fixtures (`web/test/fixtures/session-data.ts`)
-Alleen testdata.
+### Fixtures (`web/test/fixtures/public-session.ts`)
+Alleen testdata. Een eigen bestand, los van `fixtures/session-data.ts` van WP-20 (B-1). `SLUG` heeft dezelfde waarde als in WP-20; geen test importeert beide fixturebestanden.
 - `SLUG = 'Q2x0aHJ1c3RtZTEyMzQ1Ng'` (22 tekens).
 - `NOW = '2026-07-18T09:00:00.000Z'` (lokaal za 18 jul 11:00), `NOW_STALE = '2026-07-18T11:06:00.000Z'`, `NOW_ENDED = '2026-07-18T16:00:00.000Z'` (gelijk aan `ends_at`).
 - `TOKEN = 'T'.repeat(43)`, `TOKEN_NEW = 'U'.repeat(43)`.
@@ -889,30 +983,41 @@ Alleen testdata.
   - 13:00Z `go`, `[]`, 19.0/24.0, 255, `onshore`, `high`;
   - 14:00Z `marginal`, `['low_confidence']`, 14.0/`null`, 300, `side_onshore`, `low`;
   - 15:00Z `no_go`, `['offshore']`, 15.2/19.8, 90, `offshore`, `medium`.
-- `sessionPageData(overrides = {})` → `{ kind: 'ok', now: NOW, slug: SLUG, session: SESSION_INFO, rsvps: [RSVP_EVA, RSVP_SANNE, RSVP_NOOR, RSVP_TOM], evaluations: SESSION_EVALS, ...overrides }`.
+- `publicSessionPageData(overrides = {})` → `{ kind: 'ok', now: NOW, slug: SLUG, session: SESSION_INFO, rsvps: [RSVP_EVA, RSVP_SANNE, RSVP_NOOR, RSVP_TOM], evaluations: SESSION_EVALS, ...overrides }`.
 
 ### `web/test/helpers/fake-rpc.ts`
 ```ts
 export interface RpcResponse { data: unknown; error: { code?: string; message?: string; details?: unknown; hint?: unknown } | null; status: number }
+export interface FakeRpcCall {
+	fn: string;
+	args: Record<string, unknown> | undefined;
+	options: unknown;
+	argCount: number;
+	signal: AbortSignal | null;   // set by .abortSignal(); null when never called
+}
+/** What rpc() returns: thenable like the postgrest builder, plus abortSignal() that records the signal. */
+export interface FakeRpcBuilder extends PromiseLike<RpcResponse> {
+	abortSignal(signal: AbortSignal): FakeRpcBuilder;
+}
 export function createFakeRpc(): {
-	rpc: (fn: string, args?: Record<string, unknown>, options?: unknown) => Promise<RpcResponse>;
-	calls: Array<{ fn: string; args: Record<string, unknown> | undefined; options: unknown; argCount: number }>;
+	rpc: (fn: string, args?: Record<string, unknown>, options?: unknown) => FakeRpcBuilder;
+	calls: FakeRpcCall[];
 	/** Queue responses per function; an empty queue answers { data: null, error: null, status: 200 }. */
 	respond(fn: string, ...responses: RpcResponse[]): void;
-	/** The next call of fn rejects with err (simulates a thrown client). */
+	/** The next call of fn rejects with err when awaited (simulates a thrown client). */
 	throwNext(fn: string, err: unknown): void;
 	reset(): void;
 };
 /** Client for vi.mock('#lib/supabase.js'): { rpc, from } plus an `auth` getter that only counts accesses. */
 export function clientWithAuthTrap(parts: { rpc: unknown; from?: unknown }): { client: object; authAccesses: () => number };
 ```
-`argCount` is `arguments.length`, zodat een test kan eisen dat er geen derde argument is (POST, A6). De `auth`-getter geeft `undefined` terug en verhoogt een teller.
+`argCount` is `arguments.length` van `rpc(...)`, zodat een test kan eisen dat er geen derde argument is (POST, A6); `abortSignal` telt daar niet mee. `rpc` legt de call vast en bepaalt het antwoord bij de aanroep; `then` delegeert naar die promise. De `auth`-getter geeft `undefined` terug en verhoogt een teller.
 
 ### Tests per bestand
 
 | Bestand | Tests |
 |---|---|
-| `session-view.test.ts` | **Slug en sleutel:** `isValidSessionSlug`: `SLUG`, 10 tekens en 64 tekens geven `true`; `'short'`, 65 tekens, `'bad slug!'`, `'a/b…'` en `''` geven `false`. `rsvpStorageKey(SLUG) === 'shakka:rsvp:' + SLUG`. **Foutsoort:** `rsvpErrorKind` geeft voor `{ code: 'PT400', message: k }` precies `k`, voor elk van de vijf codes; `{ code: 'PT400', message: 'boom' }` geeft `unknown`; `{ code: '42501', message: 'x' }` geeft `unknown`; `(anything, 0)` geeft `network`; `null`, `'x'` en `undefined` geven `unknown`. `new RsvpError('session_full', 'createRsvp').message === 'createRsvp failed: session_full'`. **(AC-4)** De teksten van `RSVP_MESSAGES` zijn allemaal verschillend, niet leeg, bevatten geen `_`, en zijn gelijk aan de tabel. **Parsers:** `parsePublicSession(SESSION_JSON)` is diep gelijk aan `SESSION_JSON`. Met een extra sleutel `edit_token_hash` in de sessie en `email` in een RSVP: de uitvoer heeft die sleutels niet. Een fout volgt bij: `session` ontbreekt, `rsvps` is geen array, `ride: 'walk'`, `seats_free: 1.5`, `cancelled: 'false'`, en `starts_at: 'gisteren'` (elke fout is `RsvpError` met `kind 'unknown'`). `parseCreateResult({ rsvp_id: NEW_ID, edit_token: TOKEN })` geeft hetzelfde object; met een token van 42 tekens, met `+` erin, of met `rsvp_id: 'x'` volgt een fout. `parseStoredRsvp`: geldig geeft het object; `null`, `[]`, `{}` en een verkeerde token geven `null`. **Gesloten:** `isSessionClosed`: `cancelled` geeft `true`; `now = ends_at` geeft `true`; `now = ends_at - 1 ms` geeft `false`; `now` tussen begin en eind geeft `false`. **Tijdvenster:** `sessionWindowText(SESSION_INFO.starts_at, SESSION_INFO.ends_at) === 'zaterdag 18 juli, 14:00–18:00'`; `('2026-07-18T20:00:00Z', '2026-07-19T02:00:00Z') === 'zaterdag 18 juli 22:00 – zondag 19 juli 04:00'`; `('2026-07-18T20:00:00Z', '2026-07-18T22:00:00Z') === 'zaterdag 18 juli, 22:00–00:00'`; `('2026-10-25T00:00:00Z', '2026-10-25T03:00:00Z') === 'zondag 25 oktober, 02:00–04:00'`. **Labels:** `seatsText` geeft voor `null`, 0, 1 en 3 de vier teksten. `rideLabel` met `byId` van de fixtures: Eva → `{ 'Biedt een lift aan (2 plekken)', null }`; Sanne → `{ 'Rijdt mee met', 'Eva' }`; Noor → `{ 'Zoekt een lift', null }`; Tom → `{ 'Rijdt zelf', null }`; Sanne met `rides_with: TOM_ID` → `Zoekt een lift`; Eva met `seats_offered: null` → `'Biedt een lift aan'`. **Carpool:** `carpoolView(SESSION_INFO, fixtures)` geeft `organizerSeats 3`, `departurePoint 'Utrecht CS'`, `drivers` gelijk aan `[{ rsvp: Eva, riders: [Sanne] }]`, `seekers [Noor]` en `isEmpty false`. Met `{ seats_free: null, departure_point: '  ' }` en alleen Tom: `departurePoint null` en `isEmpty true`. Een meerijder met een `rides_with` die nergens naar wijst, staat bij `seekers`. **Links:** `safeHttpsLink('https://tikkie.me/pay/x')` geeft `{ href: 'https://tikkie.me/pay/x', host: 'tikkie.me' }`; `'http://tikkie.me'`, `'javascript:alert(1)'` en `'geen url'` geven `null`. `optionalText`: `null`, `''` en `'  '` geven `null`; `'x'` geeft `'x'`. **Formulier:** `parseRsvpForm`:
+| `session-view.test.ts` | **Slug en sleutel:** `isValidSessionSlug`: `SLUG`, 10 tekens en 64 tekens geven `true`; `'short'`, 65 tekens, `'bad slug!'`, `'a/b…'` en `''` geven `false`. `rsvpStorageKey(SLUG) === 'shakka:rsvp:' + SLUG`. **Foutsoort:** `rsvpErrorKind` geeft voor `{ code: 'PT400', message: k }` precies `k`, voor elk van de vijf codes; `{ code: 'PT400', message: 'boom' }` geeft `unknown`; `{ code: '42501', message: 'x' }` geeft `unknown`; `(anything, 0)` geeft `network`; `null`, `'x'` en `undefined` geven `unknown`. `new RsvpError('session_full', 'createRsvp').message === 'createRsvp failed: session_full'`. **(AC-4)** De teksten van `RSVP_MESSAGES` zijn allemaal verschillend, niet leeg, bevatten geen `_`, en zijn gelijk aan de tabel. `RSVP_MESSAGES.session_full` bevat `String(MAX_RSVPS)` en `organisator`. **Parsers:** `parsePublicSession(SESSION_JSON)` is diep gelijk aan `SESSION_JSON`. Met een extra sleutel `edit_token_hash` in de sessie en `email` in een RSVP: de uitvoer heeft die sleutels niet. Een fout volgt bij: `session` ontbreekt, `rsvps` is geen array, `ride: 'walk'`, `seats_free: 1.5`, `cancelled: 'false'`, `starts_at: 'gisteren'`, en `ends_at` gelijk aan `starts_at` (elke fout is `RsvpError` met `kind 'unknown'`). `parseCreateResult({ rsvp_id: NEW_ID, edit_token: TOKEN })` geeft hetzelfde object; met een token van 42 tekens, met `+` erin, of met `rsvp_id: 'x'` volgt een fout. `parseStoredRsvp`: geldig geeft het object; `null`, `[]`, `{}` en een verkeerde token geven `null`. **Gesloten:** `isSessionClosed`: `cancelled` geeft `true`; `now = ends_at` geeft `true`; `now = ends_at - 1 ms` geeft `false`; `now` tussen begin en eind geeft `false`. **Tijdvenster (A21; dezelfde verwachtingen als `formatWindowLocal` in WP-20 `time.test.ts`):** `sessionWindowText(SESSION_INFO.starts_at, SESSION_INFO.ends_at) === 'za 18 jul 14:00–18:00'`; `('2026-07-18T20:00:00Z', '2026-07-19T00:00:00Z') === 'za 18 jul 22:00 – zo 19 jul 02:00'`; `('2026-07-18T20:00:00Z', '2026-07-19T02:00:00Z') === 'za 18 jul 22:00 – zo 19 jul 04:00'`; `('2026-07-18T20:00:00Z', '2026-07-18T22:00:00Z') === 'za 18 jul 22:00–00:00'`; `('2026-10-25T00:00:00Z', '2026-10-25T02:00:00Z') === 'zo 25 okt 02:00–03:00'`; `('2026-10-25T00:00:00Z', '2026-10-25T03:00:00Z') === 'zo 25 okt 02:00–04:00'`; begin gelijk aan eind gooit `RangeError`. Deze test blijft in stap 9 ongewijzigd. **Labels:** `seatsText` geeft voor `null`, 0, 1 en 3 de vier teksten. `rideLabel` met `byId` van de fixtures: Eva → `{ 'Biedt een lift aan (2 plekken)', null }`; Sanne → `{ 'Rijdt mee met', 'Eva' }`; Noor → `{ 'Zoekt een lift', null }`; Tom → `{ 'Rijdt zelf', null }`; Sanne met `rides_with: TOM_ID` → `Zoekt een lift`; Eva met `seats_offered: null` → `'Biedt een lift aan'`. **Carpool:** `carpoolView(SESSION_INFO, fixtures)` geeft `organizerSeats 3`, `departurePoint 'Utrecht CS'`, `drivers` gelijk aan `[{ rsvp: Eva, riders: [Sanne] }]`, `seekers [Noor]` en `isEmpty false`. Met `{ seats_free: null, departure_point: '  ' }` en alleen Tom: `departurePoint null` en `isEmpty true`. Een meerijder met een `rides_with` die nergens naar wijst, staat bij `seekers`. **Links (A14):** `tikkieLink('https://tikkie.me/pay/x')` geeft `'https://tikkie.me/pay/x'`; `null`, `''`, `'http://tikkie.me/pay/x'`, `'javascript:alert(1)'`, `'geen url'`, `'https://evil.example/pay/x'`, `'https://tikkie.me.evil.example/x'`, `'https://www.tikkie.me/pay/x'`, `'https://tikkie.me:8443/x'`, `'https://u@tikkie.me/x'`, `'HTTPS://TIKKIE.ME/x'` en `'https://tikkie.me/'` geven `null`. `optionalText`: `null`, `''` en `'  '` geven `null`; `'x'` geeft `'x'`. `isolateText('Eva') === '⁨Eva⁩'`. **Formulier:** `parseRsvpForm`:
   - `{ first_name: '  Sanne ', ride: 'own', seats: '3', rides_with: EVA_ID }` in `create` geeft `{ first_name: 'Sanne', ride: 'own', seats_offered: null, rides_with: null }`;
   - `''` en `'   '` geven `nameRequired`;
   - 31× `'x'` geeft `nameTooLong`; 30× `'😀'` is ok;
@@ -924,19 +1029,20 @@ export function clientWithAuthTrap(parts: { rpc: unknown; from?: unknown }): { c
   - een lege naam plus `ride: ''` geeft twee fouten tegelijk.
 
   `rsvpFormFromRsvp(RSVP_EVA)` geeft `{ 'Eva', 'offers_ride', '2', '' }`. |
-| `rsvp-storage.test.ts` | Met een `Map`-gebaseerde `StorageLike` en met de echte jsdom-`localStorage`. **(AC-3)** `writeStoredRsvp(localStorage, SLUG, { rsvp_id: NEW_ID, edit_token: TOKEN })` geeft `true`, en `localStorage.getItem('shakka:rsvp:' + SLUG) === JSON.stringify({ rsvp_id: NEW_ID, edit_token: TOKEN })`. Bij een extra eigenschap op het argument staat die niet in de waarde. `readStoredRsvp` geeft het object terug. `clearStoredRsvp` verwijdert de sleutel. Afwezig geeft `null`. `'{kapot'` en `'{"rsvp_id":"x"}'` geven `null`, en de sleutel is daarna weg. `storage` `undefined` geeft `null`, `false` en geen fout. Bij een `getItem` die gooit volgt `null`; bij een `setItem` die gooit volgt `false`; bij een `removeItem` die gooit volgt geen fout. Bij een ongeldige slug volgt geen toegang tot de storage (spies 0 keer aangeroepen). `browserStorage()` geeft in jsdom `localStorage`. |
-| `rsvp.test.ts` | `fake = createFakeRpc()`, `trap = clientWithAuthTrap({ rpc: fake.rpc })`, en `vi.mock('#lib/supabase.js', () => ({ supabase: trap.client, initialUrlHash: '' }))` (hoisted). Daarnaast spies op `console.warn`, `console.error` en `console.log`. **(AC-3)** `createRsvp(SLUG, { first_name: '  Sanne  ', ride: 'needs_ride', seats_offered: null })`: `fake.calls[0]` is `{ fn: 'rsvp_create', args: { p_slug: SLUG, p_first_name: 'Sanne', p_ride: 'needs_ride', p_seats_offered: null }, argCount: 2 }`, en het resultaat is de geparste `{ rsvp_id, edit_token }`. `getPublicSession('kort')` geeft `null` met 0 calls. `getPublicSession(SLUG)`: `('get_public_session', { p_slug: SLUG })` met `argCount` 2; `data SESSION_JSON` geeft het geparste object; `data null` geeft `null`. `updateRsvp(TOKEN, { first_name: ' Eva ', ride: 'needs_ride', seats_offered: null, rides_with: null })`: `args` heeft precies de vijf sleutels `p_edit_token`, `p_first_name` (`'Eva'`), `p_ride`, `p_seats_offered` en `p_rides_with`; `'p_rides_with' in args` en de waarde is `null`; het resultaat is een `PublicRsvp`. `updateRsvp('abc', …)` gooit `RsvpError` `invalid_token` met 0 calls. `deleteRsvp(TOKEN)`: `('rsvp_delete', { p_edit_token: TOKEN })`; `true` en `false` komen door; `data: 'yes'` geeft `RsvpError` `unknown`. `deleteRsvp('abc')` geeft `false` met 0 calls. **(AC-4)** Voor elk van de vijf codes geeft een antwoord `{ data: null, error: { code: 'PT400', message: <code>, details: null, hint: null }, status: 400 }` bij `createRsvp` een `RsvpError` met die `kind`. Een antwoord met `message: 'secret detail'` en `code: 'XX000'` geeft `kind 'unknown'`, en `String(err)` en `err.message` bevatten geen `'secret detail'`. `status: 0` geeft `network`. `fake.throwNext('rsvp_create', new Error('secret detail'))` geeft `network`. **Altijd:** elke call heeft `argCount === 2` (geen `{ get: true }`); `trap.authAccesses() === 0`; geen console-spy is aangeroepen met een argument dat `TOKEN` bevat. |
-| `rsvp-contract.test.ts` (node) | Leest `../../supabase/migrations/20261015200000_sessions.sql` (via `new URL(…, import.meta.url)`). `fnBlock(name)` is de tekst van `create function public.<name>(` tot de eerste `$$;` daarna. `params(name)`: de groep uit `/create function public\.\w+\(([\s\S]*?)\)\s*returns/`, gesplitst op `,`, per deel het eerste woord. De tests: (1) `params('get_public_session')` is `['p_slug']`; `params('rsvp_create')` is `['p_slug', 'p_first_name', 'p_ride', 'p_seats_offered']`; `params('rsvp_update')` is `['p_edit_token', 'p_first_name', 'p_ride', 'p_seats_offered', 'p_rides_with']`; `params('rsvp_delete')` is `['p_edit_token']`. Plus: de sleutels die `rsvp.ts` werkelijk stuurt (via `createFakeRpc` en de vier functies) zijn per functie exact gelijk aan `params(...)`. (2) In `fnBlock('get_public_session')`: de namen uit `/'([a-z_]+)',/g` in het stuk tussen `'session', jsonb_build_object(` en `'rsvps'` zijn exact `PUBLIC_SESSION_KEYS`; in het stuk na `'rsvps'` tot `order by r.created_at` zijn ze exact `PUBLIC_RSVP_KEYS`. (3) De `return jsonb_build_object(` in `fnBlock('rsvp_update')` heeft precies `PUBLIC_RSVP_KEYS`. (4) `fnBlock('rsvp_create')` bevat `'rsvp_id'` en `'edit_token'`. (5) De set `using message = '([a-z_]+)'` over het hele bestand is gelijk aan `RPC_ERROR_CODES`. (6) `fnBlock('rsvp_update')` bevat `` `'${EDIT_TOKEN_RE.source}'` `` en `fnBlock('get_public_session')` bevat `` `'${SESSION_SLUG_RE.source}'` ``. (7) `/ends_at < p_now - interval '(\d+) days'/` geeft `SESSION_RETENTION_DAYS`. (8) De CHECK `between 0 and 8` voor `seats_offered` en `between 1 and 30` voor `first_name` staan in het bestand (`MAX_SEATS`, `MAX_FIRST_NAME`), en `>= 30` (het maximum aantal RSVP's) staat in `fnBlock('rsvp_create')` (`MAX_RSVPS`). |
-| `session-page-data.test.ts` | Mockt `#lib/rsvp.js` (`getPublicSession`) en `#lib/data.js` (`getEvaluations`). `loadSessionPage('kort', new Date(NOW))` geeft `not_found` met 0 calls. Bij `null` volgt `not_found` en wordt `getEvaluations` niet aangeroepen. Bij een geldige sessie: `getEvaluations` met `('test-strand', 2026-07-18T12:00:00.000Z, 2026-07-18T16:00:00.000Z)` (vergelijk `toISOString()`), en het resultaat is gelijk aan `sessionPageData()` (met `now === NOW`). Met `starts_at '2026-07-18T12:30:00+00:00'` is `from` 12:00Z. Als `getEvaluations` rejectet met `new Error('secret detail')`: `ok` met `evaluations: null`, en `console.warn` precies één keer met exact `('session verdict load failed')`. Als `getPublicSession` rejectet: `error`, met `console.warn('session page load failed')` en geen argument met `secret detail`. |
-| `session-page.test.ts` | Mockt `$app/navigation` (`refreshAll`) en `#lib/rsvp.js` (`getPublicSession`, `createRsvp`, `updateRsvp` en `deleteRsvp` als `vi.fn`). `#lib/supabase.js` wordt gemockt als een factory die gooit (zoals `spot-page.test.ts`). `#lib/auth.js` wordt gemockt met `session: { subscribe: authSpy }`. Renders met `render(Page, { data } as never)`. **(AC-2)** (a) Met `sessionPageData()`: h1 `Kitesessie: Teststrand`; `zaterdag 18 juli, 14:00–18:00`; `.session-organizer` heeft tekst `Georganiseerd door Lars`; de link `Naar de spotpagina van Teststrand` heeft `href '/spot/test-strand'`; de notitie; de link `Open betaalverzoek` heeft `href 'https://tikkie.me/pay/test'`, `target '_blank'` en `rel 'noopener noreferrer'`, en de tekst `(link naar tikkie.me)` staat er. Deelnemers: kop `Deelnemers (5)`; `li.organizer` met `Lars` en `organisator`; `[data-rsvp=EVA_ID]` bevat `Biedt een lift aan (2 plekken)`, `SANNE_ID` bevat `Rijdt mee met Eva`, `NOOR_ID` bevat `Zoekt een lift` en `TOM_ID` bevat `Rijdt zelf`. Carpool: `Vrije plekken bij Lars: 3` en `Vertrekpunt: Utrecht CS`; `[data-driver=EVA_ID]` bevat `2 plekken` en `meerijders: Sanne`; `[data-seeker=NOOR_ID]`. Uren: `time`-elementen `14:00`, `15:00`, `16:00` en `17:00`; binnen `.hour` van `17:00` staan `Niet gaan` en `Aflandige wind: niet kiten`. Daarnaast `Bijgewerkt: za 18 jul 10:05`. `authSpy` is niet aangeroepen. Elke voornaam staat in een `bdi` (`container.querySelectorAll('bdi')` bevat de tekst `Eva`). (b) **(AC-5)** `document.head.querySelector('meta[name="robots"]')` heeft `content === 'noindex'`, ook bij `{ kind: 'not_found', … }`. Met `session: { …SESSION_INFO, cancelled: true }`: `getByRole('alert')` bevat `Deze sessie is geannuleerd`; er is geen `Voornaam`-veld (`queryByLabelText('Voornaam')` is `null`) en geen knop `Ik ook`; `ouder dan 3 uur` staat er niet. Met `now: NOW_ENDED`: de tekst `Deze sessie is voorbij`, geen formulier. (c) **(AC-6)** Een link met `href === 'https://open-meteo.com/'` en de tekst `Rijkswaterstaat`. (d) `not_found` geeft h1 `Sessie niet gevonden`. `error` geeft een alert met de tekst; een klik op `Opnieuw proberen` roept `refreshAll` één keer aan. (e) `now: NOW_STALE` geeft een alert met `ouder dan 3 uur`. (f) `evaluations: null` geeft `Het oordeel kon niet worden geladen.`; `[]` geeft `Er is nog geen oordeel voor dit tijdvenster.` (g) Een window over middernacht (`starts_at '2026-07-18T20:00:00+00:00'`, `ends_at '2026-07-19T02:00:00+00:00'`, evaluaties om 21:00Z en 23:00Z) geeft de koppen `za 18 jul` en `zo 19 jul`. (h) Met `tikkie_url 'http://tikkie.me/x'` is er geen link `Open betaalverzoek`. Met `note: '   '` is er geen kop `Notitie`. (i) Hervatten: met `now` 20 minuten vóór `Date.now()`, `visibilityState` `'visible'` en een event volgt `refreshAll`, zoals in `spot-page.test.ts`. |
-| `session-page-integration.test.ts` | **(AC-2, letterlijk: gemockte RPC)** `fake = createFakeRpc()` en `db = createFakeSupabase()` (bestaande helper), plus `trap = clientWithAuthTrap({ rpc: fake.rpc, from: db.client.from })`. `vi.mock('#lib/supabase.js', () => ({ supabase: trap.client, initialUrlHash: '' }))`, en `$app/navigation` gemockt. `fake.respond('get_public_session', { data: SESSION_JSON, error: null, status: 200 })` en `db.respond('evaluations', { data: SESSION_EVALS, error: null })`. Daarna `data = await loadSessionPage(SLUG, new Date(NOW))` (echte modules) en `render(Page, { data } as never)`. Dan staan de deelnemers (`Eva`, `Sanne`, `Noor` en `Tom` in de deelnemerslijst), de carpool (`Vrije plekken bij Lars: 3`, `meerijders: Sanne`, `Zoekt een lift` bij Noor) en de vier uren in beeld. `fake.calls` is precies één `get_public_session` met `argCount 2`. `db.calls` is precies één `evaluations`-call met `gte('valid_at', '2026-07-18T12:00:00.000Z')` en `lt('valid_at', '2026-07-18T16:00:00.000Z')`. `trap.authAccesses() === 0`. |
-| `rsvp-flow.test.ts` | Mockt `#lib/rsvp.js` (vier `vi.fn`), `$app/navigation`, en `#lib/supabase.js` (gooiende factory). De opslag (`rsvp-storage`) en `session-view` zijn echt. `user = userEvent.setup()`. Helper `key = 'shakka:rsvp:' + SLUG`. **(AC-3)** (1) Render `sessionPageData()`. Typ `'  Sanne  '` in `Voornaam` (`findByLabelText`, want de opslag-`$effect` loopt eerst) en klik `Ik ook`. `createRsvp` is één keer aangeroepen met `(SLUG, { first_name: 'Sanne', ride: 'own', seats_offered: null })`. Met `createRsvp` → `{ rsvp_id: NEW_ID, edit_token: TOKEN_NEW }` en `getPublicSession` → `{ session: SESSION_INFO, rsvps: [...4, RSVP_NEW] }`: daarna is `localStorage.getItem(key) === JSON.stringify({ rsvp_id: NEW_ID, edit_token: TOKEN_NEW })`; `findByRole('heading', { name: 'Jij gaat' })`; de knoppen `Wijzigen` en `Afmelden`; `role="status"` met `Je staat op de lijst.`; `[data-rsvp=NEW_ID]` bevat `(jij)`. (2) Opnieuw renderen: `unmount()`, met `localStorage.setItem(key, JSON.stringify({ rsvp_id: TOM_ID, edit_token: TOKEN }))` en `render` met `sessionPageData()`. Dan staan `Jij gaat`, `Wijzigen` en `Afmelden` er, `Aangemeld als Tom · Rijdt zelf`, en geen `Voornaam`-veld. (3) Afmelden: vanuit (2) klik je `Afmelden` en dan `Ja, afmelden`. `deleteRsvp` is aangeroepen met `(TOKEN)` → `true`; `localStorage.getItem(key)` is `null`; `role="status"` bevat `Je bent afgemeld.`; het veld `Voornaam` is er weer. (4) Met `deleteRsvp` → `false`: de sleutel is weg en de tekst `Je aanmelding bestond al niet meer.` staat er. (5) Wijzigen: vanuit (2) klik je `Wijzigen`, kies je `Ik zoek een lift`, kies je in `Rijd mee met` de optie `Eva` en klik je `Opslaan`. `updateRsvp` krijgt `(TOKEN, { first_name: 'Tom', ride: 'needs_ride', seats_offered: null, rides_with: EVA_ID })`, daarna `Je wijziging is opgeslagen.` en `getPublicSession` één keer. (6) `updateRsvp` rejectet met `new RsvpError('invalid_token', 'updateRsvp')` (echte klasse uit `session-view`): de sleutel is weg, de melding is `RSVP_MESSAGES.invalid_token`, en het formulier `Voornaam` is er weer. **(AC-4)** (7) Geparametriseerd over `rate_limited`, `session_full`, `session_closed` en `invalid_input`: `createRsvp` rejectet met `new RsvpError(kind, 'createRsvp')`; dan heeft `findByRole('alert')` exact `RSVP_MESSAGES[kind]`. `queryByText(/rate_limited\|session_full\|session_closed\|invalid_input/)` is `null`; de sleutel bestaat niet. Daarna: de vier verzamelde teksten zijn paarsgewijs verschillend. Bij `session_full` en `session_closed` is `getPublicSession` aangeroepen. (8) `createRsvp` rejectet met `new Error('secret detail')`: `RSVP_MESSAGES.unknown`, en `secret detail` staat niet in `document.body.textContent`. **Overig:** (9) een lege naam plus `Ik ook` geeft `Vul je voornaam in.`, `aria-invalid="true"` op het veld, en `createRsvp` 0 keer. (10) Dubbelklik: `createRsvp` geeft een promise die nog niet is opgelost. Twee klikken op `Ik ook` geven één aanroep, en de knop `Bezig…` is `disabled`. (11) Een verouderde sleutel (`{ rsvp_id: NEW_ID, edit_token: TOKEN }`, terwijl `NEW_ID` niet in de lijst staat) is na de render verwijderd, en het formulier staat er. (12) Een kapotte sleutel (`'{kapot'`) wordt verwijderd, en het formulier staat er. (13) `vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); })`. Na een geslaagde create staat `RSVP_NOTICES.storageFailed` er, en `Afmelden` werkt (`deleteRsvp` met `TOKEN_NEW`). (14) Tweede tabblad: vóór de klik zet de test `localStorage.setItem(key, JSON.stringify({ rsvp_id: TOM_ID, edit_token: TOKEN }))` (na de render). De klik op `Ik ook` geeft 0 keer `createRsvp`, `getPublicSession` één keer, en `Jij gaat`. (15) Gesloten plus sleutel (`cancelled: true`, sleutel Tom): `Afmelden` staat er, `Wijzigen` niet. (16) Een verversing die `null` geeft na een create: `Sessie niet gevonden`, en de sleutel is weg. (17) Na alle stappen in (1)–(5): `document.body.innerHTML` en `window.location.href` bevatten `TOKEN` en `TOKEN_NEW` niet. |
-| `session-no-auth.test.ts` (node) | **(AC-2, A1)** Leest de bestanden `src/routes/s/[slug]/+page.svelte`, `src/routes/s/[slug]/+page.ts`, `src/lib/rsvp.ts`, `src/lib/rsvp-storage.ts`, `src/lib/session-view.ts`, `src/lib/rsvp-types.ts`, `src/lib/session-page-data.ts`, en `RsvpPanel.svelte`, `RsvpForm.svelte` en `SessionParticipants.svelte` uit `src/lib/components/`. Geen van die bestanden matcht `/#lib\/auth\.js\|\.\/auth\.js\|\.auth\b\|getSession\|getUser\|\$session/`. `rsvp.ts` matcht niet `/get:\s*true\|head:\s*true/` en niet `/\.from\(/`, en bevat precies één keer `supabase.rpc(` (in `call`). Geen van de bestanden matcht `/\{@html/` of `/console\.(log\|info\|debug)\(/`. `+page.svelte` bevat `<meta name="robots" content="noindex" />` binnen `<svelte:head>`. |
+| `rsvp-storage.test.ts` | Met een `Map`-gebaseerde `StorageLike` en met de echte jsdom-`localStorage`. **(AC-3)** `writeStoredRsvp(localStorage, SLUG, { rsvp_id: NEW_ID, edit_token: TOKEN })` geeft `true`, en `localStorage.getItem('shakka:rsvp:' + SLUG) === JSON.stringify({ rsvp_id: NEW_ID, edit_token: TOKEN })`. Bij een extra eigenschap op het argument staat die niet in de waarde. `readStoredRsvp` geeft het object terug. `clearStoredRsvp` verwijdert de sleutel. Afwezig geeft `null`. `'{kapot'` en `'{"rsvp_id":"x"}'` geven `null`, en de sleutel is daarna weg. `storage` `null`: `readStoredRsvp` geeft `null` en gooit niet. Bij een `getItem` die gooit volgt `null`; bij een `removeItem` die gooit volgt geen fout. Bij een ongeldige slug volgt geen toegang tot de storage (spies 0 keer aangeroepen). `browserStorage()` geeft in jsdom `localStorage`; met een getter die gooit geeft hij `null` (`const d = Object.getOwnPropertyDescriptor(globalThis, 'localStorage')`, dan `Object.defineProperty(globalThis, 'localStorage', { configurable: true, get: () => { throw new Error('SecurityError'); } })`, en in `finally` `Object.defineProperty(globalThis, 'localStorage', d!)`; is de eigenschap niet configureerbaar, dan vervalt alleen deze deeltest en noteert de builder dat in `deviations.md`). **Geheugenfallback (E26):** (a) `writeStoredRsvp(null, SLUG, v)` geeft `false`, daarna geeft `readStoredRsvp(null, SLUG)` `v` en ook `readStoredRsvp(localStorage, SLUG)` `v` (lege opslag); `clearStoredRsvp(null, SLUG)` maakt beide `null`. (b) Een `setItem` die gooit: `false`, `localStorage` heeft de sleutel niet, en `readStoredRsvp(localStorage, SLUG)` geeft `v`. (c) Een geslaagde `writeStoredRsvp` na (b) wist de geheugenwaarde (na `localStorage.removeItem(key)` geeft `read` `null`). (d) `resetRsvpMemory()` wist de geheugenwaarde. (e) De geheugenwaarde is per slug: een andere geldige slug geeft `null`. |
+| `rsvp.test.ts` | `fake = createFakeRpc()`, `trap = clientWithAuthTrap({ rpc: fake.rpc })`, en `vi.mock('#lib/supabase.js', () => ({ supabase: trap.client, initialUrlHash: '' }))` (hoisted). Daarnaast spies op `console.warn`, `console.error` en `console.log`. **(AC-3)** `createRsvp(SLUG, { first_name: '  Sanne  ', ride: 'needs_ride', seats_offered: null })`: `fake.calls[0]` is `{ fn: 'rsvp_create', args: { p_slug: SLUG, p_first_name: 'Sanne', p_ride: 'needs_ride', p_seats_offered: null }, argCount: 2 }`, en het resultaat is de geparste `{ rsvp_id, edit_token }`. `getPublicSession('kort')` geeft `null` met 0 calls. `getPublicSession(SLUG)`: `('get_public_session', { p_slug: SLUG })` met `argCount` 2; `data SESSION_JSON` geeft het geparste object; `data null` geeft `null`. `updateRsvp(TOKEN, { first_name: ' Eva ', ride: 'needs_ride', seats_offered: null, rides_with: null })`: `args` heeft precies de vijf sleutels `p_edit_token`, `p_first_name` (`'Eva'`), `p_ride`, `p_seats_offered` en `p_rides_with`; `'p_rides_with' in args` en de waarde is `null`; het resultaat is een `PublicRsvp`. `updateRsvp('abc', …)` gooit `RsvpError` `invalid_token` met 0 calls. `deleteRsvp(TOKEN)`: `('rsvp_delete', { p_edit_token: TOKEN })`; `true` en `false` komen door; `data: 'yes'` geeft `RsvpError` `unknown`. `deleteRsvp('abc')` geeft `false` met 0 calls. **(AC-4)** Voor elk van de vijf codes geeft een antwoord `{ data: null, error: { code: 'PT400', message: <code>, details: null, hint: null }, status: 400 }` bij `createRsvp` een `RsvpError` met die `kind`. Een antwoord met `message: 'secret detail'` en `code: 'XX000'` geeft `kind 'unknown'`, en `String(err)` en `err.message` bevatten geen `'secret detail'`. `status: 0` geeft `network`. `fake.throwNext('rsvp_create', new Error('secret detail'))` geeft `network`. **Timeout (A6, review N-8):** elke call heeft een `signal` met `typeof signal.aborted === 'boolean'`; met `vi.spyOn(AbortSignal, 'timeout')` is die aangeroepen met `RPC_TIMEOUT_MS` (15 000). Met `AbortSignal.timeout` tijdelijk op `undefined` (via `Object.defineProperty(AbortSignal, 'timeout', { configurable: true, value: undefined })`, origineel terug in `finally`) slaagt `getPublicSession(SLUG)` en is `signal` `null`. **Altijd:** elke call heeft `argCount === 2` (geen `{ get: true }`); `trap.authAccesses() === 0`; geen console-spy is aangeroepen met een argument dat `TOKEN` bevat. |
+| `rsvp-contract.test.ts` (node) | Leest `../../supabase/migrations/20261015200000_sessions.sql` (via `new URL(…, import.meta.url)`). **(0) Drift door latere migraties (review N-4):** lees alle `*.sql` in `../../supabase/migrations/` (`readdirSync`, gesorteerd); voor elk bestand met een naam die na `20261015200000_sessions.sql` sorteert, matcht de tekst niet `/\b(get_public_session\|rsvp_create\|rsvp_update\|rsvp_delete\|purge_expired_sessions)\b/` en niet `/alter\s+table\s+(if\s+exists\s+)?(only\s+)?public\.rsvps\b/i`. Faalt dat, dan is de melding `` `${file} changes the session RPCs or rsvps: update rsvp-types.ts, session-view.ts and rsvp-contract.test.ts` ``. Zo blijft de test niet groen op een verouderde definitie (`create or replace function` in een latere migratie). `fnBlock(name)` is de tekst van `create function public.<name>(` tot de eerste `$$;` daarna. `params(name)`: de groep uit `/create function public\.\w+\(([\s\S]*?)\)\s*returns/`, gesplitst op `,`, per deel het eerste woord. De tests: (1) `params('get_public_session')` is `['p_slug']`; `params('rsvp_create')` is `['p_slug', 'p_first_name', 'p_ride', 'p_seats_offered']`; `params('rsvp_update')` is `['p_edit_token', 'p_first_name', 'p_ride', 'p_seats_offered', 'p_rides_with']`; `params('rsvp_delete')` is `['p_edit_token']`. Plus: de sleutels die `rsvp.ts` werkelijk stuurt (via `createFakeRpc` en de vier functies) zijn per functie exact gelijk aan `params(...)`. (2) In `fnBlock('get_public_session')`: de namen uit `/'([a-z_]+)',/g` in het stuk tussen `'session', jsonb_build_object(` en `'rsvps',` (exclusief) zijn exact `PUBLIC_SESSION_KEYS`; in het stuk dat direct ná de letterlijke tekst `'rsvps',` begint (dus zonder de sleutel `rsvps` zelf) en loopt tot `order by r.created_at` zijn ze exact `PUBLIC_RSVP_KEYS`. (3) De `return jsonb_build_object(` in `fnBlock('rsvp_update')` heeft precies `PUBLIC_RSVP_KEYS`. (4) `fnBlock('rsvp_create')` bevat `'rsvp_id'` en `'edit_token'`. (5) De set `using message = '([a-z_]+)'` over `fnBlock('rsvp_create') + fnBlock('rsvp_update') + fnBlock('rsvp_delete')` is gelijk aan `RPC_ERROR_CODES`. (6) `fnBlock('rsvp_update')` bevat `` `'${EDIT_TOKEN_RE.source}'` `` en `fnBlock('get_public_session')` bevat `` `'${SESSION_SLUG_RE.source}'` ``. (7) `/ends_at < p_now - interval '(\d+) days'/` geeft `SESSION_RETENTION_DAYS`. (8) De CHECK `between 0 and 8` voor `seats_offered` en `between 1 and 30` voor `first_name` staan in het bestand (`MAX_SEATS`, `MAX_FIRST_NAME`), en `>= 30` (het maximum aantal RSVP's) staat in `fnBlock('rsvp_create')` (`MAX_RSVPS`). |
+| `public-session-data.test.ts` | Mockt `#lib/rsvp.js` (`getPublicSession`) en `#lib/data.js` (`getEvaluations`). `loadPublicSessionPage('kort', new Date(NOW))` geeft `not_found` met 0 calls. Bij `null` volgt `not_found` en wordt `getEvaluations` niet aangeroepen. Bij een geldige sessie: `getEvaluations` met `('test-strand', 2026-07-18T12:00:00.000Z, 2026-07-18T16:00:00.000Z)` (vergelijk `toISOString()`), en het resultaat is gelijk aan `publicSessionPageData()` (met `now === NOW`). Met `starts_at '2026-07-18T12:30:00+00:00'` is `from` 12:00Z. Als `getEvaluations` rejectet met `new Error('secret detail')`: `ok` met `evaluations: null`, en `console.warn` precies één keer met exact `('session verdict load failed')`. Als `getPublicSession` rejectet: `error`, met `console.warn('session page load failed')` en geen argument met `secret detail`. |
+| `public-session-page.test.ts` | Mockt `$app/navigation` (`refreshAll`) en `#lib/rsvp.js` (`getPublicSession`, `createRsvp`, `updateRsvp` en `deleteRsvp` als `vi.fn`). `#lib/supabase.js` wordt gemockt als een factory die gooit (zoals `spot-page.test.ts`). `#lib/auth.js` wordt gemockt met `session: { subscribe: authSpy }`. Renders met `render(Page, { data } as never)`. **(AC-2)** (a) Met `publicSessionPageData()`: h1 `Kitesessie: Teststrand`; `.session-when` heeft tekst `za 18 jul 14:00–18:00`; `.session-organizer` heeft tekst `Georganiseerd door Lars`; de link `Naar de spotpagina van Teststrand` heeft `href '/spot/test-strand'`; de notitie; de link `Open betaalverzoek` heeft `href 'https://tikkie.me/pay/test'`, `target '_blank'` en `rel 'noopener noreferrer'`, en de tekst `(link naar tikkie.me)` staat er. Deelnemers: kop `Deelnemers (5)`; `li.organizer` met `Lars` en `organisator`; `[data-rsvp=EVA_ID]` bevat `Biedt een lift aan (2 plekken)`, `SANNE_ID` bevat `Rijdt mee met Eva`, `NOOR_ID` bevat `Zoekt een lift` en `TOM_ID` bevat `Rijdt zelf`. Carpool: `Vrije plekken bij Lars: 3` en `Vertrekpunt: Utrecht CS`; `[data-driver=EVA_ID]` bevat `2 plekken` en `meerijders: Sanne`; `[data-seeker=NOOR_ID]`. Uren: `time`-elementen `14:00`, `15:00`, `16:00` en `17:00`; binnen `.hour` van `17:00` staan `Niet gaan` en `Aflandige wind: niet kiten`. Daarnaast `Bijgewerkt: za 18 jul 10:05`. `authSpy` is niet aangeroepen. Elke voornaam staat in een `bdi` (`container.querySelectorAll('bdi')` bevat de tekst `Eva`). (b) **(AC-5)** `document.head.querySelector('meta[name="robots"]')` heeft `content === 'noindex'`, ook bij `{ kind: 'not_found', … }`. Met `session: { …SESSION_INFO, cancelled: true }`: `getByRole('alert')` bevat `Deze sessie is geannuleerd`; er is geen `Voornaam`-veld (`queryByLabelText('Voornaam')` is `null`) en geen knop `Ik ook`; `ouder dan 3 uur` staat er niet. Met `now: NOW_ENDED`: de tekst `Deze sessie is voorbij`, geen formulier. (c) **(AC-6)** Een link met `href === 'https://open-meteo.com/'` en de tekst `Rijkswaterstaat`. (d) `not_found` geeft h1 `Sessie niet gevonden` en de tekst `` `Sessies verdwijnen ${SESSION_RETENTION_DAYS} dagen na afloop.` `` (review N-2). `error` geeft een alert met de tekst; een klik op `Opnieuw proberen` roept `refreshAll` één keer aan. (e) `now: NOW_STALE` geeft een alert met `ouder dan 3 uur`. (f) `evaluations: null` geeft `Het oordeel kon niet worden geladen.`; `[]` geeft `Er is nog geen oordeel voor dit tijdvenster.` (g) Een window over middernacht (`starts_at '2026-07-18T20:00:00+00:00'`, `ends_at '2026-07-19T02:00:00+00:00'`, evaluaties om 21:00Z en 23:00Z) geeft de koppen (`getByRole('heading', { level: 3, name })`) `za 18 jul` en `zo 19 jul`, en `.session-when` `za 18 jul 22:00 – zo 19 jul 04:00`. (h) Met `tikkie_url 'http://tikkie.me/x'` en met `'https://evil.example/pay/x'` is er geen link `Open betaalverzoek` en geen tekst `link naar`. Met `note: '   '` is er geen kop `Notitie`. (i) Hervatten: met `now` 20 minuten vóór `Date.now()`, `visibilityState` `'visible'` en een event volgt `refreshAll`, zoals in `spot-page.test.ts`. (j) **Klok (A5, E46, review N-1):** `vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] })`, `vi.setSystemTime(new Date('2026-07-18T15:59:00.000Z'))`, render met `now: '2026-07-18T15:59:00.000Z'`: het veld `Voornaam` en de knop `Ik ook` staan er (`getByLabelText`, na `await tick()` voor de opslag-`$effect`). `vi.advanceTimersByTime(61_000)` en `await tick()`: geen `Voornaam`-veld, de tekst `Deze sessie is voorbij` staat er. Bij een unmount vóór het afgaan is de timer opgeruimd: `vi.getTimerCount()` na `unmount()` is gelijk aan de telling vóór `render`. |
+| `public-session-page-integration.test.ts` | **(AC-2, letterlijk: gemockte RPC)** `fake = createFakeRpc()` en `db = createFakeSupabase()` (bestaande helper), plus `trap = clientWithAuthTrap({ rpc: fake.rpc, from: db.client.from })`. `vi.mock('#lib/supabase.js', () => ({ supabase: trap.client, initialUrlHash: '' }))`, en `$app/navigation` gemockt. `fake.respond('get_public_session', { data: SESSION_JSON, error: null, status: 200 })` en `db.respond('evaluations', { data: SESSION_EVALS, error: null })`. Daarna `data = await loadPublicSessionPage(SLUG, new Date(NOW))` (echte modules) en `render(Page, { data } as never)`. Dan staan de deelnemers (`Eva`, `Sanne`, `Noor` en `Tom` in de deelnemerslijst), de carpool (`Vrije plekken bij Lars: 3`, `meerijders: Sanne`, `Zoekt een lift` bij Noor) en de vier uren in beeld. `fake.calls` is precies één `get_public_session` met `argCount 2`. `db.calls` is precies één `evaluations`-call met `gte('valid_at', '2026-07-18T12:00:00.000Z')` en `lt('valid_at', '2026-07-18T16:00:00.000Z')`. `trap.authAccesses() === 0`. |
+| `rsvp-flow.test.ts` | Mockt `#lib/rsvp.js` (vier `vi.fn`), `$app/navigation`, en `#lib/supabase.js` (gooiende factory). De opslag (`rsvp-storage`) en `session-view` zijn echt. `user = userEvent.setup()`. Helper `key = 'shakka:rsvp:' + SLUG`. **Standaardantwoord (review N-5):** in `beforeEach` krijgt `getPublicSession` `mockResolvedValue({ session: SESSION_INFO, rsvps: [RSVP_EVA, RSVP_SANNE, RSVP_NOOR, RSVP_TOM] })`; tests die iets anders nodig hebben, overschrijven dat met `mockResolvedValueOnce`. Zonder standaard geeft de `vi.fn` `undefined` en zet `applyRefresh` `gone = true`. **(AC-3)** (1) Render `publicSessionPageData()`. Typ `'  Sanne  '` in `Voornaam` (`findByLabelText`, want de opslag-`$effect` loopt eerst) en klik `Ik ook`. `createRsvp` is één keer aangeroepen met `(SLUG, { first_name: 'Sanne', ride: 'own', seats_offered: null })`. Met `createRsvp` → `{ rsvp_id: NEW_ID, edit_token: TOKEN_NEW }` en `getPublicSession` → `{ session: SESSION_INFO, rsvps: [...4, RSVP_NEW] }`: daarna is `localStorage.getItem(key) === JSON.stringify({ rsvp_id: NEW_ID, edit_token: TOKEN_NEW })`; `findByRole('heading', { name: 'Jij gaat' })`; de knoppen `Wijzigen` en `Afmelden`; `role="status"` met `Je staat op de lijst.`; `[data-rsvp=NEW_ID]` bevat `(jij)`. (2) Opnieuw renderen: `unmount()`, met `localStorage.setItem(key, JSON.stringify({ rsvp_id: TOM_ID, edit_token: TOKEN }))` en `render` met `publicSessionPageData()`. Dan staan `Jij gaat`, `Wijzigen` en `Afmelden` er, `Aangemeld als Tom · Rijdt zelf`, en geen `Voornaam`-veld. (3) Afmelden: vanuit (2) klik je `Afmelden` en dan `Ja, afmelden`. `deleteRsvp` is aangeroepen met `(TOKEN)` → `true`; `localStorage.getItem(key)` is `null`; `role="status"` bevat `Je bent afgemeld.`; het veld `Voornaam` is er weer. (4) Met `deleteRsvp` → `false`: de sleutel is weg en de tekst `Je aanmelding bestond al niet meer.` staat er. (5) Wijzigen: vanuit (2) klik je `Wijzigen`, kies je `Ik zoek een lift`, kies je in `Rijd mee met` de optie van Eva op waarde (`user.selectOptions(getByLabelText('Rijd mee met'), EVA_ID)`; de optietekst is `'⁨Eva⁩'`, A11) en klik je `Opslaan`. `updateRsvp` krijgt `(TOKEN, { first_name: 'Tom', ride: 'needs_ride', seats_offered: null, rides_with: EVA_ID })`, daarna `Je wijziging is opgeslagen.` en `getPublicSession` één keer. (6) `updateRsvp` rejectet met `new RsvpError('invalid_token', 'updateRsvp')` (echte klasse uit `session-view`): de sleutel is weg, de melding is `RSVP_MESSAGES.invalid_token`, en het formulier `Voornaam` is er weer. **(AC-4)** (7) Geparametriseerd over `rate_limited`, `session_full`, `session_closed` en `invalid_input`: `createRsvp` rejectet met `new RsvpError(kind, 'createRsvp')`; dan heeft `findByRole('alert')` exact `RSVP_MESSAGES[kind]`. `queryByText(/rate_limited\|session_full\|session_closed\|invalid_input/)` is `null`; de sleutel bestaat niet. Daarna: de vier verzamelde teksten zijn paarsgewijs verschillend. Bij `session_full` en `session_closed` is `getPublicSession` aangeroepen. (8) `createRsvp` rejectet met `new Error('secret detail')`: `RSVP_MESSAGES.unknown`, en `secret detail` staat niet in `document.body.textContent`. **Overig:** (9) een lege naam plus `Ik ook` geeft `Vul je voornaam in.`, `aria-invalid="true"` op het veld, en `createRsvp` 0 keer. (10) Dubbelklik: `createRsvp` geeft een promise die nog niet is opgelost. Twee klikken op `Ik ook` geven één aanroep, en de knop `Bezig…` is `disabled`. (11) Een verouderde sleutel (`{ rsvp_id: NEW_ID, edit_token: TOKEN }`, terwijl `NEW_ID` niet in de lijst staat) is na de render verwijderd, en het formulier staat er. (12) Een kapotte sleutel (`'{kapot'`) wordt verwijderd, en het formulier staat er. (13) `vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => { throw new Error('quota'); })`. Na een geslaagde create staat `RSVP_NOTICES.storageFailed` er. Daarna een nieuwe load zoals bij hervatten: `rerender({ data: publicSessionPageData({ rsvps: [...4, RSVP_NEW] }) })` (nieuw object). `Jij gaat` blijft staan (geheugenfallback, review N-10), en `Afmelden` werkt (`deleteRsvp` met `TOKEN_NEW`). (14) Tweede tabblad: vóór de klik zet de test `localStorage.setItem(key, JSON.stringify({ rsvp_id: TOM_ID, edit_token: TOKEN }))` (na de render). De klik op `Ik ook` geeft 0 keer `createRsvp`, `getPublicSession` één keer, en `Jij gaat`. (15) Gesloten plus sleutel (`cancelled: true`, sleutel Tom): `Afmelden` staat er, `Wijzigen` niet; de sectie `.rsvp-panel` heeft `aria-labelledby="rsvp-heading"`. Na `Afmelden` en `Ja, afmelden`: de sectie toont `Je bent afgemeld.` en heeft geen attribuut `aria-labelledby` (review N-12). (16) Een verversing die `null` geeft na een create: `Sessie niet gevonden`, en de sleutel is weg. (17) Na alle stappen in (1)–(5): `document.body.innerHTML` en `window.location.href` bevatten `TOKEN` en `TOKEN_NEW` niet. (18) **Server sluit (A5, review N-1):** een open sessie volgens de browser (`publicSessionPageData()`), `createRsvp` rejectet met `new RsvpError('session_closed', 'createRsvp')`: de melding `RSVP_MESSAGES.session_closed` staat er, het veld `Voornaam` en de knop `Ik ook` zijn weg, `getPublicSession` is één keer aangeroepen, en `createRsvp` is één keer aangeroepen. (19) Met sleutel Tom: `Wijzigen`, `Opslaan` met `updateRsvp` dat rejectet met `session_closed`: `Wijzigen` is weg, `Afmelden` staat er nog. |
+| `session-no-auth.test.ts` (node) | **(AC-2, A1)** Leest de bestanden `src/routes/s/[slug]/+page.svelte`, `src/routes/s/[slug]/+page.ts`, `src/lib/rsvp.ts`, `src/lib/rsvp-storage.ts`, `src/lib/session-view.ts`, `src/lib/rsvp-types.ts`, `src/lib/public-session-data.ts`, en `RsvpPanel.svelte`, `RsvpForm.svelte` en `SessionParticipants.svelte` uit `src/lib/components/`. Geen van die bestanden matcht `/#lib\/auth\.js\|\.\/auth\.js\|\.auth\b\|getSession\|getUser\|\$session/`. `rsvp.ts` matcht niet `/get:\s*true\|head:\s*true/` en niet `/\.from\(/`, en bevat precies één keer `supabase.rpc(` (in `call`). Geen van de bestanden matcht `/\{@html/` of `/console\.(log\|info\|debug)\(/`. `+page.svelte` bevat `<meta name="robots" content="noindex" />` binnen `<svelte:head>`. |
 | `user-tables.test.ts` (gewijzigd) | `.rpc(` komt alleen voor in `lib/rsvp.ts` (zie Interfaces). De bestaande tests blijven ongewijzigd groen. |
 
 ### Per acceptatiecriterium
 - **AC-1:** `cd web && npm run check && npm test && npm run build`, plus `npm run verify:build` en vanuit de root `bash scripts/check-no-client-openmeteo.sh`. In CI loopt dit via de bestaande job `web`.
-- **AC-2:** `session-page-integration.test.ts` (gemockte RPC: deelnemers, carpool en uren, `authAccesses() === 0`), `session-page.test.ts` (a) (`authSpy` niet aangeroepen) en `session-no-auth.test.ts`.
+- **AC-2:** `public-session-page-integration.test.ts` (gemockte RPC: deelnemers, carpool en uren, `authAccesses() === 0`), `public-session-page.test.ts` (a) (`authSpy` niet aangeroepen) en `session-no-auth.test.ts`.
+  - **Reikwijdte van dit bewijs (review N-11).** De tests tonen aan dat de pagina en de WP-21-modules `auth`/`$session` niet aanraken en geen auth-sessie vereisen. Ze tonen niet aan dat de echte client geen auth-aanroep doet: supabase-js roept intern `auth.getSession()` aan om de bearer-header te bepalen (anoniem: de anon key), en de layout start `initAuth()`. Dat is bestaand gedrag en geen probleem: zonder sessie gaat de RPC als `anon`. De verifier noteert dit in de verificatie, zodat niemand de trap-test leest als bewijs voor de echte client.
 - **AC-3:**
   - `rsvp.test.ts`: `rsvp_create` met de getrimde voornaam;
   - `rsvp-flow.test.ts` (1): versturen met de getrimde naam en de sleutel `shakka:rsvp:{slug}` met `{rsvp_id, edit_token}`;
@@ -944,8 +1050,8 @@ export function clientWithAuthTrap(parts: { rpc: unknown; from?: unknown }): { c
   - `rsvp-flow.test.ts` (3): afmelden roept `rsvp_delete` aan en verwijdert de sleutel;
   - `rsvp-storage.test.ts`.
 - **AC-4:** `rsvp-flow.test.ts` (7) en (8), `rsvp.test.ts` (PT400-mapping) en `session-view.test.ts` (teksten verschillend en gelijk aan de tabel).
-- **AC-5:** `session-page.test.ts` (b): `noindex` in `document.head`, de banner bij annuleren, en geen formulier bij een geannuleerde of afgelopen sessie. Daarnaast `session-no-auth.test.ts` (meta in de bron).
-- **AC-6:** `session-page.test.ts` (c). De footer-`Attribution` van de layout blijft gedekt door `layout.test.ts`.
+- **AC-5:** `public-session-page.test.ts` (b) en (j): `noindex` in `document.head`, de banner bij annuleren, en geen formulier bij een geannuleerde of afgelopen sessie (ook als de sessie afloopt terwijl de pagina open staat). Daarnaast `session-no-auth.test.ts` (meta in de bron) en `rsvp-flow.test.ts` (18) (server sluit).
+- **AC-6:** `public-session-page.test.ts` (c). De footer-`Attribution` van de layout blijft gedekt door `layout.test.ts`.
 - **AC-7:** `NEEDS_LARS`, volgens RUNBOOK §16.9.
 
 Daarnaast blijven alle bestaande webtests groen (`no-local-date-getters`, `no-third-party`, `no-telegram`, `data-tables` en de rest van `user-tables`), en `cd ingest && uv run pytest` ook (deze WP raakt `ingest/` niet).
@@ -957,6 +1063,10 @@ Gecontroleerd op 15 oktober 2026. **Geen nieuwe packages.** Gebruikt worden de v
 |---|---|---|
 | supabase-js `rpc(fn, args = {}, { head = false, get = false, count } = {})` | Standaard POST met de argumenten als JSON-body. `get: true` of `head: true` zet de argumenten in de querystring; dat gebruiken we nooit (A6). | https://raw.githubusercontent.com/supabase/supabase-js/master/packages/core/postgrest-js/src/PostgrestClient.ts, https://supabase.com/docs/reference/javascript/rpc |
 | postgrest-js foutvorm | Een HTTP-fout geeft `error = JSON.parse(body)` met `code`, `message`, `details` en `hint`. Een netwerkfout resolvet (rejectet niet) met `status: 0` en een lege `code`. Daarom `rsvpErrorKind(error, status)`. | https://raw.githubusercontent.com/supabase/supabase-js/master/packages/core/postgrest-js/src/PostgrestBuilder.ts |
+| postgrest-js `abortSignal(signal: AbortSignal): this` | Zet `this.signal`, dat aan `fetch` wordt meegegeven. Bij `shouldThrowOnError === false` (standaard) vangt de builder elke fetchfout op en resolvet met `status: 0`, `data: null` en een `error` met lege `code`; voor een `AbortError` zet hij alleen een andere hint. Door `AbortSignal.timeout` rejectet `fetch` met de reden van het signaal (een `TimeoutError`); ook dat is een fetchfout, dus `status: 0` en `network` (A6, E47). | https://raw.githubusercontent.com/supabase/supabase-js/master/packages/core/postgrest-js/src/PostgrestTransformBuilder.ts, https://raw.githubusercontent.com/supabase/supabase-js/master/packages/core/postgrest-js/src/PostgrestBuilder.ts (gecontroleerd 15-10-2026) |
+| `AbortSignal.timeout(ms)` | Statische methode, abort met een `TimeoutError` als reden; "Baseline 2024" (breed beschikbaar sinds april 2024), dus oudere browsers missen hem: daarom de `typeof`-controle (E48) | https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static |
+| Tikkie-linkvorm | Een echt betaalverzoek heeft de vorm `https://tikkie.me/pay/<code>`; het enige echte domein is `tikkie.me` (A14) | https://tikkie.me/vraag-en-antwoord/nl, https://www.seniorweb.nl/artikel/hoe-zie-je-of-een-tikkie-betaalverzoek-veilig-is |
+| Unicode FSI/PDI (U+2068/U+2069) | Bidi-isolatie in platte tekst, voor `<option>` (A11) | https://www.w3.org/International/questions/qa-bidi-unicode-controls |
 | PostgREST `PTxyz` | `code: "PT400"`, HTTP 400, `message` = de code uit WP-19 | https://docs.postgrest.org/en/v14/references/errors.html (via WP-19) |
 | `JSON.stringify` laat `undefined` weg | Daarom `?? null` voor elke parameter. Zonder de sleutel vindt PostgREST de functie niet (`PGRST202`). | https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/JSON/stringify |
 | Svelte 5.25+: een `let … = $derived(…)` mag je tijdelijk overschrijven | A8 (`session`, `rsvps`, `gone`) | https://svelte.dev/docs/svelte/$derived ("Overriding derived values"; "Prior to Svelte 5.25, deriveds were read-only") |
@@ -976,9 +1086,15 @@ Geen Open-Meteo, geen nieuwe origin, geen CDN, geen analytics, geen nieuwe diens
   - Lars kan een RSVP verwijderen via RUNBOOK §16.5 en §16.8;
   - een moderatie-RPC voor de organisator hoort bij WP-22.
 - **R2. De token in `localStorage` is leesbaar voor elk script op de origin (XSS).** De gevolgen zijn beperkt tot het wijzigen of afmelden van die ene RSVP. Mitigatie: nergens `{@html}` (test), geen scripts van derden (bestaande trackerscan), en een CSP met `script-src 'self'` in WP-23.
-- **R3. Mergeconflicten met WP-20.** Beide WP's raken mogelijk `user-tables.test.ts` (de `.rpc(`-allowlist) en `app.css` (elk een eigen blok aan het eind). Daarom staan de types in `rsvp-types.ts` en de nep-RPC in `fake-rpc.ts`, en niet in `types.ts` en `fake-supabase.ts`. Wie als tweede merget, voegt de lijsten samen; dat is mechanisch werk.
+- **R3. Overlap met WP-20 (bijgewerkt na review B-1).** Na de hernoemingen maakt WP-21 geen bestand aan dat WP-20 ook aanmaakt, dus geen add/add-conflicten. De echte overlap:
+  - `web/test/user-tables.test.ts`: WP-20 wijzigt de tests voor tabellen en schrijfacties (`sessions` erbij); WP-21 vervangt alleen de test `no file uses .rpc(` door de allowlist-test. Een tekstueel conflict is mogelijk als de hunks aangrenzen. Oplossing in stap 9: de WP-20-versie van het bestand nemen en daarin alleen `it('no file uses .rpc(', …)` vervangen door de WP-21-test plus de constante `RPC_FILES`;
+  - `docs/RUNBOOK.md`: WP-20 wijzigt §11 (punt 7 en nieuw punt 10), WP-21 voegt §16 punt 8 en 9 toe. Andere secties; een conflict is onwaarschijnlijk, en anders beide behouden;
+  - `app.css` wijzigt alleen WP-21 (WP-20 gebruikt `<style>`-blokken); `time.ts` en `fake-supabase.ts` wijzigt alleen WP-20.
+
+  De volgorde ligt vast: WP-20 merget eerst, WP-21 rebaset daarna (stap 9). Faalt een test van WP-20 na de rebase door WP-21-code, dan past de builder alleen WP-21-bestanden aan; WP-20-bestanden blijven ongemoeid (behalve de genoemde conflictoplossing in `user-tables.test.ts`).
+- **R10. Een WP-20-helper wijkt toch af van de blueprint.** Stap 9 vervangt een eigen helper alleen als het WP-20-gedrag gelijk is (de bestaande WP-21-tests blijven ongewijzigd groen). Anders blijft de eigen helper staan, noteert de builder het in `deviations.md`, en geldt het opruimpunt uit "Gevolgen voor latere WP's".
 - **R4. `<svelte:head>` in jsdom.** Verwacht wordt dat Svelte 5 de `meta` in `document.head` zet. Lukt dat in vitest niet, dan blijft het bewijs voor AC-5 de bronregel in `session-no-auth.test.ts`. De builder noteert dat in `deviations.md`, en de verifier controleert de `meta` in de gebouwde app met `npm run preview` en de devtools.
-- **R5. Een dubbele RSVP na een verloren antwoord** (E25). Dit komt zelden voor. Zonder een idempotentiesleutel in de RPC (een wijziging in WP-19) is het niet op te lossen. Het geeft hooguit één extra naam in de lijst.
+- **R5. Een dubbele RSVP na een verloren antwoord** (E25, en na de timeout van 15 seconden, E47). Dit komt zelden voor. Zonder een idempotentiesleutel in de RPC (een wijziging in WP-19) is het niet op te lossen. Het geeft hooguit één extra naam in de lijst.
 - **R6. Spam en vol zetten** (WP-19 R1, review N-7). De UI geeft duidelijke meldingen (`rate_limited` met "over een paar minuten", `session_full`). Echte moderatie hoort bij WP-22.
 - **R7. `noindex` alleen via JavaScript** (A18). Crawlers zonder JavaScript zien de lege shell zonder sessiedata. Er lekt dus niets, maar de URL kan wel in een index komen als iemand hem publiek deelt. `X-Robots-Tag` volgt in WP-23.
 - **R8. De bewaartermijn van 7 dagen is nog niet bevestigd door Lars** (WP-19 A1). De tekst in de UI en de pagina "Sessie niet gevonden" volgen `SESSION_RETENTION_DAYS`. Verandert de migratie, dan faalt `rsvp-contract.test.ts` en moet de constante mee.
@@ -995,18 +1111,20 @@ Geen Open-Meteo, geen nieuwe origin, geen CDN, geen analytics, geen nieuwe diens
 ## Stappenplan voor de builder
 Werk in de worktree `/Users/larst/Dev/Shakka/.claude/worktrees/WP-21` op branch `wp/WP-21`, met Node 24. Lees of print `.env` en `web/.env` nooit. Na elke stap draai je vanuit `web/` `npm run check && npm test`, plus de extra's die bij de stap staan. Eén commit per stap, in het Engels (bijv. `WP-21: add session view logic`).
 
+Maak geen bestand aan met de naam `web/src/lib/session-page-data.ts`, `web/test/session-page-data.test.ts` of `web/test/fixtures/session-data.ts`: die zijn van WP-20 (B-1).
+
 1. **Types en pure logica (tests eerst).**
-   - Schrijf `test/fixtures/session-data.ts`, `test/session-view.test.ts` en `test/rsvp-contract.test.ts`, zonder het deel van contracttest (1) dat `rsvp.ts` nodig heeft (de verzonden sleutels). Dat deel komt in stap 3. Rood.
+   - Schrijf `test/fixtures/public-session.ts`, `test/session-view.test.ts` en `test/rsvp-contract.test.ts` (inclusief driftcheck (0)), zonder het deel van contracttest (1) dat `rsvp.ts` nodig heeft (de verzonden sleutels). Dat deel komt in stap 3. Rood.
    - Maak `src/lib/rsvp-types.ts` en `src/lib/session-view.ts`. Groen.
 2. **Opslag (tests eerst).** Schrijf `test/rsvp-storage.test.ts`. Rood. Maak `src/lib/rsvp-storage.ts`. Groen.
 3. **RPC-module (tests eerst).**
    - Schrijf `test/helpers/fake-rpc.ts` en `test/rsvp.test.ts`, en vul `rsvp-contract.test.ts` aan met de check van de verzonden sleutels. Pas `test/user-tables.test.ts` aan (de allowlist). Rood.
    - Maak `src/lib/rsvp.ts`. Groen.
    - Controleer met `grep -rn "\.rpc(" web/src` dat alleen `lib/rsvp.ts` voorkomt.
-4. **Paginadata en route (tests eerst).** Schrijf `test/session-page-data.test.ts`. Rood. Maak `src/lib/session-page-data.ts` en `src/routes/s/[slug]/+page.ts`. Groen.
+4. **Paginadata en route (tests eerst).** Schrijf `test/public-session-data.test.ts`. Rood. Maak `src/lib/public-session-data.ts` en `src/routes/s/[slug]/+page.ts`. Groen.
 5. **Componenten en pagina.**
    - Maak `SessionParticipants.svelte`, `RsvpForm.svelte`, `RsvpPanel.svelte` en `src/routes/s/[slug]/+page.svelte`, en voeg het CSS-blok toe aan `app.css`.
-   - Schrijf `test/session-page.test.ts`, `test/session-page-integration.test.ts`, `test/rsvp-flow.test.ts` en `test/session-no-auth.test.ts`.
+   - Schrijf `test/public-session-page.test.ts`, `test/public-session-page-integration.test.ts`, `test/rsvp-flow.test.ts` en `test/session-no-auth.test.ts`.
    - Groen, plus `npm run build` en `npm run verify:build`.
    - Lukt de `noindex`-check in `document.head` niet: R4.
 6. **Documentatie.** Werk RUNBOOK §16 bij (punt 8 en 9).
@@ -1026,9 +1144,38 @@ Werk in de worktree `/Users/larst/Dev/Shakka/.claude/worktrees/WP-21` op branch 
    - `grep -rn "\.rpc(" web/src` geeft alleen `web/src/lib/rsvp.ts`;
    - `grep -rn "{@html" web/src` geeft niets;
    - `cd ingest && uv run pytest`;
-   - `git status`: geen `web/.env`, `web/build` of `node_modules` gestaged; `git diff --stat develop` raakt alleen bestanden uit de tabel "Bestanden".
+   - `git status`: geen `web/.env`, `web/build` of `node_modules` gestaged; `git diff --stat $(git merge-base origin/develop HEAD)` raakt alleen bestanden uit de tabel "Bestanden", en geen van de drie WP-20-namen hierboven.
+9. **Integratie met WP-20 (A20; pas na de merge van WP-20 in `develop`).**
+   - Controleer met `git fetch origin && git ls-tree origin/develop web/src/lib/session-model.ts web/src/lib/local-prefs.ts` dat WP-20 gemerged is. Zo niet: noteer in `deviations.md` "stap 9 open: wacht op merge WP-20" en stop hier; de orchestrator laat deze stap uitvoeren zodra WP-20 gemerged is. De WP-21-PR merget niet vóór stap 9.
+   - `git rebase origin/develop`. Bij een conflict in `web/test/user-tables.test.ts`: neem de WP-20-versie en vervang daarin alleen `it('no file uses .rpc(', …)` door de allowlist-test met `RPC_FILES` (R3). Bij een conflict in `docs/RUNBOOK.md`: behoud beide toevoegingen. Wijzig geen andere WP-20-bestanden.
+   - Draai `npm run check && npm test` vóór de vervangingen hieronder: alles groen (ook de WP-20-tests).
+   - Lees in de gemergde code `session-model.ts`, `time.ts` (`formatWindowLocal`) en `local-prefs.ts`, en vervang alleen waar het gedrag gelijk is aan wat "Consistentie met afhankelijke WP's", WP-20, beschrijft:
+     - `session-view.ts`: verwijder de eigen regex, `isValidSessionSlug`-body en `countCodePoints`; voeg toe `import { SESSION_SLUG_PATTERN, codePointLength, isSessionSlug } from './session-model.js';` en `import { formatWindowLocal } from './time.js';`, met `export const SESSION_SLUG_RE = SESSION_SLUG_PATTERN;`, `export function isValidSessionSlug(slug: string): boolean { return isSessionSlug(slug); }`, en in `parseRsvpForm` `codePointLength` in plaats van `countCodePoints`. De body van `sessionWindowText` wordt `return formatWindowLocal(new Date(startsAt), new Date(endsAt));`. Ongebruikte imports (`formatLocal`, `localDateKey`) gaan weg;
+     - `rsvp-storage.ts`: verwijder de eigen `StorageLike` en `browserStorage`; voeg toe `import { browserStorage, type KeyValueStorage } from './local-prefs.js';`, `export { browserStorage };` en `export type StorageLike = KeyValueStorage;`. De rest van het bestand blijft gelijk.
+   - Criterium voor "gelijk": de bestaande tests in `session-view.test.ts`, `rsvp-storage.test.ts`, `rsvp-contract.test.ts` en `rsvp-flow.test.ts` blijven **zonder wijziging** groen. Faalt er een door een vervanging, draai die ene vervanging terug, laat de eigen helper staan en noteer het in `deviations.md` (R10, opruimpunt).
+   - Controleer dat er geen importcyclus is (`npm run check`) en dat `grep -rn "countCodePoints" web/src web/test` niets geeft (als die vervanging is gedaan).
+   - Eindcontrole uit stap 8 opnieuw. Commit: `WP-21: reuse WP-20 session helpers after rebase`.
 
 **Nodig van Lars (AC-7):**
 - `supabase db push` van WP-19 is gedaan (RUNBOOK §16.2), en Cloudflare Pages draait (WP-13/WP-14);
 - een testsessie volgens RUNBOOK §16.9 (of via WP-20 als dat al gemerged is). Open de link in WhatsApp op een telefoon zonder in te loggen, en meld je aan, wijzig en meld je af;
 - een reactie op de voorstellen A13 (privacyregel met 7 dagen) en A10 (0 t/m 8 plekken, met "Geen (auto zit vol)").
+
+## Verwerking review
+Review ronde 1 (`docs/wp/WP-21/review.md`, CHANGES_REQUIRED), met de beslissingen van de orchestrator.
+
+| Punt | Verwerking |
+|---|---|
+| **B-1** (blokkerend): drie bestanden botsen met WP-20 | Overgenomen. Hernoemd: `web/src/lib/session-page-data.ts` → `web/src/lib/public-session-data.ts` (`SessionPageData` → `PublicSessionPageData`, `loadSessionPage` → `loadPublicSessionPage`), `web/test/session-page-data.test.ts` → `web/test/public-session-data.test.ts`, `web/test/fixtures/session-data.ts` → `web/test/fixtures/public-session.ts` (`sessionPageData()` → `publicSessionPageData()`). Voor de duidelijkheid ook `session-page.test.ts` → `public-session-page.test.ts` en `session-page-integration.test.ts` → `public-session-page-integration.test.ts` (botsten niet, maar stonden naast WP-20's `session-page-data.test.ts`). Alle verwijzingen aangepast: lagenschets, `+page.ts`, tabel "Bestanden", Testplan, `session-no-auth.test.ts`, "Gevolgen" (WP-23-axe) en het stappenplan. De WP-20-blueprint is nagelopen op `session-*`-namen, `time.ts`-helpers en `fake-supabase.ts`: WP-21 maakt geen WP-20-bestand aan en wijzigt `time.ts` en `fake-supabase.ts` niet. De alinea onder "Bestanden" en "Consistentie" (WP-20) beschrijven de echte overlap; R3 is herschreven (`user-tables.test.ts` en `RUNBOOK.md`; `app.css` raakt alleen WP-21, want WP-20 gebruikt `<style>`-blokken). Volgorde: WP-20 merget eerst, WP-21 rebaset en hergebruikt identieke helpers (A20, stap 9, R10). De builder-instructie verbiedt de drie WP-20-namen expliciet, en de eindcontrole controleert dat. |
+| N-1: "gesloten" volgt `session_closed` en `ends_at` niet | Overgenomen. `now` is een overschrijfbare `$derived`; `applyRefresh` zet `now = new Date()`, en een klok-`$effect` zet `now` 1 seconde na `ends_at` (A5, E46). `RsvpPanel` heeft `serverClosed`, gezet bij `session_closed` van `rsvp_create` en `rsvp_update`; `isClosed = closed \|\| serverClosed` verbergt formulier en Wijzigen (E15). Tests: `public-session-page.test.ts` (j), `rsvp-flow.test.ts` (18) en (19). |
+| N-2: vaste "7 dagen" op "Sessie niet gevonden" | Overgenomen: `{SESSION_RETENTION_DAYS}` in de markup, getest in `public-session-page.test.ts` (d). |
+| N-3: tekst `session_full` klopt niet met de telling | Overgenomen: "Deze sessie zit vol: naast de organisator kunnen hoogstens 30 mensen zich aanmelden." Test: de tekst bevat `String(MAX_RSVPS)` en `organisator`. |
+| N-4: contracttest leest alleen één migratie | Overgenomen (variant 2 uit de review, zoals `session-schema.test.ts` van WP-20): driftcheck (0) faalt zodra een latere migratie een van de vijf functienamen noemt of `public.rsvps` wijzigt, met de melding om `rsvp-types.ts` en de test bij te werken. (2) begint het RSVP-stuk expliciet ná de letterlijke `'rsvps',`. (5) kijkt nu alleen naar de blokken van `rsvp_create`, `rsvp_update` en `rsvp_delete`. |
+| N-5: geen standaardantwoord voor `getPublicSession` in `rsvp-flow.test.ts` | Overgenomen: `mockResolvedValue({ session: SESSION_INFO, rsvps: [4 fixtures] })` in `beforeEach`, overschrijven met `mockResolvedValueOnce`. |
+| N-6: Tikkie-host | Beslissing orchestrator: alleen `https://tikkie.me/...`. `safeHttpsLink` is vervangen door `tikkieLink` (prefix `https://tikkie.me/`, minstens één teken erna, `hostname === 'tikkie.me'`), A14, E38, tests in `session-view.test.ts` en `public-session-page.test.ts` (h). De tekst "(link naar tikkie.me)" blijft. Dezelfde regel komt via de orchestrator in WP-20 (genoteerd bij "Consistentie" en "Gevolgen"). |
+| N-7: `<option>` kan geen `<bdi>` bevatten | Overgenomen: optietekst via `isolateText` (FSI/PDI, A11, E49). De flowtest kiest de optie op waarde. |
+| N-8: RPC zonder timeout | Overgenomen: `.abortSignal(AbortSignal.timeout(RPC_TIMEOUT_MS))` met `RPC_TIMEOUT_MS = 15_000`, alleen als `AbortSignal.timeout` bestaat (A6, E47, E48). Geverifieerd in postgrest-js: `abortSignal` zet het signaal op de fetch, en een rejectende fetch resolvet met `status: 0`. `fake-rpc.ts` geeft nu een thenable builder met `abortSignal` die het signaal vastlegt; `argCount` blijft 2. R5 noemt de timeout als extra bron van een dubbele RSVP. |
+| N-9: dubbele logica naast WP-20 | Overgenomen via A20, A21 en stap 9. De vensternotatie van WP-21 is nu exact die van `formatWindowLocal` (WP-20/WP-08), zodat de helper na de rebase vervangen kan worden. Ook `browserStorage` geeft nu `null` zoals in WP-20. Stap 9 vervangt slugregex, `countCodePoints`, `sessionWindowText`-body en `browserStorage` door de WP-20-helpers als het gedrag gelijk is; anders volgt het opruimpunt in "Gevolgen" (R10). |
+| N-10: opslagranden | (a) Geaccepteerd en gedocumenteerd bij A7 (en verwezen vanuit A15). (b) Overgenomen: `rsvp-storage.ts` heeft een geheugenfallback per slug, gevuld als schrijven mislukt. Daardoor overleeft `stored` een `refreshAll()` bij hervatten en blijft de tekst "zolang deze pagina open is" kloppen (E26). Tests in `rsvp-storage.test.ts` en `rsvp-flow.test.ts` (13). |
+| N-11: AC-2 en de interne `auth.getSession()` van supabase-js | Overgenomen als notitie bij AC-2 in "Per acceptatiecriterium", voor de verifier. |
+| N-12: `aria-labelledby` naar een kop die er niet is | Overgenomen: `aria-labelledby` alleen als er een kop is (`stored \|\| !isClosed`). Test: `rsvp-flow.test.ts` (15). |
