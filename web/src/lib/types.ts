@@ -291,3 +291,17 @@ export const MARINE_HOUR_COLUMNS = [
 	'wave_dir_deg',
 	'fetched_at'
 ] as const;
+
+/** Columns of push_subscriptions the PWA reads (own rows only, RLS). */
+export const PUSH_SUBSCRIPTION_COLUMNS = ['id', 'endpoint', 'created_at'] as const;
+export interface OwnPushSubscription {
+	id: string;
+	endpoint: string;
+	created_at: string;
+}
+/** Exactly the columns the PWA inserts; user_id comes from the column default auth.uid() (WP-17). */
+export interface PushSubscriptionKeys {
+	endpoint: string;
+	p256dh: string;
+	auth: string;
+}

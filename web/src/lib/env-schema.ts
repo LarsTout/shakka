@@ -43,3 +43,43 @@ export function parseMaptilerKey(value: string | undefined): string {
 	}
 	return key;
 }
+
+/** Decodes base64url (with or without '=' padding) to bytes.
+ *  Throws Error('invalid base64url') for other characters or a length that is 1 mod 4. */
+export function base64UrlToBytes(value: string): Uint8Array<ArrayBuffer> {
+	if (!/^[A-Za-z0-9_-]*={0,2}$/.test(value)) throw new Error('invalid base64url');
+	const bare = value.replace(/=+$/, '');
+	if (bare.length % 4 === 1) throw new Error('invalid base64url');
+	const std = bare.replace(/-/g, '+').replace(/_/g, '/');
+	const padded = std + '='.repeat((4 - (std.length % 4)) % 4);
+	const bin = atob(padded);
+	const out = new Uint8Array(bin.length);
+	for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+	return out;
+}
+
+/** Validates PUBLIC_VAPID_PUBLIC_KEY. Missing or blank -> '' (push disabled in this build).
+ *  Returns the key without '=' padding. Never echoes the value. */
+export function parseVapidPublicKey(value: string | undefined): string {
+	const raw = value?.trim() ?? '';
+	if (!raw) return '';
+	const key = raw.replace(/=+$/, '');
+	let bytes: Uint8Array;
+	try {
+		if (/[^A-Za-z0-9_-]/.test(key)) throw new Error('invalid base64url');
+		bytes = base64UrlToBytes(key);
+	} catch {
+		throw new Error(
+			'PUBLIC_VAPID_PUBLIC_KEY must be base64url: use VAPID_PUBLIC_KEY from shakka alerts vapid-keys'
+		);
+	}
+	if (bytes.length === 32) {
+		throw new Error(
+			'PUBLIC_VAPID_PUBLIC_KEY looks like a private key: use VAPID_PUBLIC_KEY, never VAPID_PRIVATE_KEY'
+		);
+	}
+	if (bytes.length !== 65 || bytes[0] !== 0x04) {
+		throw new Error('PUBLIC_VAPID_PUBLIC_KEY must be an uncompressed P-256 public key (65 bytes)');
+	}
+	return key;
+}

@@ -66,6 +66,21 @@ describe('+layout.svelte', () => {
 		await userEvent.click(screen.getByRole('button', { name: 'Uitloggen' }));
 		expect(mocks.signOut).toHaveBeenCalled();
 	});
+	it('WP-18: disables the button while signing out, one call only', async () => {
+		store().set({ user: { email: 'lars@example.com' } });
+		let resolve!: () => void;
+		mocks.signOut.mockReturnValueOnce(new Promise<void>((r) => (resolve = r)));
+		render(Layout, { children });
+		const user = userEvent.setup();
+		await user.click(screen.getByRole('button', { name: 'Uitloggen' }));
+		const busy = screen.getByRole('button', { name: 'Uitloggen…' });
+		expect(busy).toBeDisabled();
+		await user.click(busy);
+		expect(mocks.signOut).toHaveBeenCalledTimes(1);
+		resolve();
+		const again = await screen.findByRole('button', { name: 'Uitloggen' });
+		expect(again).toBeEnabled();
+	});
 	it('WP-16: signed in shows the Alerts and Profiel links', () => {
 		store().set({ user: { email: 'lars@example.com' } });
 		render(Layout, { children });

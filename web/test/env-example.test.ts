@@ -8,6 +8,11 @@ describe('.env.example', () => {
 			.split('\n')
 			.map((l) => l.trim())
 			.filter((l) => l && !l.startsWith('#'));
-		expect(lines).toEqual(['PUBLIC_SUPABASE_URL=', 'PUBLIC_SUPABASE_PUBLISHABLE_KEY=', 'PUBLIC_MAPTILER_KEY=']);
+		expect(lines).toEqual([
+			'PUBLIC_SUPABASE_URL=',
+			'PUBLIC_SUPABASE_PUBLISHABLE_KEY=',
+			'PUBLIC_MAPTILER_KEY=',
+			'PUBLIC_VAPID_PUBLIC_KEY='
+		]);
 	});
 });

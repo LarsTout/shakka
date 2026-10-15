@@ -8,6 +8,17 @@
 
 	let { children }: { children: Snippet } = $props();
 	let redirectError = $state<string | null>(null);
+	let signingOut = $state(false);
+
+	async function handleSignOut() {
+		if (signingOut) return;
+		signingOut = true;
+		try {
+			await signOut();
+		} finally {
+			signingOut = false;
+		}
+	}
 
 	onMount(() => {
 		redirectError = initialAuthRedirectError();
@@ -25,7 +36,7 @@
 			<a href="/alerts">Alerts</a>
 			<a href="/profiel">Profiel</a>
 			<span class="who">{$session.user.email}</span>
-			<button type="button" onclick={() => signOut()}>Uitloggen</button>
+			<button type="button" disabled={signingOut} onclick={handleSignOut}>{signingOut ? 'Uitloggen…' : 'Uitloggen'}</button>
 		{:else if $session === null}
 			<a href="/login">Inloggen</a>
 		{/if}

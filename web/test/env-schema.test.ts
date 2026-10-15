@@ -1,6 +1,15 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { parseMaptilerKey, parsePublishableKey, parseSupabaseUrl } from '../src/lib/env-schema.js';
+import {
+	base64UrlToBytes,
+	parseMaptilerKey,
+	parsePublishableKey,
+	parseSupabaseUrl,
+	parseVapidPublicKey
+} from '../src/lib/env-schema.js';
+
+const TEST_KEY = 'B' + 'A'.repeat(86);
+const OTHER_KEY = 'B' + 'A'.repeat(42) + 'Q' + 'A'.repeat(43);
 
 describe('parseSupabaseUrl', () => {
 	it('normalises to the origin', () => {
@@ -76,5 +85,62 @@ describe('parseMaptilerKey', () => {
 		}
 		expect(message.startsWith('PUBLIC_MAPTILER_KEY')).toBe(true);
 		expect(message).not.toContain(value);
+	});
+});
+
+describe('base64UrlToBytes', () => {
+	it('decodes plain input', () => {
+		expect([...base64UrlToBytes('AQID')]).toEqual([1, 2, 3]);
+	});
+	it.each(['_-8', '-_', TEST_KEY, OTHER_KEY])('matches Buffer for %s', (x) => {
+		expect([...base64UrlToBytes(x)]).toEqual([...Buffer.from(x, 'base64url')]);
+	});
+	it('decodes 65 bytes starting with 4', () => {
+		const b = base64UrlToBytes(OTHER_KEY);
+		expect(b).toHaveLength(65);
+		expect(b[0]).toBe(4);
+	});
+	it('accepts padding', () => {
+		expect([...base64UrlToBytes('AQ==')]).toEqual([...base64UrlToBytes('AQ')]);
+	});
+	it.each(['a', 'a b'])('throws for %j', (x) => {
+		expect(() => base64UrlToBytes(x)).toThrow('invalid base64url');
+	});
+});
+
+describe('parseVapidPublicKey', () => {
+	it.each([undefined, '', '  '])('returns empty for %j', (v) => {
+		expect(parseVapidPublicKey(v)).toBe('');
+	});
+	it.each([TEST_KEY, OTHER_KEY])('accepts a public key', (k) => {
+		expect(parseVapidPublicKey(k)).toBe(k);
+		expect(parseVapidPublicKey(`  ${k}  `)).toBe(k);
+		expect(parseVapidPublicKey(`${k}=`)).toBe(k);
+	});
+	function msg(v: string): string {
+		try {
+			parseVapidPublicKey(v);
+		} catch (e) {
+			return (e as Error).message;
+		}
+		return '';
+	}
+	it('refuses a private-looking key', () => {
+		expect(msg('A'.repeat(43))).toContain('private key');
+		expect(msg('B' + 'A'.repeat(42))).toContain('private key');
+	});
+	it('refuses non base64url', () => {
+		expect(msg('abc!')).toContain('base64url');
+		expect(msg('sb_publishable_test')).not.toBe('');
+	});
+	it('refuses a 65 byte key that is not uncompressed', () => {
+		const bytes = Buffer.alloc(65);
+		bytes[0] = 2;
+		expect(msg(bytes.toString('base64url'))).toContain('uncompressed P-256');
+	});
+	it('never echoes the input', () => {
+		for (const v of ['abc!', 'A'.repeat(43), 'sb_publishable_test', 'Zm9vYmFy']) {
+			expect(msg(v)).not.toContain(v);
+		}
 	});
 });

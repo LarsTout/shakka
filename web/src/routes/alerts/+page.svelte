@@ -1,6 +1,7 @@
 <script lang="ts">
 	import AlertRuleForm from '#lib/components/AlertRuleForm.svelte';
 	import LoginPrompt from '#lib/components/LoginPrompt.svelte';
+	import PushSettings from '#lib/components/PushSettings.svelte';
 	import { session } from '#lib/auth.js';
 	import { ALERT_DEFAULTS } from '#lib/contracts.js';
 	import { ruleSummary, storedRuleStatus } from '#lib/forms.js';
@@ -34,6 +35,10 @@
 <svelte:head><title>Alerts · Shakka</title></svelte:head>
 
 <h1>Alerts</h1>
+
+{#if $session !== undefined}
+	<PushSettings signedIn={$session !== null} />
+{/if}
 
 {#if $session === undefined}
 	<p class="muted">Laden…</p>

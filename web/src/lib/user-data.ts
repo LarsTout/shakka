@@ -3,13 +3,16 @@ import { DataError, fetchAllPages } from './data.js';
 import {
 	ALERT_RULE_COLUMNS,
 	PROFILE_COLUMNS,
+	PUSH_SUBSCRIPTION_COLUMNS,
 	type AlertRuleRow,
 	type AlertRuleValues,
+	type OwnPushSubscription,
 	type Profile,
-	type ProfileUpdate
+	type ProfileUpdate,
+	type PushSubscriptionKeys
 } from './types.js';
 
-// The only module that reads or writes profiles, favorites and alert_rules.
+// The only module that reads or writes profiles, favorites, alert_rules and push_subscriptions.
 
 export async function getProfile(userId: string): Promise<Profile | null> {
 	const { data, error } = await supabase
@@ -112,4 +115,29 @@ export async function resetAlertRule(userId: string, spotId: string): Promise<vo
 		.eq('user_id', userId)
 		.eq('spot_id', spotId);
 	if (error) throw new DataError('resetAlertRule', error.code ?? null);
+}
+
+/** Own push subscriptions, newest first (RLS limits this to the signed-in user). */
+export async function listOwnPushSubscriptions(): Promise<OwnPushSubscription[]> {
+	const { data, error } = await supabase
+		.from('push_subscriptions')
+		.select(PUSH_SUBSCRIPTION_COLUMNS.join(','))
+		.order('created_at', { ascending: false });
+	if (error) throw new DataError('listOwnPushSubscriptions', error.code ?? null);
+	return (data as unknown as OwnPushSubscription[] | null) ?? [];
+}
+
+/** Inserts exactly endpoint, p256dh and auth; user_id comes from the column default (WP-17). */
+export async function addPushSubscription(keys: PushSubscriptionKeys): Promise<'added' | 'exists'> {
+	const { error } = await supabase
+		.from('push_subscriptions')
+		.insert({ endpoint: keys.endpoint, p256dh: keys.p256dh, auth: keys.auth });
+	if (!error) return 'added';
+	if (error.code === '23505') return 'exists';
+	throw new DataError('addPushSubscription', error.code ?? null);
+}
+
+export async function removePushSubscription(id: string): Promise<void> {
+	const { error } = await supabase.from('push_subscriptions').delete().eq('id', id);
+	if (error) throw new DataError('removePushSubscription', error.code ?? null);
 }
