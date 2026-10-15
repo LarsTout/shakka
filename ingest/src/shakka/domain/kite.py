@@ -1,10 +1,13 @@
 """Kite size advice from rider weight, level, quiver and wind. Pure: no I/O, no clock."""
 
 import math
+import statistics
 from collections.abc import Mapping, Sequence
 from enum import StrEnum
 from types import MappingProxyType
-from typing import Final
+from typing import Annotated, Any, Final
+
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
 
 from shakka.domain.spot import Level
 
@@ -79,3 +82,54 @@ def classify_fit(size_m2: float, ideal_m2: float) -> KiteFit:
     if size > ideal * FIT_TOLERANCE:
         return KiteFit.OVERPOWERED
     return KiteFit.IDEAL
+
+
+def _normalize_quiver(value: Any) -> tuple[float, ...]:
+    if not isinstance(value, list | tuple):
+        raise ValueError(f"quiver_m2 must be a list or tuple, got {value!r}")
+    if len(value) > MAX_QUIVER_KITES:
+        raise ValueError(f"quiver_m2 holds at most {MAX_QUIVER_KITES} kites, got {len(value)}")
+    lo, hi = QUIVER_SIZE_RANGE_M2
+    sizes: set[float] = set()
+    for item in value:
+        if not _is_number(item) or not math.isfinite(item):
+            raise ValueError(f"quiver_m2 sizes must be finite numbers, got {item!r}")
+        if not lo <= item <= hi:
+            raise ValueError(f"quiver_m2 sizes must be between {lo} and {hi}, got {item!r}")
+        sizes.add(float(item))
+    return tuple(sorted(sizes))
+
+
+class KiteAdvice(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    size_m2: float  # always one of rider.quiver_m2
+    fit: KiteFit
+    ideal_size_m2: float  # rounded half-up to 0.1
+
+
+class RiderProfile(BaseModel):
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    weight_kg: Annotated[int, Field(strict=True, ge=30, le=200)]
+    level: Level
+    quiver_m2: Annotated[tuple[float, ...], BeforeValidator(_normalize_quiver)] = ()
+
+
+def recommend_kite(rider: RiderProfile, wind_kn: float) -> KiteAdvice | None:
+    """Advice for one hour, or None when the quiver is empty."""
+    wind = _check_wind(wind_kn)
+    if not rider.quiver_m2:
+        return None
+    ideal = ideal_kite_size(rider.weight_kg, rider.level, wind)
+    size = pick_from_quiver(rider.quiver_m2, ideal)
+    assert size is not None
+    return KiteAdvice(size_m2=size, fit=classify_fit(size, ideal), ideal_size_m2=ideal)
+
+
+def recommend_for_window(rider: RiderProfile, wind_kn_values: Sequence[float]) -> KiteAdvice | None:
+    """Advice for a window: recommend_kite on the upper median of the hourly winds."""
+    values = [_check_wind(v) for v in wind_kn_values]
+    if not values:
+        return None
+    return recommend_kite(rider, statistics.median_high(values))
