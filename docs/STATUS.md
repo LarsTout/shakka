@@ -29,7 +29,7 @@ Opdeling: goedgekeurd.
 | WP-20 | Sessie aanmaken en delen | done | AC-6 open: telefoontest (push → ik ga → WhatsApp) door Lars |
 | WP-21 | Publieke sessiepagina en RSVP zonder account | done | AC-7 open: RSVP-test op telefoon zonder account + noindex in preview (RUNBOOK §16.9) |
 | WP-22 | Hardening backend en kostenbewaking | todo | |
-| WP-23 | Privacy, toegankelijkheid en performance | building | |
+| WP-23 | Privacy, toegankelijkheid en performance | verifying | |
 | WP-24 | E-mail als tweede meldingskanaal | todo | M5; scopewijziging, akkoord Lars nodig; niet parallel met WP-30 |
 | WP-25 | Moderatie voor organisatoren | todo | M5 |
 | WP-26 | Forecast-horizon 8 dagen (`days_ahead` 7 werkt) | todo | M5 |
