@@ -1,5 +1,5 @@
 # Blueprint WP-19: Sessies: datamodel, RLS en RPC's
-Status: DRAFT
+Status: APPROVED
 Revisie: 1
 
 ## Doel
