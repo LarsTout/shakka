@@ -22,6 +22,8 @@
 	<nav aria-label="Hoofdmenu">
 		<a href="/over">Over</a>
 		{#if $session}
+			<a href="/alerts">Alerts</a>
+			<a href="/profiel">Profiel</a>
 			<span class="who">{$session.user.email}</span>
 			<button type="button" onclick={() => signOut()}>Uitloggen</button>
 		{:else if $session === null}

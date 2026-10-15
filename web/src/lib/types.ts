@@ -161,3 +161,114 @@ export const SUMMARY_COLUMNS = [
 	'reasons',
 	'evaluated_at'
 ] as const;
+
+export const LEVELS: readonly SpotLevel[] = ['beginner', 'intermediate', 'advanced'];
+
+/** Row of public.profiles (the columns the app uses; an unused legacy column is never selected). */
+export interface Profile {
+	user_id: string;
+	weight_kg: number | null;
+	level: SpotLevel | null;
+	quiver_m2: number[];
+	default_min_kn: number | null;
+	default_max_kn: number | null;
+	created_at: string;
+	updated_at: string;
+}
+export const PROFILE_COLUMNS = [
+	'user_id',
+	'weight_kg',
+	'level',
+	'quiver_m2',
+	'default_min_kn',
+	'default_max_kn',
+	'created_at',
+	'updated_at'
+] as const;
+/** The only profile columns `authenticated` may update (column grant, WP-01). */
+export const PROFILE_EDITABLE_COLUMNS = [
+	'weight_kg',
+	'level',
+	'quiver_m2',
+	'default_min_kn',
+	'default_max_kn'
+] as const;
+export type ProfileEditableColumn = (typeof PROFILE_EDITABLE_COLUMNS)[number];
+export type ProfileUpdate = Pick<Profile, ProfileEditableColumn>;
+
+export const FAVORITE_COLUMNS = ['user_id', 'spot_id', 'created_at'] as const;
+
+/** Settable columns of alert_rules, in WP-07 RULE_FIELDS order. */
+export const RULE_FIELDS = [
+	'enabled',
+	'min_kn',
+	'max_kn',
+	'dir_classes',
+	'weekdays',
+	'earliest_local',
+	'latest_local',
+	'min_go_hours',
+	'days_ahead'
+] as const;
+export type RuleField = (typeof RULE_FIELDS)[number];
+/** Priority order, highest first (WP-07 RuleSource). */
+export const RULE_SOURCES = ['rule', 'profile', 'spot', 'system'] as const;
+export type RuleSource = (typeof RULE_SOURCES)[number];
+
+/** Row of public.alert_rules. Times as PostgREST returns them ('17:00:00'). */
+export interface AlertRuleRow {
+	user_id: string;
+	spot_id: string;
+	enabled: boolean;
+	min_kn: number | null;
+	max_kn: number | null;
+	dir_classes: DirClass[] | null;
+	weekdays: number[] | null;
+	earliest_local: string | null;
+	latest_local: string | null;
+	min_go_hours: number | null;
+	days_ahead: number | null;
+	updated_at: string;
+}
+export const ALERT_RULE_COLUMNS = [
+	'user_id',
+	'spot_id',
+	'enabled',
+	'min_kn',
+	'max_kn',
+	'dir_classes',
+	'weekdays',
+	'earliest_local',
+	'latest_local',
+	'min_go_hours',
+	'days_ahead',
+	'updated_at'
+] as const;
+export type AlertRuleValues = Pick<AlertRuleRow, RuleField>;
+
+/** One item of data/contracts/alert_defaults.json (WP-07). A = element type of `allowed`. */
+export interface AlertDefaultItem<T, A extends string | number = string | number> {
+	field: RuleField;
+	label_nl: string;
+	default: T;
+	sources: RuleSource[];
+	min: number | null;
+	max: number | null;
+	allowed: A[] | null;
+	min_span_kn: number | null;
+}
+/** An item whose `allowed` list is guaranteed by parseAlertDefaults. */
+export type AlertDefaultChoiceItem<T, A extends string | number> = AlertDefaultItem<T, A> & {
+	allowed: A[];
+};
+export interface AlertDefaults {
+	enabled: AlertDefaultItem<boolean>;
+	min_kn: AlertDefaultItem<number>;
+	max_kn: AlertDefaultItem<number>;
+	dir_classes: AlertDefaultChoiceItem<DirClass[], DirClass>;
+	weekdays: AlertDefaultChoiceItem<number[], number>;
+	earliest_local: AlertDefaultItem<null>;
+	latest_local: AlertDefaultItem<null>;
+	min_go_hours: AlertDefaultItem<number>;
+	days_ahead: AlertDefaultItem<number>;
+}

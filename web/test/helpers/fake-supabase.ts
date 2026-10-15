@@ -20,7 +20,22 @@ export function createFakeSupabase() {
 		const call: Call = { table, ops: [] };
 		calls.push(call);
 		const builder: Builder = {};
-		for (const name of ['select', 'eq', 'gte', 'lt', 'not', 'order', 'range', 'maybeSingle']) {
+		for (const name of [
+			'select',
+			'eq',
+			'gte',
+			'lt',
+			'not',
+			'order',
+			'range',
+			'maybeSingle',
+			'single',
+			'insert',
+			'update',
+			'upsert',
+			'delete',
+			'in'
+		]) {
 			builder[name] = (...args: unknown[]) => {
 				call.ops.push([name, ...args]);
 				return builder;
@@ -48,4 +63,11 @@ export function createFakeSupabase() {
 			queues.clear();
 		}
 	};
+}
+
+const WRITE_OPS = ['insert', 'update', 'upsert', 'delete'];
+
+/** Calls that contain a write operation (insert, update, upsert or delete). */
+export function writeCalls(calls: Call[]): Call[] {
+	return calls.filter((c) => c.ops.some(([name]) => WRITE_OPS.includes(name)));
 }

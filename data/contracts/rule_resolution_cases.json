@@ -1,0 +1,846 @@
+[
+  {
+    "name": "system_defaults",
+    "spot": {
+      "default_min_kn": null
+    },
+    "profile": null,
+    "override": null,
+    "expected": {
+      "enabled": true,
+      "min_kn": 12,
+      "max_kn": 30,
+      "dir_classes": [
+        "onshore",
+        "side_onshore",
+        "sideshore"
+      ],
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "earliest_local": null,
+      "latest_local": null,
+      "min_go_hours": 2,
+      "days_ahead": 3,
+      "sources": {
+        "enabled": "system",
+        "min_kn": "system",
+        "max_kn": "system",
+        "dir_classes": "system",
+        "weekdays": "system",
+        "earliest_local": "system",
+        "latest_local": "system",
+        "min_go_hours": "system",
+        "days_ahead": "system"
+      }
+    }
+  },
+  {
+    "name": "spot_min_only",
+    "spot": {
+      "default_min_kn": 16
+    },
+    "profile": null,
+    "override": null,
+    "expected": {
+      "enabled": true,
+      "min_kn": 16,
+      "max_kn": 30,
+      "dir_classes": [
+        "onshore",
+        "side_onshore",
+        "sideshore"
+      ],
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "earliest_local": null,
+      "latest_local": null,
+      "min_go_hours": 2,
+      "days_ahead": 3,
+      "sources": {
+        "enabled": "system",
+        "min_kn": "spot",
+        "max_kn": "system",
+        "dir_classes": "system",
+        "weekdays": "system",
+        "earliest_local": "system",
+        "latest_local": "system",
+        "min_go_hours": "system",
+        "days_ahead": "system"
+      }
+    }
+  },
+  {
+    "name": "spot_min_derives_max",
+    "spot": {
+      "default_min_kn": 28
+    },
+    "profile": null,
+    "override": null,
+    "expected": {
+      "enabled": true,
+      "min_kn": 28,
+      "max_kn": 33,
+      "dir_classes": [
+        "onshore",
+        "side_onshore",
+        "sideshore"
+      ],
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "earliest_local": null,
+      "latest_local": null,
+      "min_go_hours": 2,
+      "days_ahead": 3,
+      "sources": {
+        "enabled": "system",
+        "min_kn": "spot",
+        "max_kn": "system",
+        "dir_classes": "system",
+        "weekdays": "system",
+        "earliest_local": "system",
+        "latest_local": "system",
+        "min_go_hours": "system",
+        "days_ahead": "system"
+      }
+    }
+  },
+  {
+    "name": "profile_beats_spot",
+    "spot": {
+      "default_min_kn": 16
+    },
+    "profile": {
+      "default_min_kn": 14,
+      "default_max_kn": 26
+    },
+    "override": null,
+    "expected": {
+      "enabled": true,
+      "min_kn": 14,
+      "max_kn": 26,
+      "dir_classes": [
+        "onshore",
+        "side_onshore",
+        "sideshore"
+      ],
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "earliest_local": null,
+      "latest_local": null,
+      "min_go_hours": 2,
+      "days_ahead": 3,
+      "sources": {
+        "enabled": "system",
+        "min_kn": "profile",
+        "max_kn": "profile",
+        "dir_classes": "system",
+        "weekdays": "system",
+        "earliest_local": "system",
+        "latest_local": "system",
+        "min_go_hours": "system",
+        "days_ahead": "system"
+      }
+    }
+  },
+  {
+    "name": "profile_min_derives_max",
+    "spot": {
+      "default_min_kn": 16
+    },
+    "profile": {
+      "default_min_kn": 27,
+      "default_max_kn": null
+    },
+    "override": null,
+    "expected": {
+      "enabled": true,
+      "min_kn": 27,
+      "max_kn": 32,
+      "dir_classes": [
+        "onshore",
+        "side_onshore",
+        "sideshore"
+      ],
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "earliest_local": null,
+      "latest_local": null,
+      "min_go_hours": 2,
+      "days_ahead": 3,
+      "sources": {
+        "enabled": "system",
+        "min_kn": "profile",
+        "max_kn": "system",
+        "dir_classes": "system",
+        "weekdays": "system",
+        "earliest_local": "system",
+        "latest_local": "system",
+        "min_go_hours": "system",
+        "days_ahead": "system"
+      }
+    }
+  },
+  {
+    "name": "empty_profile_falls_through",
+    "spot": {
+      "default_min_kn": 16
+    },
+    "profile": {
+      "default_min_kn": null,
+      "default_max_kn": null
+    },
+    "override": null,
+    "expected": {
+      "enabled": true,
+      "min_kn": 16,
+      "max_kn": 30,
+      "dir_classes": [
+        "onshore",
+        "side_onshore",
+        "sideshore"
+      ],
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "earliest_local": null,
+      "latest_local": null,
+      "min_go_hours": 2,
+      "days_ahead": 3,
+      "sources": {
+        "enabled": "system",
+        "min_kn": "spot",
+        "max_kn": "system",
+        "dir_classes": "system",
+        "weekdays": "system",
+        "earliest_local": "system",
+        "latest_local": "system",
+        "min_go_hours": "system",
+        "days_ahead": "system"
+      }
+    }
+  },
+  {
+    "name": "rule_all_fields",
+    "spot": {
+      "default_min_kn": 16
+    },
+    "profile": {
+      "default_min_kn": 14,
+      "default_max_kn": 26
+    },
+    "override": {
+      "enabled": false,
+      "min_kn": 18,
+      "max_kn": 24,
+      "dir_classes": [
+        "sideshore"
+      ],
+      "weekdays": [
+        6,
+        7
+      ],
+      "earliest_local": "17:00:00",
+      "latest_local": "21:00:00",
+      "min_go_hours": 3,
+      "days_ahead": 5
+    },
+    "expected": {
+      "enabled": false,
+      "min_kn": 18,
+      "max_kn": 24,
+      "dir_classes": [
+        "sideshore"
+      ],
+      "weekdays": [
+        6,
+        7
+      ],
+      "earliest_local": "17:00",
+      "latest_local": "21:00",
+      "min_go_hours": 3,
+      "days_ahead": 5,
+      "sources": {
+        "enabled": "rule",
+        "min_kn": "rule",
+        "max_kn": "rule",
+        "dir_classes": "rule",
+        "weekdays": "rule",
+        "earliest_local": "rule",
+        "latest_local": "rule",
+        "min_go_hours": "rule",
+        "days_ahead": "rule"
+      }
+    }
+  },
+  {
+    "name": "rule_min_with_profile_max",
+    "spot": {
+      "default_min_kn": 16
+    },
+    "profile": {
+      "default_min_kn": 14,
+      "default_max_kn": 26
+    },
+    "override": {
+      "enabled": true,
+      "min_kn": 20,
+      "max_kn": null,
+      "dir_classes": null,
+      "weekdays": null,
+      "earliest_local": null,
+      "latest_local": null,
+      "min_go_hours": null,
+      "days_ahead": null
+    },
+    "expected": {
+      "enabled": true,
+      "min_kn": 20,
+      "max_kn": 26,
+      "dir_classes": [
+        "onshore",
+        "side_onshore",
+        "sideshore"
+      ],
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "earliest_local": null,
+      "latest_local": null,
+      "min_go_hours": 2,
+      "days_ahead": 3,
+      "sources": {
+        "enabled": "rule",
+        "min_kn": "rule",
+        "max_kn": "profile",
+        "dir_classes": "system",
+        "weekdays": "system",
+        "earliest_local": "system",
+        "latest_local": "system",
+        "min_go_hours": "system",
+        "days_ahead": "system"
+      }
+    }
+  },
+  {
+    "name": "rule_max_with_profile_min",
+    "spot": {
+      "default_min_kn": 16
+    },
+    "profile": {
+      "default_min_kn": 14,
+      "default_max_kn": 26
+    },
+    "override": {
+      "enabled": true,
+      "min_kn": null,
+      "max_kn": 22,
+      "dir_classes": null,
+      "weekdays": null,
+      "earliest_local": null,
+      "latest_local": null,
+      "min_go_hours": null,
+      "days_ahead": null
+    },
+    "expected": {
+      "enabled": true,
+      "min_kn": 14,
+      "max_kn": 22,
+      "dir_classes": [
+        "onshore",
+        "side_onshore",
+        "sideshore"
+      ],
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "earliest_local": null,
+      "latest_local": null,
+      "min_go_hours": 2,
+      "days_ahead": 3,
+      "sources": {
+        "enabled": "rule",
+        "min_kn": "profile",
+        "max_kn": "rule",
+        "dir_classes": "system",
+        "weekdays": "system",
+        "earliest_local": "system",
+        "latest_local": "system",
+        "min_go_hours": "system",
+        "days_ahead": "system"
+      }
+    }
+  },
+  {
+    "name": "rule_row_all_null",
+    "spot": {
+      "default_min_kn": null
+    },
+    "profile": null,
+    "override": {
+      "enabled": true,
+      "min_kn": null,
+      "max_kn": null,
+      "dir_classes": null,
+      "weekdays": null,
+      "earliest_local": null,
+      "latest_local": null,
+      "min_go_hours": null,
+      "days_ahead": null
+    },
+    "expected": {
+      "enabled": true,
+      "min_kn": 12,
+      "max_kn": 30,
+      "dir_classes": [
+        "onshore",
+        "side_onshore",
+        "sideshore"
+      ],
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "earliest_local": null,
+      "latest_local": null,
+      "min_go_hours": 2,
+      "days_ahead": 3,
+      "sources": {
+        "enabled": "rule",
+        "min_kn": "system",
+        "max_kn": "system",
+        "dir_classes": "system",
+        "weekdays": "system",
+        "earliest_local": "system",
+        "latest_local": "system",
+        "min_go_hours": "system",
+        "days_ahead": "system"
+      }
+    }
+  },
+  {
+    "name": "rule_min_60_derives_65",
+    "spot": {
+      "default_min_kn": null
+    },
+    "profile": null,
+    "override": {
+      "enabled": true,
+      "min_kn": 60,
+      "max_kn": null,
+      "dir_classes": null,
+      "weekdays": null,
+      "earliest_local": null,
+      "latest_local": null,
+      "min_go_hours": null,
+      "days_ahead": null
+    },
+    "expected": {
+      "enabled": true,
+      "min_kn": 60,
+      "max_kn": 65,
+      "dir_classes": [
+        "onshore",
+        "side_onshore",
+        "sideshore"
+      ],
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "earliest_local": null,
+      "latest_local": null,
+      "min_go_hours": 2,
+      "days_ahead": 3,
+      "sources": {
+        "enabled": "rule",
+        "min_kn": "rule",
+        "max_kn": "system",
+        "dir_classes": "system",
+        "weekdays": "system",
+        "earliest_local": "system",
+        "latest_local": "system",
+        "min_go_hours": "system",
+        "days_ahead": "system"
+      }
+    }
+  },
+  {
+    "name": "latest_2400_is_no_upper_bound",
+    "spot": {
+      "default_min_kn": null
+    },
+    "profile": null,
+    "override": {
+      "enabled": true,
+      "min_kn": null,
+      "max_kn": null,
+      "dir_classes": null,
+      "weekdays": null,
+      "earliest_local": "17:00:00",
+      "latest_local": "24:00:00",
+      "min_go_hours": null,
+      "days_ahead": null
+    },
+    "expected": {
+      "enabled": true,
+      "min_kn": 12,
+      "max_kn": 30,
+      "dir_classes": [
+        "onshore",
+        "side_onshore",
+        "sideshore"
+      ],
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "earliest_local": "17:00",
+      "latest_local": null,
+      "min_go_hours": 2,
+      "days_ahead": 3,
+      "sources": {
+        "enabled": "rule",
+        "min_kn": "system",
+        "max_kn": "system",
+        "dir_classes": "system",
+        "weekdays": "system",
+        "earliest_local": "rule",
+        "latest_local": "system",
+        "min_go_hours": "system",
+        "days_ahead": "system"
+      }
+    }
+  },
+  {
+    "name": "lists_deduplicated_and_sorted",
+    "spot": {
+      "default_min_kn": null
+    },
+    "profile": null,
+    "override": {
+      "enabled": true,
+      "min_kn": null,
+      "max_kn": null,
+      "dir_classes": [
+        "sideshore",
+        "onshore",
+        "onshore"
+      ],
+      "weekdays": [
+        7,
+        6,
+        6
+      ],
+      "earliest_local": null,
+      "latest_local": null,
+      "min_go_hours": null,
+      "days_ahead": null
+    },
+    "expected": {
+      "enabled": true,
+      "min_kn": 12,
+      "max_kn": 30,
+      "dir_classes": [
+        "onshore",
+        "sideshore"
+      ],
+      "weekdays": [
+        6,
+        7
+      ],
+      "earliest_local": null,
+      "latest_local": null,
+      "min_go_hours": 2,
+      "days_ahead": 3,
+      "sources": {
+        "enabled": "rule",
+        "min_kn": "system",
+        "max_kn": "system",
+        "dir_classes": "rule",
+        "weekdays": "rule",
+        "earliest_local": "system",
+        "latest_local": "system",
+        "min_go_hours": "system",
+        "days_ahead": "system"
+      }
+    }
+  },
+  {
+    "name": "conflict_rule_min_profile_max",
+    "spot": {
+      "default_min_kn": null
+    },
+    "profile": {
+      "default_min_kn": null,
+      "default_max_kn": 20
+    },
+    "override": {
+      "enabled": true,
+      "min_kn": 25,
+      "max_kn": null,
+      "dir_classes": null,
+      "weekdays": null,
+      "earliest_local": null,
+      "latest_local": null,
+      "min_go_hours": null,
+      "days_ahead": null
+    },
+    "expected": {
+      "error": "conflict"
+    }
+  },
+  {
+    "name": "conflict_spot_min_profile_max",
+    "spot": {
+      "default_min_kn": 22
+    },
+    "profile": {
+      "default_min_kn": null,
+      "default_max_kn": 20
+    },
+    "override": null,
+    "expected": {
+      "error": "conflict"
+    }
+  },
+  {
+    "name": "invalid_offshore_in_rule",
+    "spot": {
+      "default_min_kn": null
+    },
+    "profile": null,
+    "override": {
+      "enabled": true,
+      "min_kn": null,
+      "max_kn": null,
+      "dir_classes": [
+        "onshore",
+        "offshore"
+      ],
+      "weekdays": null,
+      "earliest_local": null,
+      "latest_local": null,
+      "min_go_hours": null,
+      "days_ahead": null
+    },
+    "expected": {
+      "error": "invalid"
+    }
+  },
+  {
+    "name": "invalid_side_offshore_in_rule",
+    "spot": {
+      "default_min_kn": null
+    },
+    "profile": null,
+    "override": {
+      "enabled": true,
+      "min_kn": null,
+      "max_kn": null,
+      "dir_classes": [
+        "side_offshore"
+      ],
+      "weekdays": null,
+      "earliest_local": null,
+      "latest_local": null,
+      "min_go_hours": null,
+      "days_ahead": null
+    },
+    "expected": {
+      "error": "invalid"
+    }
+  },
+  {
+    "name": "invalid_earliest_2400",
+    "spot": {
+      "default_min_kn": null
+    },
+    "profile": null,
+    "override": {
+      "enabled": true,
+      "min_kn": null,
+      "max_kn": null,
+      "dir_classes": null,
+      "weekdays": null,
+      "earliest_local": "24:00:00",
+      "latest_local": null,
+      "min_go_hours": null,
+      "days_ahead": null
+    },
+    "expected": {
+      "error": "invalid"
+    }
+  },
+  {
+    "name": "rule_enabled_null_falls_back",
+    "spot": {
+      "default_min_kn": null
+    },
+    "profile": null,
+    "override": {
+      "enabled": null,
+      "min_kn": null,
+      "max_kn": null,
+      "dir_classes": null,
+      "weekdays": null,
+      "earliest_local": null,
+      "latest_local": null,
+      "min_go_hours": null,
+      "days_ahead": null
+    },
+    "expected": {
+      "enabled": true,
+      "min_kn": 12,
+      "max_kn": 30,
+      "dir_classes": [
+        "onshore",
+        "side_onshore",
+        "sideshore"
+      ],
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "earliest_local": null,
+      "latest_local": null,
+      "min_go_hours": 2,
+      "days_ahead": 3,
+      "sources": {
+        "enabled": "system",
+        "min_kn": "system",
+        "max_kn": "system",
+        "dir_classes": "system",
+        "weekdays": "system",
+        "earliest_local": "system",
+        "latest_local": "system",
+        "min_go_hours": "system",
+        "days_ahead": "system"
+      }
+    }
+  },
+  {
+    "name": "times_with_seconds_and_fraction",
+    "spot": {
+      "default_min_kn": null
+    },
+    "profile": null,
+    "override": {
+      "enabled": true,
+      "min_kn": null,
+      "max_kn": null,
+      "dir_classes": null,
+      "weekdays": null,
+      "earliest_local": "17:00:30",
+      "latest_local": "17:00:30.5",
+      "min_go_hours": null,
+      "days_ahead": null
+    },
+    "expected": {
+      "enabled": true,
+      "min_kn": 12,
+      "max_kn": 30,
+      "dir_classes": [
+        "onshore",
+        "side_onshore",
+        "sideshore"
+      ],
+      "weekdays": [
+        1,
+        2,
+        3,
+        4,
+        5,
+        6,
+        7
+      ],
+      "earliest_local": "17:00:30",
+      "latest_local": "17:00:30.500000",
+      "min_go_hours": 2,
+      "days_ahead": 3,
+      "sources": {
+        "enabled": "rule",
+        "min_kn": "system",
+        "max_kn": "system",
+        "dir_classes": "system",
+        "weekdays": "system",
+        "earliest_local": "rule",
+        "latest_local": "rule",
+        "min_go_hours": "system",
+        "days_ahead": "system"
+      }
+    }
+  }
+]

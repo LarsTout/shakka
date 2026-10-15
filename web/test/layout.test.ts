@@ -66,6 +66,22 @@ describe('+layout.svelte', () => {
 		await userEvent.click(screen.getByRole('button', { name: 'Uitloggen' }));
 		expect(mocks.signOut).toHaveBeenCalled();
 	});
+	it('WP-16: signed in shows the Alerts and Profiel links', () => {
+		store().set({ user: { email: 'lars@example.com' } });
+		render(Layout, { children });
+		expect(screen.getByRole('link', { name: 'Alerts' })).toHaveAttribute('href', '/alerts');
+		expect(screen.getByRole('link', { name: 'Profiel' })).toHaveAttribute('href', '/profiel');
+	});
+	it('WP-16: signed out or unknown shows neither link', () => {
+		const { unmount } = render(Layout, { children });
+		expect(screen.queryByRole('link', { name: 'Alerts' })).toBeNull();
+		expect(screen.queryByRole('link', { name: 'Profiel' })).toBeNull();
+		unmount();
+		store().set(undefined);
+		render(Layout, { children });
+		expect(screen.queryByRole('link', { name: 'Alerts' })).toBeNull();
+		expect(screen.queryByRole('link', { name: 'Profiel' })).toBeNull();
+	});
 	it('shows neither while auth is unknown', () => {
 		store().set(undefined);
 		render(Layout, { children });

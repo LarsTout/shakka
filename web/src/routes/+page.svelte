@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { refreshAll } from '$app/navigation';
 	import { onMount } from 'svelte';
+	import FavoriteStar from '#lib/components/FavoriteStar.svelte';
 	import Freshness from '#lib/components/Freshness.svelte';
 	import VerdictBadge from '#lib/components/VerdictBadge.svelte';
 	import { daySummaryText, latestOfSummaries, shouldRefreshOnResume } from '#lib/view.js';
@@ -41,6 +42,7 @@
 			{@const summary = data.summaries[spot.id]}
 			<li class="spot-item" data-spot={spot.id}>
 				<a class="spot-link" href="/spot/{spot.id}">{spot.name}</a>
+				<FavoriteStar spotId={spot.id} spotName={spot.name} />
 				{#if spot.region}<span class="muted"> · {spot.region}</span>{/if}
 				{#if !spot.verified}<span class="badge-unverified">niet geverifieerd</span>{/if}
 				{#if summary}

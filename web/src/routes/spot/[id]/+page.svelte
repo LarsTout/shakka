@@ -2,6 +2,7 @@
 	import { refreshAll } from '$app/navigation';
 	import { onMount } from 'svelte';
 	import Attribution from '#lib/components/Attribution.svelte';
+	import FavoriteStar from '#lib/components/FavoriteStar.svelte';
 	import Freshness from '#lib/components/Freshness.svelte';
 	import HourVerdict from '#lib/components/HourVerdict.svelte';
 	import {
@@ -67,7 +68,10 @@
 {:else}
 	{@const spot = data.spot}
 	<p><a href="/">Alle spots</a></p>
-	<h1>{spot.name}</h1>
+	<div class="title-row">
+		<h1>{spot.name}</h1>
+		<FavoriteStar spotId={spot.id} spotName={spot.name} />
+	</div>
 	{#if spot.region}<p class="muted">{spot.region}</p>{/if}
 
 	{#if !spot.verified}
