@@ -1,0 +1,79 @@
+# Shakka spot profiles. Field guide: docs/SPOT_DATA.md
+# After editing run: cd ingest && uv run shakka spots validate
+# Never guess facts: leave a field out when unsure and keep verified: false.
+spots:
+  - id: wijk-aan-zee
+    name: Wijk aan Zee
+    verified: false
+  - id: ijmuiden
+    name: IJmuiden
+    verified: false
+  - id: zandvoort
+    name: Zandvoort
+    verified: false
+  - id: bloemendaal
+    name: Bloemendaal
+    verified: false
+  - id: noordwijk
+    name: Noordwijk
+    verified: false
+  - id: langevelderslag
+    name: Langevelderslag
+    verified: false
+  - id: katwijk
+    name: Katwijk
+    verified: false
+  - id: scheveningen
+    name: Scheveningen
+    verified: false
+  - id: kijkduin
+    name: Kijkduin
+    verified: false
+  - id: oostvoorne
+    name: Oostvoorne
+    verified: false
+  - id: brouwersdam
+    name: Brouwersdam
+    verified: false
+  - id: neeltje-jans
+    name: Neeltje Jans
+    verified: false
+  - id: vrouwenpolder
+    name: Vrouwenpolder
+    verified: false
+  - id: domburg
+    name: Domburg
+    verified: false
+  - id: workum
+    name: Workum
+    verified: false
+  - id: makkum
+    name: Makkum
+    verified: false
+  - id: hindeloopen
+    name: Hindeloopen
+    verified: false
+  - id: lemmer
+    name: Lemmer
+    verified: false
+  - id: den-helder
+    name: Den Helder
+    verified: false
+  - id: callantsoog
+    name: Callantsoog
+    verified: false
+  - id: petten
+    name: Petten
+    verified: false
+  - id: camperduin
+    name: Camperduin
+    verified: false
+  - id: schellinkhout
+    name: Schellinkhout
+    verified: false
+  - id: muiderberg
+    name: Muiderberg
+    verified: false
+  - id: lauwersmeer
+    name: Lauwersmeer
+    verified: false
