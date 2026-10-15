@@ -7,12 +7,14 @@ from click.testing import CliRunner
 
 import shakka.jobs.runtime as runtime
 import shakka.openmeteo.forecast as om_forecast
+import shakka.openmeteo.marine as om_marine
 import shakka.pipeline as pipeline
 from fakes import FakeSupabase
 from job_fixtures import NOW, USER_A, seed_forecasts
 from pipeline_fixtures import (
     blocked_http,
     fake_forecast_fetch,
+    fake_marine_fetch,
     seed_user,
     write_spots_yaml,
 )
@@ -49,6 +51,7 @@ def patch_runtime(monkeypatch, db):
     monkeypatch.setattr(runtime, "open_db", lambda settings: db)
     monkeypatch.setattr(runtime, "open_http", blocked_http)
     monkeypatch.setattr(runtime, "utcnow", lambda: NOW)
+    monkeypatch.setattr(om_marine, "fetch_marine", fake_marine_fetch)
 
 
 @pytest.mark.parametrize("code", [0, 1])

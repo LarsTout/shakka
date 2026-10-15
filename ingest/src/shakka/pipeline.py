@@ -20,6 +20,7 @@ import pydantic
 
 import shakka.jobs.runtime as runtime
 import shakka.openmeteo.forecast as om_forecast
+import shakka.openmeteo.marine as om_marine
 import shakka.rws.tides as rws
 from shakka.budget import BudgetGuard
 from shakka.config import Settings, get_settings
@@ -28,6 +29,7 @@ from shakka.jobs.alerts import AlertJobResult, run_alerts
 from shakka.jobs.evaluate import run_evaluation
 from shakka.jobs.forecast import FetchForecast, run_forecast_ingest
 from shakka.jobs.inputs import db_error_summary, require_aware, short_error
+from shakka.jobs.marine import FetchMarine, run_marine_ingest
 from shakka.jobs.tides import TideFetcher, run_tide_ingest
 from shakka.logsetup import configure_logging, github_annotation, redact, secret_values
 from shakka.notify.base import Notifier
@@ -54,7 +56,8 @@ TIDE_STEP_BUDGET_S: Final = 240.0
 PUSH_DISABLED_WARNING: Final = (
     "push disabled: VAPID secrets not set; alerts are stored but not delivered"
 )
-STEP_NAMES: Final = ("spots_sync", "forecast", "tides", "evaluate", "alerts")
+MARINE_BUDGET_WARNING: Final = "Open-Meteo budget guard reached: marine request skipped"
+STEP_NAMES: Final = ("spots_sync", "forecast", "marine", "tides", "evaluate", "alerts")
 
 _monotonic: Callable[[], float] = time.monotonic  # looked up at call time; tests monkeypatch it
 
@@ -117,6 +120,7 @@ class PipelineContext:
     secrets: tuple[str, ...] = ()
     reports: list[StepReport] = field(default_factory=list)
     notifiers: Mapping[str, Notifier] | None = None  # None: build from Settings in step_alerts
+    marine_fetch: FetchMarine | None = None  # None: om_marine.fetch_marine at call time
 
     def report(self, name: str) -> StepReport | None:
         return next((r for r in self.reports if r.name == name), None)
@@ -166,6 +170,14 @@ def step_forecast(ctx: PipelineContext) -> StepOutcome:
         warnings.append("Open-Meteo budget guard reached: a request was skipped")
     partial = bool(result.errors) or result.skipped_budget
     return StepOutcome("partial" if partial else "ok", counts, tuple(warnings))
+
+
+def step_marine(ctx: PipelineContext) -> StepOutcome:
+    fetch = ctx.marine_fetch or om_marine.fetch_marine
+    result = run_marine_ingest(ctx.db, ctx.http, ctx.budget, now=ctx.now, fetch=fetch)
+    warnings = (MARINE_BUDGET_WARNING,) if result.skipped_budget else ()
+    partial = bool(result.errors) or result.skipped_budget
+    return StepOutcome("partial" if partial else "ok", dataclasses.asdict(result), warnings)
 
 
 def step_tides(ctx: PipelineContext) -> StepOutcome:
@@ -269,6 +281,7 @@ def step_alerts(ctx: PipelineContext) -> StepOutcome:
 STEPS: Final[tuple[Step, ...]] = (
     ("spots_sync", step_spots_sync),
     ("forecast", step_forecast),
+    ("marine", step_marine),
     ("tides", step_tides),
     ("evaluate", step_evaluate),
     ("alerts", step_alerts),
@@ -401,6 +414,7 @@ def run_hourly(
     tide_fetch: TideFetcher | None = None,
     clock: Callable[[], datetime] | None = None,
     notifiers: Mapping[str, Notifier] | None = None,
+    marine_fetch: FetchMarine | None = None,
 ) -> RunReport:
     require_aware(now)
     own_db = db is None
@@ -412,7 +426,16 @@ def run_hourly(
             http = runtime.open_http()
         try:
             return _run(
-                settings, now, db, http, steps, forecast_fetch, tide_fetch, clock, notifiers
+                settings,
+                now,
+                db,
+                http,
+                steps,
+                forecast_fetch,
+                tide_fetch,
+                clock,
+                notifiers,
+                marine_fetch,
             )
         finally:
             if own_http:
@@ -432,6 +455,7 @@ def _run(
     tide_fetch: TideFetcher | None,
     clock: Callable[[], datetime] | None,
     notifiers: Mapping[str, Notifier] | None = None,
+    marine_fetch: FetchMarine | None = None,
 ) -> RunReport:
     _close_abandoned(db, now)
     try:
@@ -464,6 +488,7 @@ def _run(
         tide_fetch or functools.partial(rws.fetch_tide_extremes, http=http),
         secrets=secret_values(settings),
         notifiers=notifiers,
+        marine_fetch=marine_fetch or om_marine.fetch_marine,
     )
     by_id = {"id": f"eq.{run_id}"}
     progress_warned = False
