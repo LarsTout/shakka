@@ -1,0 +1,130 @@
+import { render, screen, within } from '@testing-library/svelte';
+import userEvent from '@testing-library/user-event';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { NOW_FRESH, NOW_STALE, SPOT_VERIFIED, pageData } from './fixtures/spot-data.js';
+
+const nav = vi.hoisted(() => ({ refreshAll: vi.fn() }));
+vi.mock('$app/navigation', () => ({ refreshAll: nav.refreshAll }));
+// Pages must not create a real Supabase client (review N-2); fail loudly if they do.
+vi.mock('#lib/supabase.js', () => {
+	throw new Error('page tests must not import the Supabase client');
+});
+
+import Page from '../src/routes/spot/[id]/+page.svelte';
+
+const props = (data: unknown) => ({ data }) as never;
+const hourOf = (time: string): HTMLElement =>
+	screen.getByText(time, { selector: 'time' }).closest('.hour') as HTMLElement;
+
+beforeEach(() => {
+	vi.clearAllMocks();
+});
+
+describe('spot page (AC-3)', () => {
+	it('shows hours with verdict text, direction and reasons as Dutch labels', () => {
+		render(Page, props(pageData()));
+		expect(screen.getByText('14:00', { selector: 'time' })).toHaveAttribute(
+			'datetime',
+			'2026-07-15T12:00:00+00:00'
+		);
+		expect(within(hourOf('14:00')).getByText('Go')).toBeInTheDocument();
+
+		const off = hourOf('15:00');
+		expect(off.querySelector('[data-verdict="no_go"]')).toHaveTextContent('Niet gaan');
+		expect(within(off).getByText('Aflandige wind: niet kiten')).toBeInTheDocument();
+		expect(within(off).getByText('Aflandig')).toBeInTheDocument();
+
+		expect(within(hourOf('16:00')).getByText('Weermodellen zijn het oneens')).toBeInTheDocument();
+		expect(screen.queryByText('offshore')).toBeNull();
+		expect(screen.queryByText('low_confidence')).toBeNull();
+	});
+
+	it('unverified banner only for unverified spots', () => {
+		const { unmount } = render(Page, props(pageData()));
+		expect(screen.getByText(/niet geverifieerd/i)).toBeInTheDocument();
+		unmount();
+		render(Page, props(pageData({ spot: SPOT_VERIFIED })));
+		expect(screen.queryByText(/niet geverifieerd/i)).toBeNull();
+	});
+
+	it('freshness: warning when stale, updated line when fresh', () => {
+		const { unmount } = render(Page, props(pageData({ now: NOW_STALE })));
+		expect(screen.getByRole('alert')).toHaveTextContent('ouder dan 3 uur');
+		unmount();
+		render(Page, props(pageData({ now: NOW_FRESH })));
+		expect(screen.queryByRole('alert')).toBeNull();
+		expect(screen.getByText('Bijgewerkt: wo 15 jul 14:05')).toBeInTheDocument();
+	});
+
+	it('shows attribution', () => {
+		render(Page, props(pageData()));
+		const links = screen.getAllByRole('link');
+		expect(links.some((l) => l.getAttribute('href') === 'https://open-meteo.com/')).toBe(true);
+		expect(screen.getAllByText('Rijkswaterstaat').length).toBeGreaterThan(0);
+	});
+
+	it('day headings, dark toggle and tides', async () => {
+		render(Page, props(pageData()));
+		expect(screen.getByRole('heading', { name: 'Vandaag (wo 15 jul)' })).toBeInTheDocument();
+		expect(screen.getByRole('heading', { name: 'Morgen (do 16 jul)' })).toBeInTheDocument();
+		expect(screen.queryByText('23:00', { selector: 'time' })).toBeNull();
+		const toggle = screen.getByRole('button', { name: 'Toon ook donkere uren' });
+		expect(toggle).toHaveAttribute('aria-pressed', 'false');
+		await userEvent.click(toggle);
+		expect(screen.getByText('23:00', { selector: 'time' })).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Verberg donkere uren' })).toHaveAttribute(
+			'aria-pressed',
+			'true'
+		);
+		const tides = [...document.querySelectorAll('.tides')].map((t) => t.textContent?.replace(/\s+/g, ' ').trim());
+		expect(tides).toEqual([
+			'Getij: Hoogwater 11:10 (+95 cm) · Laagwater 17:40 (-70 cm)',
+			'Getij: geen gegevens'
+		]);
+	});
+
+	it('profile', () => {
+		render(Page, props(pageData()));
+		expect(screen.getByText('Onbekend (nog niet ingevuld)')).toBeInTheDocument();
+		expect(screen.getByText('1 mei t/m 30 sep, 10:00–18:00')).toBeInTheDocument();
+		expect(screen.getByText('Voorkeur laagwater')).toBeInTheDocument();
+		expect(screen.getByText('teststation')).toBeInTheDocument();
+		const hazards = screen.getByText(/Testgevaar: zandbank/);
+		expect(hazards).toHaveClass('prewrap');
+		expect(hazards.textContent).toContain('Tweede regel');
+		expect(screen.getByText('Niet ingevuld')).toBeInTheDocument();
+	});
+
+	it('no evaluations', () => {
+		render(Page, props(pageData({ evaluations: [] })));
+		expect(screen.getByText('Nog geen data voor deze spot.')).toBeInTheDocument();
+		expect(screen.queryByRole('alert')).toBeNull();
+	});
+
+	it('not_found and error states', async () => {
+		const { unmount } = render(Page, props({ kind: 'not_found', now: NOW_FRESH, id: 'x' }));
+		expect(screen.getByRole('heading', { name: 'Spot niet gevonden' })).toBeInTheDocument();
+		unmount();
+		render(Page, props({ kind: 'error', now: NOW_FRESH, id: 'x' }));
+		expect(screen.getByRole('alert')).toHaveTextContent('De gegevens konden niet worden geladen');
+		await userEvent.click(screen.getByRole('button', { name: 'Opnieuw proberen' }));
+		expect(nav.refreshAll).toHaveBeenCalledTimes(1);
+	});
+
+	describe('resume', () => {
+		const fire = () => {
+			Object.defineProperty(document, 'visibilityState', { value: 'visible', configurable: true });
+			document.dispatchEvent(new Event('visibilitychange'));
+		};
+		it('refreshes when data is older than 10 minutes', () => {
+			render(Page, props(pageData({ now: new Date(Date.now() - 20 * 60_000).toISOString() })));
+			fire();
+			expect(nav.refreshAll).toHaveBeenCalledTimes(1);
+		});
+		it('does not refresh fresh data', () => {
+			render(Page, props(pageData({ now: new Date().toISOString() })));
+			fire();
+			expect(nav.refreshAll).not.toHaveBeenCalled();
+		});
+	});
+});
