@@ -1,6 +1,6 @@
 # Blueprint WP-08: Alert-deduplicatie en berichtopbouw (puur)
 Status: DRAFT
-Revisie: 1
+Revisie: 2
 
 ## Doel
 Twee pure domeinmodules:
@@ -10,7 +10,7 @@ Twee pure domeinmodules:
 Er is geen I/O. Laden en opslaan van `alert_state` doet WP-10, versturen doet WP-17 (Web Push, het enige kanaal sinds A-16), en de route `/go` bouwen WP-14 en WP-20.
 
 ## Aannames
-- **A1. Contractafwijking (bindend): `WindowSnapshot.gust_max_kn: float | None`.** Een `go`-uur kan `gust_kn = None` hebben (WP-05 A2 en "Gevolgen", WP-07 "Gevolgen"). `gust_max_kn` is het maximum over de uren met een bekende vlaag, en `None` als geen enkel uur een vlaag heeft. Een onbekende vlaag wordt nooit 0: niet in de snapshot, niet in een vergelijking (vlagen zijn geen criterium, zie A3) en niet in een bericht (daar staat "vlagen onbekend"). De orchestrator past de contractregel in `docs/WORK_PACKAGES.md` (WP-08, Contracten) aan naar `gust_max_kn: float | None`.
+- **A1. Contractafwijking (bindend): `WindowSnapshot.gust_max_kn: float | None`.** Een `go`-uur kan `gust_kn = None` hebben (WP-05 A2 en "Gevolgen", WP-07 "Gevolgen"). `gust_max_kn` is het maximum over de uren met een bekende vlaag, en `None` als geen enkel uur een vlaag heeft. Een onbekende vlaag wordt nooit 0: niet in de snapshot, niet in een vergelijking (vlagen zijn geen criterium, zie A3) en niet in een bericht (daar staat "vlagen onbekend"). De contractregel in `docs/WORK_PACKAGES.md` (WP-08, Contracten) is op `develop` al aangepast naar `gust_max_kn: float | None` (commit `ef2ca44`); deze branch neemt dat over bij de merge.
 - **A2. Richtingsklasse komt uit de uren, nooit uit `dir_deg`** (WP-05 A15). `WindowSnapshot.dir_class` is de klasse die in de meeste uren voorkomt. Bij een gelijke stand wint de klasse die het dichtst bij aflandig ligt (`sideshore` boven `side_onshore` boven `onshore`): bij twijfel toont het bericht de minst gunstige klasse. `dir_deg` is het circulaire gemiddelde van de uurrichtingen (`circular_mean_deg` uit WP-05) en is alleen informatief. Een snapshot weigert `side_offshore` en `offshore` (harde regel; een window bevat die uren nooit).
 - **A3. Drempels voor een wezenlijke verandering (voorstel; Lars toetst in de M1-testweek).**
   Vergeleken worden de **basislijn** (de snapshot van de laatste melding, zie A4) en het huidige window:
@@ -27,13 +27,15 @@ Er is geen I/O. Laden en opslaan van `alert_state` doet WP-10, versturen doet WP
     - Alleen als geen enkel uur van de basislijn al voorbij is (`baseline.start >= eerstvolgend heel uur`). Bij een begonnen window vallen de vroege uren weg, en dan zijn minimum en maximum niet meer vergelijkbaar.
   - **Geen criterium:** vlagen (vlagerigheid zit al in het oordeel: `gusty` is marginal, `too_gusty` no_go), betrouwbaarheid en richting(sklasse). Alle uren in een window zijn per definitie `go` en rijdbaar voor de regel van de gebruiker. Deze velden staan wel in het bericht zodra er om een andere reden een melding komt. Zo blijft de ruis laag ("alerts die standaard goed staan", plan §1).
   - **Voorrang:** geldt een verslechteringscriterium, dan is het `worsened`, ook als er tegelijk een verbetering is (bijv. eerder begin maar 4 kn minder wind). Slecht nieuws gaat voor; het bericht toont het hele nieuwe window.
+  - **Zuivere verschuiving van 2 uur of meer is `worsened` (bewuste keuze).** 10–16 wordt 12–18: het begin is 2 uur later (`worse`) en het eind 2 uur later (`better`), dus `worsened`. Een verschuiving naar 08–14 geeft om dezelfde reden ook `worsened` (eind 2 uur eerder). Onderbouwing: wie op het oude window rekende, verliest minstens 2 uur van wat hem gemeld was, en dat is voor de planning slecht nieuws. De body toont het nieuwe window plus "Was: …", dus de gebruiker ziet zelf dat het een verschuiving is. Een aparte soort "verschoven" kan niet: de DB-CHECK `alert_state_last_event_enum` en het contract kennen alleen vier soorten. Lars toetst dit in de testweek (R1).
+  - **Windows van 1 uur (bewuste keuze).** Bij `min_go_hours = 1` (toegestaan, bereik 1–24) kan een window van 1 uur bestaan. Schuift dat hele window 1 uur op (10–11 wordt 11–12), dan delen oud en nieuw geen uur. Koppelen gaat op overlap (scope van WP-08), dus dat geeft `cancelled` voor het oude en `new` voor het nieuwe window. Dat is feitelijk juist: het gemelde uur is geen go meer. AC-4 blijft gelden zoals het geformuleerd is: alleen het begin ±1 uur of alleen het eind ±1 uur laat bij elke lengte overlap over en geeft geen melding (10–11 wordt 09–11 of 10–12). Alleen een verschuiving van het hele window met minstens zijn eigen lengte verliest de overlap, en vanaf een lengte van 2 uur (de standaard, WP-07 A1) is dat 2 uur of meer, dus al boven de drempel. Koppelen op "bijna overlap" zou I2 en de één-op-één-regel ingewikkelder maken voor een niet-standaardinstelling; daarom niet. Getest in `test_one_hour_window_shift`; Lars toetst het in de testweek (R1).
   - Een andere waarde is één constante in `dedup.py` plus de tests die precies op de grens liggen.
 - **A4. De opgeslagen snapshot is de basislijn: wat de gebruiker het laatst te horen kreeg.** Bij een event wordt `snapshot` het huidige window; zonder event blijft de oude snapshot staan. `window_start` en `window_end` volgen wel elke run het huidige window (voor het koppelen op overlap). Zo kan sluipende verschuiving (bijv. elke run 1 uur later) nooit onder de drempel blijven: na twee runs is het verschil 2 uur en volgt `worsened`. Het bericht toont de basislijn als "Was: …", en dat is precies wat de gebruiker eerder zag.
 - **A5. Begonnen windows.** Een entry is **begonnen** als `window_start <= now`. Het begin van een lopend window schuift elk uur op, omdat het huidige uur niet meetelt (WP-07 A9). Daarom:
   - blijft `window_start` van een begonnen entry staan op het oorspronkelijke begin (alleen `window_end` volgt het huidige window);
   - wordt een begonnen entry die geen window meer heeft (bijv. onder `min_go_hours` gezakt) **nooit** `cancelled` (WP-07 "Gevolgen"). Hij blijft ongewijzigd `active` tot `window_end <= now` en wordt dan `expired`. Komt er intussen weer een window dat overlapt, dan wordt het eraan gekoppeld en vergeleken met de basislijn, zonder `new`;
   - telt bij de vergelijking het begin van de basislijn vanaf het eerstvolgende hele uur: `max(baseline.start, floor_hour(now) + 1 h)`.
-- **A6. `expired` betekent: afgesloten zonder melding.** Dat geldt voor een afgelopen window (`window_end <= now`, AC-3) en voor een entry die bij het samensmelten van twee windows is opgegaan in een andere entry (A7). De DB-CHECK kent alleen `active`, `cancelled` en `expired`; een vierde status is niet nodig.
+- **A6. `expired` betekent: afgesloten zonder melding.** Dat geldt voor een afgelopen window (`window_end <= now`, AC-3), voor een entry die bij het samensmelten van twee windows is opgegaan in een andere entry (A7) en voor een entry die bij het herstel van overlappende actieve entries afvalt (A15). De DB-CHECK kent alleen `active`, `cancelled` en `expired`; een vierde status is niet nodig.
 - **A7. Splitsen en samensmelten (AC-5).** Koppelen is één-op-één, op de grootste overlap, met een vaste volgorde bij gelijke stand (zie Ontwerp).
   - **Splitsen:** het oude window wordt gekoppeld aan het deel met de grootste overlap (bij gelijke overlap het vroegste deel) en daarmee vergeleken (meestal `worsened`). Elk ander deel krijgt een eigen entry en een `new`-event. Zo weet de gebruiker dat het window korter is, en ook dat er later nog een window is.
   - **Samensmelten:** de vroegste oude entry met de grootste overlap wordt gekoppeld en vergeleken (meestal `improved`); de andere oude entry wordt stil `expired` (A6). Geen `cancelled`, want zijn uren zijn nog steeds go.
@@ -46,7 +48,13 @@ Er is geen I/O. Laden en opslaan van `alert_state` doet WP-10, versturen doet WP
 - **A13. Additieve uitbreidingen van het contract.** De signatures uit WORK_PACKAGES blijven gelijk (behalve A1). Erbij komen:
   - in `dedup`: `EDGE_SHIFT_THRESHOLD`, `WIND_CHANGE_THRESHOLD_KN`, `SNAPSHOT_KEYS`, `ALERT_STATE_COLUMNS`, de typealias `AlertStatus`, `AlertStateEntry.to_row()` en `AlertStateEntry.from_row(row)` (pure mapping voor WP-10), en `classify_change(previous, current, *, now)` (de drempelregel los testbaar);
   - in `messages`: `format_window_local(start, end)`, de labeltabellen en de constanten `TIDE_CONTEXT_MARGIN` en `MAX_TIDE_EXTREMES_IN_MESSAGE`.
-- **A14. Geen nieuwe dependencies, geen migratie, geen wijziging aan bestaande code.** Alleen nieuwe bestanden (zie Bestanden). `docs/WORK_PACKAGES.md` (A1) werkt de orchestrator bij.
+- **A14. Geen nieuwe dependencies, geen migratie, geen wijziging aan bestaande code.** Alleen nieuwe bestanden (zie Bestanden). `docs/WORK_PACKAGES.md` (A1) is al bijgewerkt op `develop`.
+- **A15. Overlappende actieve entries worden hersteld, niet geweigerd.** `diff_windows` levert zelf nooit overlappende actieve entries op (I2), maar ze kunnen in de database ontstaan als de schrijfacties van één diff maar half lukken. Voorbeeld: bij een split wordt entry A (10–18) `worsened` naar 10–13 en komt er een nieuwe entry N (15–18). Mislukt de update van A (crash of overgeslagen aflevering in WP-17) en lukt de insert van N wel, dan staan A (10–18) en N (15–18) allebei `active`. Een `ValueError` zou die favoriet dan dagen stilzetten (WP-10 slaat hem over tot de oude `window_end` voorbij is). Daarom herstelt `diff_windows` dit deterministisch, vóór het koppelen:
+  - kandidaten zijn de entries die na het verlopen (stap 3) `active` zijn, dus met `window_end > now`;
+  - sorteer ze op `(window_start, id or "", index in previous)`: het vroegste begin wint, daarna de laagste `id`, daarna de invoervolgorde (alleen relevant bij `id is None`, wat voor opgeslagen rijen niet voorkomt);
+  - loop de lijst af: een entry blijft actief als zijn span geen enkele al behouden span overlapt; anders wordt hij `status="expired"`, verder ongewijzigd en zonder event (A6).
+  - Het vroegste begin wint omdat dat bij een begonnen window de lopende sessie is (die mag nooit stil verdwijnen, A5) en omdat bij het halve-split-scenario de oude entry A de basislijn draagt van wat de gebruiker het laatst te horen kreeg. A wordt daarna gewoon gekoppeld en vergeleken, dus de gemiste `worsened` volgt alsnog. Prijs: het deel van N dat niet aan A hangt, krijgt opnieuw een `new` (R7).
+  - Daarnaast legt "Gevolgen voor latere WP's" een schrijfvolgorde en een alles-of-niets-regel vast, zodat herstel alleen een vangnet is.
 
 ## Ontwerp
 
@@ -65,34 +73,38 @@ Voor `window: Window` (WP-07; alle uren `go`, rijdbaar, aaneengesloten):
 ### Koppelen en vergelijken (`diff_windows`)
 Invoer: de statusregels van één gebruiker en één spot (`previous`, in elke volgorde) en de huidige windows (`current`, uitvoer van `find_windows`). Notatie: `first_hour = floor_hour(now) + 1 h`; de span van een entry is `[window_start, window_end)`; `overlap(a, b)` is de lengte van de doorsnede (een `timedelta`, 0 als ze niet overlappen).
 
-0. `now` naïef → `ValueError`; daarna `now = now.astimezone(UTC)`.
+0. `now` naïef → `ValueError`; daarna `now = now.astimezone(UTC)` en `first_hour = _floor_hour(now) + 1 h`.
 1. Controles (`ValueError`):
    - alle `spot_id`'s van `previous` en `current` samen zijn hooguit één waarde;
    - geen twee entries met dezelfde `id` (als `id` niet `None` is);
    - huidige windows overlappen elkaar niet (na sorteren op `start`: `vorige.end <= volgende.start`);
-   - actieve entries met `window_end > now` overlappen elkaar niet. `diff_windows` levert dit zelf altijd zo op (invariant I2); een schending betekent een kapotte database.
+   - elk huidig window begint op of na `first_hour` (`window.start < first_hour` → `ValueError`). Dat is het contract van `find_windows` met dezelfde `now` (WP-07 A9). De controle maakt het expliciet, want een window vóór `first_hour` kan een begonnen entry overlappen die in fase 1 niet gekoppeld wordt, en dan breekt I2 stil.
+   - Overlappende actieve entries zijn **geen** fout meer; die worden in stap 4 hersteld (A15).
 2. `windows` = `current` gesorteerd op `start`; `snaps[j] = snapshot_window(windows[j])`. `state = list(previous)` (de invoer wordt niet gewijzigd).
 3. **Verlopen:** elke `active` entry met `window_end <= now` wordt `status="expired"` (verder ongewijzigd, geen event).
-4. Deel de overige actieve entries in: **begonnen** (`window_start <= now`) en **toekomstig** (`window_start > now`).
-5. **Fase 1, begonnen entries** (op volgorde van `(window_start, index)`; door de controle in stap 1 is er hooguit één): koppel aan het vrije window met het vroegste `start` dat overlapt met `[max(window_start, first_hour), window_end)`. Het vroegste, niet het grootste: het lopende window loopt dan door vanaf nu, en de span blijft disjunct van latere windows.
-6. **Fase 2, toekomstige entries:** alle paren (entry `i`, window `j`) met overlap > 0, gesorteerd op `(-overlap, windows[j].start, entry.window_start, entry.window_end, entry.id or "", i)`. Ga de lijst af en koppel een paar als beide nog vrij zijn (greedy).
-7. **Fase 3, heractiveren:** zoals fase 2, maar met entries die vóór deze diff status `cancelled` hadden en windows die na fase 1 en 2 nog vrij zijn.
-8. **Gekoppelde entries** (`e = previous[i]`, `W = windows[j]`, `C = snaps[j]`):
+4. **Herstel overlap (A15):** neem de entries die nu nog `active` zijn, sorteer op `(window_start, id or "", i)` en loop ze af met een lijst `kept`. Overlapt de span van entry `i` (`_overlap > 0`) met de span van een entry in `kept`, dan wordt `state[i]` `status="expired"` (verder ongewijzigd, geen event); anders gaat `i` in `kept`. Alleen de entries in `kept` doen mee in stap 5 t/m 10. In een normale run (geen overlap) verandert deze stap niets.
+5. Deel de entries in `kept` in: **begonnen** (`window_start <= now`) en **toekomstig** (`window_start > now`).
+6. **Fase 1, begonnen entries** (op volgorde van `(window_start, index)`): koppel aan het vrije window met het vroegste `start` dat overlapt met `[max(window_start, first_hour), window_end)`. Na stap 4 is er hooguit één begonnen entry: elke begonnen entry bevat `now` in zijn span, dus twee begonnen entries overlappen altijd. Het vroegste window, niet het grootste: het lopende window loopt dan door vanaf nu, en de span blijft disjunct van latere windows.
+7. **Fase 2, toekomstige entries:** alle paren (entry `i`, window `j`) met overlap > 0, gesorteerd op `(-overlap, windows[j].start, entry.window_start, entry.window_end, entry.id or "", i)`. Ga de lijst af en koppel een paar als beide nog vrij zijn (greedy).
+8. **Fase 3, heractiveren:** zoals fase 2, maar met entries die vóór deze diff status `cancelled` hadden en windows die na fase 1 en 2 nog vrij zijn.
+9. **Gekoppelde entries** (`e = previous[i]`, `W = windows[j]`, `C = snaps[j]`):
    - fase 3: `status="active"`, `window_start=W.start`, `window_end=W.end`, `snapshot=C`, `last_event=new`; event `new` (`current=C`, `previous=None`);
    - fase 1 en 2: `kind = classify_change(e.snapshot, C, now=now)`. `window_start` = `e.window_start` als begonnen, anders `W.start`; `window_end = W.end`. Is `kind` niet `None`, dan ook `snapshot=C` en `last_event=kind`, plus een event (`current=C`, `previous=e.snapshot`). Anders blijft de snapshot de basislijn (A4).
-9. **Niet-gekoppelde actieve entries:**
+10. **Niet-gekoppelde entries uit `kept`:**
    - begonnen: ongewijzigd (A5);
    - toekomstig, en de span overlapt een huidig window (dat dus aan een andere entry hangt): `status="expired"`, geen event (samensmelten, A6/A7);
    - toekomstig, zonder overlap: `status="cancelled"`, `last_event=cancelled`, snapshot ongewijzigd; event `cancelled` (`current=None`, `previous=e.snapshot`).
-10. Entries met status `cancelled` die niet heractiveerd zijn, en entries met status `expired`, blijven ongewijzigd.
-11. **Nieuwe windows** (vrij na fase 1–3), op volgorde van `start`: voeg toe `AlertStateEntry(id=None, spot_id=W.spot_id, window_start=W.start, window_end=W.end, status="active", snapshot=C, last_event=new, last_notified_at=None)` en een event `new` met `state_index` = de nieuwe positie.
-12. `events` gesorteerd op `state_index`. Resultaat `DiffResult(events, new_state=state)`.
+11. Entries met status `cancelled` die niet heractiveerd zijn, en entries met status `expired` (van vóór de diff, uit stap 3 of uit stap 4), blijven verder ongewijzigd.
+12. **Nieuwe windows** (vrij na fase 1–3), op volgorde van `start`: voeg toe `AlertStateEntry(id=None, spot_id=W.spot_id, window_start=W.start, window_end=W.end, status="active", snapshot=C, last_event=new, last_notified_at=None)` en een event `new` met `state_index` = de nieuwe positie.
+13. `events` gesorteerd op `state_index`. Resultaat `DiffResult(events=events, new_state=state)`.
 
 `new_state` bevat dus altijd elke entry uit `previous` precies één keer, op dezelfde positie (`new_state[i].id == previous[i].id`), gevolgd door de nieuwe entries. WP-10 hoeft alleen te schrijven waar `new_state[i] != previous[i]`, en de entries vanaf `len(previous)` in te voegen.
 
 ### `classify_change`
 ```
-first_hour = floor_hour(now) + 1h
+if now.tzinfo is None or now.utcoffset() is None: raise ValueError
+now        = now.astimezone(UTC)                # same as step 0 of diff_windows
+first_hour = _floor_hour(now) + 1h
 p_start   = max(P.start, first_hour)
 d_start   = C.start - p_start
 d_end     = C.end - P.end
@@ -105,12 +117,12 @@ if P.start >= first_hour:                       # no baseline hour has passed
     better |= d_min >= WIND_CHANGE_THRESHOLD_KN or d_max >= WIND_CHANGE_THRESHOLD_KN
 return WORSENED if worse else IMPROVED if better else None
 ```
-Alle tijden in UTC, zodat zomer- en wintertijd geen rol spelen. `gust_max_kn`, `confidence`, `dir_deg` en `dir_class` worden niet gelezen (A3).
+Alle tijden in UTC, zodat zomer- en wintertijd geen rol spelen. `classify_change` is publiek en zet `now` daarom zelf naar UTC vóór `_floor_hour`; `_floor_hour` verwacht een UTC-datetime (`now.replace(minute=0, second=0, microsecond=0)`). `diff_windows` gebruikt dezelfde regel voor de naïef-controle (stap 0). `gust_max_kn`, `confidence`, `dir_deg` en `dir_class` worden niet gelezen (A3).
 
 ### Waarom dit AC-1 t/m AC-5 haalt
 - **AC-1:** in de tweede run is de basislijn gelijk aan het window, dus `classify_change` geeft `None`, en de spans en statussen veranderen niet. Ook als de tijd een uur doorloopt bij een lopend window: `p_start` wordt `first_hour` = `C.start`, het eind is gelijk, en wind wordt niet vergeleken.
 - **AC-3:** cancel alleen voor een toekomstige entry zonder overlap; verlopen is een aparte stap vóór het koppelen; heractiveren in fase 3.
-- **AC-5:** greedy met een volledige, vaste sorteersleutel is deterministisch en één-op-één. De invarianten staan in het Testplan.
+- **AC-5:** greedy met een volledige, vaste sorteersleutel is deterministisch en één-op-één. Het herstel in stap 4 heeft ook een vaste sorteersleutel en zorgt dat I2 al vóór het koppelen geldt, ook bij een half geschreven vorige diff (A15). De invarianten staan in het Testplan.
 
 ### Bericht (`render_alert`)
 Titel: `f"{EVENT_TITLE_NL[kind]}: {naam}"`, met `naam = " ".join(spot.name.split())` (geen regeleinden in de titel).
@@ -125,8 +137,8 @@ Regels van de body (gescheiden door `"\n"`, geen afsluitende newline). `S` is de
 
 Formaten (exact):
 - `window(s)` = `format_window_local(s.start, s.end)`:
-  - lokale tijd (`LOCAL_TZ`); `dag(d) = f"{WEEKDAY_ABBR_NL[d.isoweekday() - 1]} {d.day} {MONTH_ABBR_NL[d.month - 1]}"`;
-  - valt het laatste moment (`end - 1 µs`) op dezelfde lokale datum als `start`: `f"{dag(ls)} {ls:%H:%M}–{le:%H:%M}"` (bijv. `za 18 okt 14:00–18:00`; een eind om middernacht wordt `00:00`);
+  - lokale tijd (`LOCAL_TZ`): `ls = start.astimezone(LOCAL_TZ)` en `le = end.astimezone(LOCAL_TZ)` (het echte eind, niet `end - 1 µs`); `dag(d) = f"{WEEKDAY_ABBR_NL[d.isoweekday() - 1]} {d.day} {MONTH_ABBR_NL[d.month - 1]}"`;
+  - valt het laatste moment op dezelfde lokale datum als `start` (`(end - timedelta(microseconds=1)).astimezone(LOCAL_TZ).date() == ls.date()`): `f"{dag(ls)} {ls:%H:%M}–{le:%H:%M}"` (bijv. `za 18 okt 14:00–18:00`; een eind om middernacht wordt `00:00`);
   - anders: `f"{dag(ls)} {ls:%H:%M} – {dag(le)} {le:%H:%M}"`.
   - Het streepje is een en-dash (U+2013).
 - `kn(x)` = `str(math.floor(x + 0.5))` (half naar boven).
@@ -137,7 +149,7 @@ Formaten (exact):
 - `direction(s)` = `f"Wind uit {compass_label(s.dir_deg)} ({s.dir_deg}°) · {DIR_CLASS_LABEL_NL[s.dir_class]}"`.
 - `confidence(s)` = `f"Betrouwbaarheid: {CONFIDENCE_LABEL_NL[s.confidence]}"`.
 - `kite` (alleen als `kite is not None` en `kind != cancelled`):
-  - `m2(x)`: afronden op 0,1; een geheel getal zonder decimalen (`9`), anders met een komma (`10,5`);
+  - `m2(x)`: afronden op 0,1, half naar boven, net als `ideal_kite_size` en `kn()`: `t = math.floor(x * 10 + 0.5)`; is `t % 10 == 0`, dan `str(t // 10)` (`9`), anders `f"{t // 10},{t % 10}"` (`10,5`). Niet `round()` (dat rondt half naar even af). `x` is een kitemaat en dus positief; er is geen extra controle;
   - fit `ideal`: `f"Kite: {m2(size)} m² ({KITE_FIT_LABEL_NL[fit]})"`;
   - anders: `f"Kite: {m2(size)} m² ({KITE_FIT_LABEL_NL[fit]}, ideaal {m2(ideal)} m²)"`.
 - `tide` (alleen als `kind != cancelled`, `spot.tide_sensitive != none`, `spot.rws_station` gezet en er minstens één extreem is):
@@ -160,7 +172,7 @@ De URL staat niet in de body: het kanaal maakt er een knop of tik-actie van (WP-
 
 | Pad | Actie | Inhoud |
 |---|---|---|
-| `ingest/src/shakka/domain/dedup.py` | aanmaken | Constanten, `AlertStatus`, `AlertEventKind`, `_RevalidatingModel` (eigen kopie, zelfde code als in `alerts.py`), `WindowSnapshot` (met `to_json`/`from_json`), `snapshot_window`, `AlertStateEntry` (met `to_row`/`from_row`), `AlertEvent`, `DiffResult`, `classify_change`, `diff_windows`, private helpers (`_floor_hour`, `_overlap`, `_aware_utc`). |
+| `ingest/src/shakka/domain/dedup.py` | aanmaken | Constanten, `AlertStatus`, `AlertEventKind`, `_RevalidatingModel` (eigen kopie, zelfde code als in `alerts.py`), `WindowSnapshot` (met `to_json`/`from_json`), `snapshot_window`, `AlertStateEntry` (met `to_row`/`from_row`), `AlertEvent`, `DiffResult`, `classify_change`, `diff_windows`, private helpers (`_floor_hour`, `_overlap`, `_aware_utc`, `_repair_overlaps` voor stap 4). |
 | `ingest/src/shakka/domain/messages.py` | aanmaken | Constanten en labeltabellen, `AlertMessage`, `format_window_local`, `build_go_url`, `render_alert`, private helpers voor de regels en `_quote`. |
 | `ingest/tests/dedup_fixtures.py` | aanmaken | Helpers voor de dedup-tests (zie Testplan). |
 | `ingest/tests/message_fixtures.py` | aanmaken | Fixture-spots, snapshots, getij en `GOLDEN_CASES` (ook bruikbaar voor WP-17 AC-3). |
@@ -260,13 +272,15 @@ class DiffResult(_RevalidatingModel):
 def classify_change(previous: WindowSnapshot, current: WindowSnapshot, *,
                     now: datetime) -> AlertEventKind | None:
     """IMPROVED, WORSENED or None by the thresholds in the blueprint (A3). ValueError on a
-    naive now."""
+    naive now; an aware now is converted to UTC before flooring."""
 
 def diff_windows(previous: Sequence[AlertStateEntry], current: Sequence[Window], *,
                  now: datetime) -> DiffResult:
     """Match state entries of one user and one spot to the current windows and decide the
-    events (see blueprint, steps 0-12). Inputs are not modified. ValueError on a naive now,
-    mixed spot_ids, duplicate ids, overlapping windows or overlapping live active entries."""
+    events (see blueprint, steps 0-13). Inputs are not modified. Overlapping live active
+    entries are repaired (earliest window_start, then lowest id, stays active; the others
+    become expired without an event). ValueError on a naive now, mixed spot_ids, duplicate
+    ids, overlapping windows or a window starting before floor_hour(now) + 1 h."""
 ```
 - Alle modellen: `frozen=True`, `extra="forbid"`; `model_copy` valideert opnieuw (`_RevalidatingModel`, dezelfde 10 regels als in `alerts.py`: `dict(self)`, `update`, `model_validate`). `diff_windows` maakt elke gewijzigde entry via `model_copy(update=...)`.
 - Validatie van `AlertEvent` (`model_validator(mode="after")`): `new` vereist `current` gezet en `previous is None`; `improved`/`worsened` beide gezet; `cancelled` vereist `current is None` en `previous` gezet.
@@ -358,13 +372,17 @@ def render_alert(event: AlertEvent, spot: SpotProfile, *, kite: KiteAdvice | Non
   - Getij: geef de extremen van het station van de spot mee die minstens `[window.start - 3 h, window.end + 3 h]` dekken; het bereik dat WP-10 voor de evaluatie laadt, is ruim genoeg.
   - `base_url = settings.app_base_url` (mag `None` of leeg zijn).
   - Opslaan: voor `i < len(previous)` alleen als `new_state[i] != previous[i]`: update op `id` met `to_row()` (zonder `id`). Voor `i >= len(previous)`: insert met `user_id` erbij; de teruggegeven `id` is de `state_id` van het bijbehorende event. "Renderen" en "opslaan" blijven aparte stappen (voor WP-17).
+  - **Schrijfvolgorde (bindend):** per (gebruiker, spot) eerst alle updates van bestaande entries (`i < len(previous)`), daarna pas de inserts (`i >= len(previous)`). PostgREST-schrijfacties zijn niet samen transactioneel. Crasht de job tussen updates en inserts, dan ontbreekt hooguit een nieuwe entry; de volgende run maakt die opnieuw aan met een `new`, zonder overlap. In de omgekeerde volgorde kan een nieuwe entry naast een nog niet bijgewerkte, overlappende oude entry komen te staan. `diff_windows` herstelt dat wel (A15), maar dan kost het een dubbele `new` (R7).
+  - Een fout bij het schrijven van één (gebruiker, spot) stopt de schrijfacties voor die combinatie (de rest van die diff wordt niet meer geschreven); andere favorieten gaan door.
   - `last_notified_at` laat `diff_windows` ongemoeid (A9); in M1 blijft het leeg.
   - `snapshot` in de database is de basislijn (laatst gemelde stand), niet de nieuwste verwachting. Toon hem in de CLI dus als "laatst gemeld".
   - De opruimregel `window_end < now - 48h` (WP-10) raakt de logica niet: zulke rijen zijn `expired` of `cancelled` en spelen niet meer mee.
 - **WP-17:**
   - De body is opgebouwd in volgorde van belang (A11); `to_push_text` mag hele regels vanaf het begin nemen. De titel is in de golden-tests hoogstens 26 tekens.
   - `ingest/tests/message_fixtures.py::GOLDEN_CASES` bevat de golden-berichten voor WP-17 AC-3.
-  - Heractiveren hergebruikt de `id` (A8), dus de push-`tag` vervangt de eerdere annulering. Een entry die bij samensmelten `expired` wordt, krijgt geen melding; zijn oude melding blijft op de telefoon staan.
+  - Heractiveren hergebruikt de `id` (A8), dus de push-`tag` vervangt de eerdere annulering. Een entry die bij samensmelten of herstel (A15) `expired` wordt, krijgt geen melding; zijn oude melding blijft op de telefoon staan.
+  - **Alles of niets per (gebruiker, spot) (randvoorwaarde voor de afleverregel van WP-17):** de afleverregel "state voor dat event niet bijwerken" geldt voor de hele diff van die gebruiker en spot, niet per event. Wordt de state van één event niet bijgewerkt (geen geslaagde aflevering en minstens één niet-permanente fout), dan schrijft WP-17 voor die (gebruiker, spot) geen enkele entry uit `new_state`: geen updates, geen inserts, ook niet die van stille wijzigingen (`expired`, verschoven spans). De volgende run berekent dan dezelfde diff opnieuw en levert opnieuw af. Zo kan er geen nieuwe entry ontstaan naast een oude, niet bijgewerkte entry met een overlappende span. Gevolg: events uit dezelfde diff die wel zijn afgeleverd, worden de volgende run opnieuw afgeleverd. Voor bestaande entries vervangt dezelfde `tag` dan de vorige melding; voor een nieuw window kan de gebruiker het bericht twee keer zien. Dat is geaccepteerd, want het gebeurt alleen na een tijdelijke fout. Binnen de diff geldt de schrijfvolgorde van WP-10 (eerst updates, dan inserts).
+  - Alle schrijfacties van een diff komen dus na alle afleveringen van die diff. Heeft WP-17 de `id` van een nieuwe entry al vóór de aflevering nodig (voor de `tag`), dan kan het die zelf toekennen en meegeven bij de latere insert (`AlertStateEntry.id` mag gezet zijn; `to_row()` neemt hem dan mee). Hoe precies, beslist WP-17; de alles-of-niets-regel moet gelden. Wordt hij toch geschonden (bijv. een crash midden in het schrijven), dan herstelt `diff_windows` de overlap bij de volgende run (A15) in plaats van de favoriet te blokkeren.
   - Overgang M1 → push (open punt WP-17): actieve rijen met `last_notified_at is None` zijn de rijen die in M1 een event kregen zonder aflevering.
 - **WP-14 en WP-20:** het formaat van `/go` ligt vast. Fixture-string voor WP-14 AC-5: `https://example.org/go?spot=test-strand&start=2026-07-18T12%3A00%3A00Z&end=2026-07-18T16%3A00%3A00Z` (`start` en `end` zijn hele uren in UTC, halfopen).
 
@@ -372,7 +390,7 @@ def render_alert(event: AlertEvent, spot: SpotProfile, *, kite: KiteAdvice | Non
 
 | # | Geval | Gedrag |
 |---|---|---|
-| E1 | `previous` en `current` leeg | `DiffResult([], [])`. |
+| E1 | `previous` en `current` leeg | `DiffResult(events=[], new_state=[])`. |
 | E2 | Zelfde windows, zelfde `now`, tweede keer | 0 events, `new_state` gelijk aan de invoer (AC-1). |
 | E3 | Lopend window, `now` een uur later, zelfde evaluaties | 0 events: begin geclipt op `first_hour`, wind niet vergeleken (A5). `window_start` blijft het oorspronkelijke begin. |
 | E4 | Begonnen window zakt onder `min_go_hours` en verdwijnt | Geen event; entry blijft `active` en ongewijzigd; `expired` zodra `window_end <= now` (A5). |
@@ -395,8 +413,8 @@ def render_alert(event: AlertEvent, spot: SpotProfile, *, kite: KiteAdvice | Non
 | E21 | Richtingen 350 en 10 in één window | `dir_deg = 0`. Tegengestelde richtingen (gemiddelde onbepaald): `dir_deg` van het eerste uur. |
 | E22 | Klassen gelijk verdeeld (2× onshore, 2× sideshore) | `sideshore` (A2). |
 | E23 | Snapshot met `dir_class` offshore of side-offshore (bijv. uit een kapotte rij) | `ValidationError`, ook via `from_json` en `model_copy`. |
-| E24 | Twee actieve entries met overlappende spans en `window_end > now` | `ValueError`. |
-| E25 | `current` overlapt zichzelf, verschillende spots, dubbele `id`, naïeve `now` | `ValueError`. |
+| E24 | Twee actieve entries met overlappende spans en `window_end > now` (half geschreven vorige diff) | Herstel (A15, stap 4): de entry met het vroegste `window_start`, daarna de laagste `id`, blijft actief; de andere wordt `expired` zonder event. Daarna gewoon koppelen. Geen `ValueError`. |
+| E25 | `current` overlapt zichzelf, verschillende spots, dubbele `id`, naïeve `now`, een window met `start < floor_hour(now) + 1 h` | `ValueError`. |
 | E26 | Invoer ongesorteerd | Zelfde uitkomst; `new_state` volgt de volgorde van `previous`. |
 | E27 | Window over lokale middernacht | `za 18 jul 22:00 – zo 19 jul 01:00`; eind precies om middernacht: `za 18 jul 22:00–00:00`. |
 | E28 | Window op de dag van de wintertijd (2026-10-25 10:00Z–12:00Z) | `zo 25 okt 11:00–13:00` (CET). |
@@ -412,6 +430,11 @@ def render_alert(event: AlertEvent, spot: SpotProfile, *, kite: KiteAdvice | Non
 | E38 | Spotnaam met dubbele spaties of een regeleinde | Titel met enkele spaties. |
 | E39 | `event.spot_id != spot.id` | `ValueError`. |
 | E40 | Niveau 0 cm | `0 cm` (zonder plus). |
+| E41 | Window van 1 uur (`min_go_hours = 1`) schuift in zijn geheel 1 uur op (10–11 wordt 11–12) | `cancelled` plus `new` (geen overlap; bewuste keuze, A3). Alleen begin −1 h (09–11) of alleen eind +1 h (10–12): geen event. |
+| E42 | Zuivere verschuiving van 2 uur (10–16 wordt 12–18 of 08–14) | `worsened` (bewuste keuze, A3). |
+| E43 | Overlappende actieve entries met hetzelfde begin | Laagste `id` blijft actief (A15). |
+| E44 | Begonnen entry overlapt een toekomstige actieve entry met een lagere `id` | De begonnen entry blijft actief (vroegste begin wint, A15); de toekomstige wordt `expired`. |
+| E45 | `m2` precies op een halve tiende (9,25) | `9,3` (half naar boven, niet half naar even). |
 
 ## Testplan
 Tests eerst. Geen netwerk, geen klok: `now` is altijd een expliciete aware datetime. Ruff `DTZ` staat aan, dus elke `datetime(...)` in tests heeft `tzinfo=UTC`. Kalender (gecontroleerd in WP-07): 2026-07-15 woensdag, 2026-07-18 zaterdag (CEST, UTC+2), 2026-11-04 woensdag dus 2026-11-07 zaterdag (CET, UTC+1), 2026-10-25 zondag (wintertijd vanaf 01:00Z).
@@ -504,18 +527,24 @@ def windows_from_pattern(day_start: datetime, pattern: str, *, now: datetime,
 - `test_active_beats_cancelled` (E9): geannuleerde entry 09–12 en actieve entry 13–16 (allebei `persist`), window 11–16 → koppeling aan de actieve entry (event `improved`, begin −2 h); de geannuleerde blijft ongewijzigd.
 - `test_shift_without_overlap` (E10): entry 10–12, window 14–16 → events `cancelled` (index 0) en `new` (index 1).
 
-**AC-4** (met `classify_change` en via `diff_windows`; basislijn `B = snapshot` van een window 2026-07-15 10:00Z–16:00Z met wind 16–22, `now = NOW`)
+**AC-4** (met `classify_change` en via `diff_windows`; basislijn `B = snapshot_window(make_window(utc(2026,7,15,10), 6, winds=[16.0, 18.0, 20.0, 22.0, 20.0, 18.0]))`, dus 10:00Z–16:00Z met wind 16–22, `now = NOW`; via `diff_windows` als `entry(10:00Z, 16:00Z, id="b1", snapshot=B)`)
 - `test_small_changes_no_event`, geparametriseerd: begin ±1 h, eind ±1 h, het hele window 1 h later of eerder, begin +1 h en eind −1 h samen, wind min/max beide +2 kn of −2 kn, wind_min −3,9 kn → `None`, en via `diff_windows` 0 events (entry gekoppeld, snapshot ongewijzigd = basislijn).
 - `test_threshold_events`, geparametriseerd (minstens één per drempel en per richting): begin −2 h → `improved`; begin +2 h → `worsened`; eind +2 h → `improved`; eind −2 h → `worsened`; wind_min +4 → `improved`; wind_min −4 → `worsened`; wind_max +4 → `improved`; wind_max −4 → `worsened`; precies 4,0 met floatruis (basislijn 14,2, nu 18,2) → `improved` (E16). Via `diff_windows`: event met `previous == B`, `current` = nieuw; entry krijgt `snapshot = current` en `last_event = kind`.
-- `test_worsened_wins` (E15): begin −2 h en wind_min −4 → `worsened`; eind +3 h en wind_max −5 → `worsened`.
+- `test_worsened_wins` (E15, E42): begin −2 h en wind_min −4 → `worsened`; eind +3 h en wind_max −5 → `worsened`; het hele window 2 h later (12–18, zelfde wind) → `worsened`; het hele window 2 h eerder (08–14, zelfde wind) → `worsened`. Via `diff_windows` geeft 12–18 één `worsened`-event voor `state_index 0` en geen `new`.
 - `test_ignored_fields` (E18, E19): alleen `gust_max_kn` (None → 30; 20 → 35), `confidence` (high → medium) of `dir_class`/`dir_deg` anders → `None`.
-- `test_wind_ignored_once_begun`: basislijn 10–16 met wind 16–22, `now = utc(2026,7,15,11) + 30 min`, huidig window 12–16 met wind 22–26 → `None` (`P.start < first_hour`). Met `now = NOW` en dezelfde wind → `improved`.
+- `test_wind_ignored_once_begun`: basislijn `B` (10–16, wind 16–22).
+  - Begonnen, `now = utc(2026,7,15,11) + 30 min` (`first_hour` 12:00Z): huidig window 12–16 met `winds=[22.0, 24.0, 26.0, 25.0]` (wind 22–26) → `None`; huidig window 12–16 met `winds=[10.0, 12.0, 14.0, 12.0]` (wind 10–14) → `None`. Reden: `P.start < first_hour`, dus wind telt niet; `p_start = 12:00Z = C.start` en het eind is gelijk, dus ook geen tijdcriterium. Via `diff_windows` met `entry(10:00Z, 16:00Z, id="b1", snapshot=B)`: 0 events, `window_start` blijft 10:00Z, snapshot blijft `B`.
+  - Niet begonnen, `now = NOW`: huidig window 10–16 (zelfde randen als `B`) met `winds=[22.0, 24.0, 26.0, 25.0, 23.0, 22.0]` (wind 22–26) → `improved` (`d_min = +6`, `d_max = +4`, randen gelijk). Met `winds=[10.0, 12.0, 14.0, 12.0, 11.0, 10.0]` (wind 10–14) → `worsened`.
+  - Zo verschilt alleen of het window begonnen is, en toont de test zuiver dat de wind dan wel of niet meetelt.
+- `test_classify_change_now_timezone` (N-8): met `t = utc(2026,7,15,11) + 30 min` geeft `classify_change(B, C, now=...)` hetzelfde voor `now = t`, `now = t.astimezone(LOCAL_TZ)` (13:30 CEST) en `now = t.astimezone(timezone(timedelta(hours=5, minutes=30)))` (17:00+05:30), met `C` = snapshot van 13–16 (begin +1 h ten opzichte van `first_hour` 12:00Z: `None`) en van 14–16 (begin +2 h: `worsened`). De offset van +05:30 bewijst de omzetting: zonder omzetting naar UTC zou `first_hour` 12:30Z worden en 14–16 maar +1,5 h zijn (`None`). Een naïeve `now` → `ValueError`.
+- `test_one_hour_window_shift` (E41, `now = NOW`): `entry(10:00Z, 11:00Z, id="h1")` met huidig window 11–12 → events `cancelled` (index 0) en `new` (index 1); met huidig window 09–11 → 0 events; met huidig window 10–12 → 0 events. Documenteert de bewuste keuze uit A3.
 - `test_drift_accumulates` (E17): drie runs met het window telkens 1 h later (10–16, 11–17, 12–18), `now = NOW`, state doorgegeven via `persist` → events: run 1 `new`, run 2 geen, run 3 `worsened` met `previous.start` 10:00Z.
 
 **AC-5** (determinisme en splitsen/samensmelten; `now = NOW`)
 - `test_split_equal` (E11), `test_split_unequal` (E12), `test_merge` (E13), `test_split_begun` (E14, `now = utc(2026,7,15,11) + 30 min`, entry 10–18 met basislijn 10–18): exact de uitkomst uit de tabel Edge cases (soorten, `state_index`, statussen, spans).
 - `test_deterministic_order`: dezelfde invoer twee keer → gelijke `DiffResult`; `current` omgekeerd → gelijk resultaat; `previous` omgekeerd (met unieke `id`'s) → per `id` dezelfde resulterende entry en dezelfde events (vergeleken via `id` in plaats van index).
-- `test_invalid_input` (E24, E25): naïeve `now`; entry en window van verschillende spots; twee entries met dezelfde `id`; overlappende windows (handmatig gemaakt); twee actieve entries 10–14 en 12–16 → `ValueError`. Lege invoer → `DiffResult([], [])`. De invoerlijsten zijn na afloop ongewijzigd.
+- `test_invalid_input` (E25): naïeve `now`; entry en window van verschillende spots; twee entries met dezelfde `id`; overlappende windows (handmatig gemaakt); een window dat vóór `first_hour` begint (`make_window(utc(2026,7,15,10), 2)` met `now = utc(2026,7,15,10) + 30 min`, `first_hour` 11:00Z) → `ValueError`. Een window dat precies op `first_hour` begint (`make_window(utc(2026,7,15,11), 2)` met dezelfde `now`) is geldig. Lege invoer → `DiffResult(events=[], new_state=[])`. De invoerlijsten zijn na afloop ongewijzigd.
+- Twee actieve entries 10–14 en 12–16 geven **geen** `ValueError` meer; zie `test_overlap_repair` (E24).
 - `test_no_bypass_parameters`: `inspect.signature` van `diff_windows`, `classify_change`, `snapshot_window`, `render_alert` en `build_go_url` bevat geen parameter met `offshore`, `allow`, `force` of `unsafe` in de naam; `now` is keyword-only.
 
 ### `tests/test_dedup_invariants.py` (AC-5)
@@ -534,11 +563,22 @@ Roosters (patronen met G = go, . = marginal, vanaf 2026-07-15 10:00Z, `min_go_ho
 
 De roosters gebruiken alleen tijdsverschillen (wind constant 20), zodat elk event uit A3-tijdregels of uit splitsen/samensmelten/annuleren komt. Geschatte looptijd: enkele seconden.
 
+Zet de invariantcontrole in een helper `check_invariants(prev, cur, now, r)` in dit bestand. "Window `W` is gekoppeld aan entry `i`" betekent hier: `i < len(prev)`, `prev[i].status == "active"`, `r.new_state[i].status == "active"` en `W` ligt binnen de span van `r.new_state[i]`.
+
+**`test_overlap_repair` (E24, E43, E44, A15)**, geparametriseerd. Entries via `entry(...)` met de standaardsnapshot van hun eigen span (wind 20), windows via `make_window` (wind 20). Per geval: exacte events en `new_state`, `check_invariants` (I1 t/m I7), en hetzelfde resultaat per `id` als `previous` in omgekeerde volgorde wordt doorgegeven.
+
+| Geval | `now` | `previous` | `current` | Verwacht |
+|---|---|---|---|---|
+| half geschreven split | `NOW` | `"a"` 10–18, `"n"` 15–18 (beide `active`, `last_event new`) | 10–13, 15–18 | `"n"` → `expired` (verder ongewijzigd, `last_event new`), geen event. `"a"` gekoppeld aan 10–13 (gelijke overlap, vroegste window): `worsened` (eind −5 h), `state_index 0`, `previous` = de snapshot 10–18, span 10–13. 15–18 → nieuwe entry op index 2 met `new`. Events: `[worsened@0, new@2]`. |
+| zelfde begin | `NOW` | `"b"` 10–14, `"a"` 10–16 | 10–16 | `"a"` blijft actief (laagste `id`), gekoppeld, geen event (gelijk aan de basislijn). `"b"` → `expired`. 0 events, `len(new_state) == 2`. |
+| begonnen wint | `utc(2026,7,15,11) + 30 min` | `"x"` 10–16 (begonnen), `"a"` 12–16 (toekomstig) | 12–16 | `"x"` blijft actief (vroegste begin, ondanks hogere `id`), gekoppeld in fase 1, geen event, `window_start` blijft 10:00Z. `"a"` → `expired`. 0 events. |
+| keten | `NOW` | `"c"` 10–14, `"b"` 12–16, `"a"` 15–18 | (geen) | `"c"` blijft; `"b"` overlapt `"c"` → `expired`; `"a"` overlapt alleen het afgevallen `"b"` → blijft. Daarna: `"c"` en `"a"` toekomstig zonder window → beide `cancelled` met event. Events: `[cancelled@0, cancelled@2]`. |
+
 ### `tests/test_messages.py`
 - **AC-7** `test_golden` (geparametriseerd over `GOLDEN_CASES`): `render_alert(case.event, case.spot, kite=case.kite, tides=case.tides, base_url=case.base_url)` geeft exact `title`, `body` en `go_url`, plus `spot_id == "test-strand"` en `kind == event.kind`. Dit dekt: zomer- en wintertijd, alle vier de soorten, de verplichte onderdelen, getij alleen bij een getijgevoelige spot met extremen, kite alleen als meegegeven (en niet bij `cancelled`), `go_url` `None` bij `cancelled` en zonder `base_url`.
 - `test_required_parts_present` (AC-7): voor elk golden-geval komen in titel plus body voor: de spotnaam, `format_window_local` van de relevante snapshot, `" kn"`, `"vlagen"`, `compass_label(dir_deg)` en `f"({dir_deg}°)"`, het `DIR_CLASS_LABEL_NL`-label en het `CONFIDENCE_LABEL_NL`-label. Geen enkel bericht bevat "flandig" (aflandig).
 - `test_tide_line_rules` (E32–E36): `PLAIN_SPOT` met `TIDES_SUMMER` → geen regel die met `Getij` begint; `LOW_TIDE_SPOT` met alleen extremen buiten de marge → geen getij-regel; `make_spot(tide_sensitive="prefer_low")` zonder `rws_station` → geen getij-regel; extremen precies op 09:00Z en 19:00Z (bij `S_SUMMER`) staan erin, 08:59Z en 19:01Z niet; een extreem op 2026-07-18 22:30Z bij een window 18:00Z–20:00Z (grens 23:00Z) toont `zo 00:30`; niveau 0 toont `0 cm`; `rws_station=" teststation "` (spaties) werkt.
-- `test_kite_line_rules`: `KITE_IDEAL` → `Kite: 9 m² (past goed)`; underpowered `KiteAdvice(size_m2=14.0, fit="underpowered", ideal_size_m2=15.8)` → `Kite: 14 m² (aan de kleine kant, ideaal 15,8 m²)`; maat 10,5 → `10,5`; bij `cancelled` met kite: geen kite-regel.
+- `test_kite_line_rules`: `KITE_IDEAL` → `Kite: 9 m² (past goed)`; underpowered `KiteAdvice(size_m2=14.0, fit="underpowered", ideal_size_m2=15.8)` → `Kite: 14 m² (aan de kleine kant, ideaal 15,8 m²)`; maat 10,5 → `10,5`; afronding van `m2` half naar boven (E45): `size_m2=9.25` → `9,3`, `size_m2=9.75` → `9,8`, `size_m2=9.96` → `10`, `size_m2=9.24` → `9,2` (9,25 en 9,75 zijn exact als binaire float, dus de test toetst echt half naar boven en niet half naar even); bij `cancelled` met kite: geen kite-regel.
 - `test_go_url_rules` (E29–E31): `base_url` `None`, `""` en `"   "` → `None`; `"https://example.org/"` → `URL_SUMMER`; `"example.org"`, `"https://example.org/?x=1"`, `"https://exa mple.org"` → `ValueError`.
 - `test_format_window_local` (E27, E28): 2026-07-18 20:00Z–23:00Z → `za 18 jul 22:00 – zo 19 jul 01:00`; 20:00Z–22:00Z → `za 18 jul 22:00–00:00`; 2026-10-25 10:00Z–12:00Z → `zo 25 okt 11:00–13:00`; naïef of `start >= end` → `ValueError`.
 - `test_title_normalized` (E38): spotnaam `"Wijk  aan\nZee"` → titel `Go: Wijk aan Zee`. `test_spot_mismatch` (E39) → `ValueError`.
@@ -560,12 +600,17 @@ De roosters gebruiken alleen tijdsverschillen (wind constant 20), zodat elk even
 - Geen API-endpoints, geen netwerk, geen kosten.
 
 ## Risico's
-- **R1. Drempels niet getoetst aan echt gebruik.** 2 uur en 4 kn zijn een voorstel (A3). Te weinig meldingen: drempels omlaag (3 kn, maar 2 kn mag niet volgens AC-4). Te veel: wind naar 5 kn. Elke wijziging is één constante.
-- **R2. Ruis bij splitsen.** Eén uur dat even `marginal` wordt, splitst een window: `worsened` plus `new`, en bij herstel `improved`. Dat zijn drie meldingen voor één twijfeluur. Bewust gekozen boven verzwijgen (A7); Lars toetst het in de testweek. Mogelijke mitigatie later: `min_go_hours` of de vlaagdrempels.
+- **R1. Drempels niet getoetst aan echt gebruik.** 2 uur en 4 kn zijn een voorstel (A3). Te weinig meldingen: drempels omlaag (3 kn, maar 2 kn mag niet volgens AC-4). Te veel: wind naar 5 kn. Elke wijziging is één constante. Lars toetst in de M1-testweek in elk geval:
+  - de drempels van 2 uur en 4 kn;
+  - dat een zuivere verschuiving van 2 uur (10–16 wordt 12–18, of 08–14) als "Slechter" binnenkomt (A3, E42);
+  - dat bij `min_go_hours = 1` een window van 1 uur dat 1 uur opschuift "Gaat niet door" plus "Go" geeft (A3, E41);
+  - het klapperen bij splitsen en samensmelten (R2).
+- **R2. Ruis bij splitsen.** Eén uur dat even `marginal` wordt, splitst een window: `worsened` plus `new`, en bij herstel `improved`. Dat zijn drie meldingen voor één twijfeluur. Klappert het over meerdere runs (split, samensmelten, weer split), dan krijgen dezelfde uren bij de tweede split opnieuw een `new`: de entry die bij het samensmelten `expired` werd, wordt niet hergebruikt (alleen `cancelled` entries worden heractiveerd, A8). Binnen één diff blijft I4 gelden; over meerdere runs heen is dit een bewuste vereenvoudiging. Bewust gekozen boven verzwijgen (A7); Lars toetst het in de testweek. Mogelijke mitigatie later: `min_go_hours`, de vlaagdrempels, of samengesmolten entries net als geannuleerde heractiveren.
 - **R3. Een lopend window dat instort geeft geen melding** (A5). De gebruiker is dan waarschijnlijk al op het strand en ziet de wind zelf. Komt het window terug, dan wordt het zonder `new` gekoppeld.
 - **R4. Basislijn in plaats van nieuwste stand.** De opgeslagen `snapshot` is wat er gemeld is, niet de nieuwste verwachting (A4). WP-10 en een eventuele UI moeten dat zo tonen; staat onder "Gevolgen".
 - **R5. Een ontbrekende actieve rij in WP-10 geeft een dubbele `new`.** Mitigatie: de laadregel onder "Gevolgen" en de invariant I4.
 - **R6. Pushinkorting.** De volgorde van de regels is ontworpen voor 150 tekens; de echte weergave op iOS en Android is niet gemeten (WP-18 AC-5).
+- **R7. Herstel kost een dubbele melding.** Na een half geschreven diff (A15) wordt de latere, overlappende entry stil `expired`, en het deel van zijn window dat niet aan de behouden entry hangt, krijgt opnieuw `new`. Was de eerste `new` al afgeleverd, dan ziet de gebruiker hem twee keer (met een andere `tag`). Mitigatie: de schrijfvolgorde en de alles-of-niets-regel onder "Gevolgen", zodat herstel alleen na een crash midden in het schrijven nodig is. Alternatief (verworpen): een `ValueError`, die de favoriet dagen zonder alerts laat.
 
 ## Buiten scope
 - `alert_state` laden, opslaan en opruimen, kite-advies per window berekenen, het filter op `verified` (WP-10).
@@ -586,8 +631,8 @@ Werk op branch `wp/WP-08` in `/Users/larst/Dev/Shakka/.claude/worktrees/WP-08`. 
 
    Commit: `feat(domain): add alert window snapshots and alert state models`.
 2. **Deduplicatie, eerst de tests.**
-   - Schrijf de tests voor AC-1 t/m AC-5 in `tests/test_dedup.py`, voeg `windows_from_pattern` toe aan `dedup_fixtures.py` en schrijf `tests/test_dedup_invariants.py`. Rood.
-   - Voeg `classify_change` en `diff_windows` (stappen 0–12 uit Ontwerp) toe aan `dedup.py`. Groen. Duurt `test_dedup_invariants.py` langer dan 30 seconden, meld dat dan in `deviations.md` in plaats van de roosters te verkleinen.
+   - Schrijf de tests voor AC-1 t/m AC-5 in `tests/test_dedup.py` (inclusief `test_classify_change_now_timezone` en `test_one_hour_window_shift`), voeg `windows_from_pattern` toe aan `dedup_fixtures.py` en schrijf `tests/test_dedup_invariants.py` (met `check_invariants`, de twee roosters en `test_overlap_repair`). Rood.
+   - Voeg `classify_change`, `_repair_overlaps` en `diff_windows` (stappen 0–13 uit Ontwerp) toe aan `dedup.py`. Groen. Duurt `test_dedup_invariants.py` langer dan 30 seconden, meld dat dan in `deviations.md` in plaats van de roosters te verkleinen.
 
    Commit: `feat(domain): deduplicate alert windows into new, improved, worsened and cancelled events`.
 3. **Berichten, eerst de tests.**
@@ -595,4 +640,26 @@ Werk op branch `wp/WP-08` in `/Users/larst/Dev/Shakka/.claude/worktrees/WP-08`. 
    - Maak `src/shakka/domain/messages.py` (constanten, `AlertMessage`, `_quote`, `format_window_local`, `build_go_url`, de regelhelpers en `render_alert`). Groen.
 
    Commit: `feat(domain): render Dutch alert messages and go links`.
-4. **Eindcontrole.** Draai de volledige suite en ruff. Controleer met `git status` en `git diff --stat develop` dat alleen de zeven bestanden uit "Bestanden" nieuw zijn en dat er geen bestaand bestand is gewijzigd. Controleer met `grep -n "urllib" ingest/src/shakka/domain/*.py` dat er niets wordt gevonden.
+4. **Eindcontrole.** Draai de volledige suite en ruff. Controleer met `git status` en `git diff --stat $(git merge-base develop HEAD) -- ingest supabase web data` dat alleen de zeven bestanden uit "Bestanden" nieuw zijn en dat er geen bestaand bestand is gewijzigd (de merge-base, omdat `develop` intussen docs-commits heeft gekregen). Controleer met `grep -n "urllib" ingest/src/shakka/domain/*.py` dat er niets wordt gevonden.
+
+## Verwerking review
+Review ronde 1 (`docs/wp/WP-08/review.md`, CHANGES_REQUIRED).
+
+**Blokkerend**
+- **B-1 (`test_wind_ignored_once_begun` verwacht het verkeerde resultaat): verwerkt.** De niet-begonnen variant gebruikt nu een huidig window 10–16 (zelfde randen als de basislijn) met wind 22–26, met verwachting `improved` (`d_min = +6`, `d_max = +4`). Gekozen boven "verwacht `worsened`": de test moet aantonen dat de wind wel of niet meetelt, en met gelijke randen is er geen tijdcriterium dat meespeelt. Met 12–16 zou de test de voorrangsregel toetsen in plaats van de windregel. Beide varianten hebben nu ook een daling (wind 10–14): begonnen `None`, niet begonnen `worsened`. De windlijsten staan er letterlijk bij, en de basislijn `B` is in het AC-4-kopje exact vastgelegd.
+- **B-2 (overlappende actieve entries geven een `ValueError` die een favoriet stil kan zetten): verwerkt, allebei de voorstellen.**
+  - (b) `diff_windows` herstelt de overlap deterministisch in de nieuwe stap 4 (A15): vroegste `window_start`, dan laagste `id`, dan invoervolgorde, blijft actief; de andere worden `expired` zonder event. Daarna loopt het koppelen gewoon door. De `ValueError` voor deze situatie is weg (stap 1, docstring, E24). Nieuwe test `test_overlap_repair` met vier gevallen (half geschreven split, zelfde begin, begonnen wint, keten), elk met I1 t/m I7 en ongevoelig voor de volgorde van `previous`. De prijs (een mogelijk dubbele `new`) staat als R7.
+  - (a) Onder "Gevolgen": WP-10 schrijft per (gebruiker, spot) eerst de updates en dan de inserts; WP-17 past de afleverregel toe op de hele diff per (gebruiker, spot) (alles of niets), als randvoorwaarde. Alle schrijfacties komen na de afleveringen; hoe WP-17 aan de `id` voor de `tag` komt, beslist WP-17.
+  - Fase 1 verwees naar de oude controle ("hooguit één begonnen entry"); dat volgt nu uit het herstel en staat er zo bij.
+
+**Niet-blokkerend**
+- **N-1 (window vóór `first_hour`): verwerkt.** Extra controle in stap 1 (`window.start < first_hour` → `ValueError`) met onderbouwing; getest in `test_invalid_input`, inclusief de grens (precies op `first_hour` is geldig). Alle bestaande scenario's voldoen hier al aan (nagelopen: idempotentie, lopend window, AC-4 met `now = NOW`, E14, rooster B).
+- **N-2 (`DiffResult([], [])`): verwerkt.** Overal `DiffResult(events=[], new_state=[])` (E1, `test_invalid_input`, stap 13).
+- **N-3 (afronding in `m2`): verwerkt.** Half naar boven met `math.floor(x * 10 + 0.5)` en opbouw met gehele getallen; getest met 9,25 → `9,3` (E45).
+- **N-4 (`ls` en `le` ongedefinieerd): verwerkt.** In `format_window_local` gedefinieerd als de lokale `start` en het lokale echte `end`; de datumvergelijking met `end - 1 µs` staat er als expressie bij.
+- **N-5 (zuivere verschuiving van 2 uur is `worsened`): verwerkt als bewuste keuze.** Onderbouwing in A3 (verlies van gemelde uren is slecht nieuws; "Was: …" maakt de verschuiving zichtbaar; een vijfde soort past niet in de DB-CHECK). Beide richtingen getest in `test_worsened_wins` (E42) en opgenomen in de toetslijst van R1.
+- **N-6 (window van 1 uur dat 1 uur verschuift): verwerkt als bewuste keuze.** Onderbouwing in A3: AC-4 ("begin of eind ±1 uur") blijft bij elke lengte gelden, alleen een verschuiving van het hele window met zijn eigen lengte verliest de overlap, en dat is vanaf 2 uur (de standaard) al boven de drempel. Koppelen op "bijna overlap" is niet gedaan omdat het I2 en één-op-één ingewikkelder maakt voor een niet-standaardinstelling. Getest in `test_one_hour_window_shift` (E41), opgenomen in R1.
+- **N-7 (klapperen over meerdere runs geeft opnieuw `new`): verwerkt.** Expliciet in R2, met de mogelijke latere mitigatie (samengesmolten entries heractiveren). Geen ontwerpwijziging.
+- **N-8 (`classify_change` zet `now` zelf naar UTC): verwerkt.** In de pseudocode en de docstring; `test_classify_change_now_timezone` gebruikt een offset van +05:30, waarmee een ontbrekende omzetting echt zichtbaar wordt.
+
+Overig: A1 en A14 vermelden nu dat de contractregel `gust_max_kn: float | None` al op `develop` staat (commit `ef2ca44`). De `git diff`-controle in stap 4 van het stappenplan vergelijkt met de merge-base, omdat `develop` intussen docs-commits heeft gekregen.
