@@ -1,7 +1,10 @@
 // @vitest-environment node
-import { readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
+	checkLazyMapLibre,
 	checkManifest,
 	findExternalScripts,
 	findTrackerRefs,
@@ -54,5 +57,46 @@ describe('pngSize', () => {
 	});
 	it('rejects non-PNG input', () => {
 		expect(() => pngSize(new Uint8Array(30))).toThrow();
+	});
+});
+
+describe('checkLazyMapLibre', () => {
+	const LIB = 'export{setWorkerUrl,getWorkerCount};/* maplibre */';
+	const dirs: string[] = [];
+	function build(files: Record<string, string>): string {
+		const dir = mkdtempSync(join(tmpdir(), 'shakka-build-'));
+		dirs.push(dir);
+		for (const [name, text] of Object.entries(files)) {
+			const path = join(dir, '_app', 'immutable', name);
+			mkdirSync(dirname(path), { recursive: true });
+			writeFileSync(path, text);
+		}
+		return dir;
+	}
+	afterEach(() => {
+		for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true });
+	});
+
+	it('accepts a lazily loaded library chunk', () => {
+		expect(checkLazyMapLibre(build({ 'entry/app.js': 'x', 'chunks/abc.js': LIB }))).toEqual([]);
+	});
+	it('flags maplibre in an entry chunk', () => {
+		const problems = checkLazyMapLibre(
+			build({ 'entry/start.js': 'import("../chunks/maplibre-gl.abc.js")', 'chunks/abc.js': LIB })
+		);
+		expect(problems).toHaveLength(1);
+		expect(problems[0]).toContain('entry');
+	});
+	it('flags a missing library chunk', () => {
+		const problems = checkLazyMapLibre(build({ 'entry/app.js': 'x' }));
+		expect(problems).toHaveLength(1);
+		expect(problems[0]).toContain('no lazily loaded maplibre chunk');
+	});
+	it('does not accept a page chunk that only mentions maplibre', () => {
+		const problems = checkLazyMapLibre(
+			build({ 'entry/app.js': 'x', 'nodes/2.js': 'const u="https://maplibre.org/";setWorkerUrl(u)' })
+		);
+		expect(problems).toHaveLength(1);
+		expect(problems[0]).toContain('no lazily loaded maplibre chunk');
 	});
 });

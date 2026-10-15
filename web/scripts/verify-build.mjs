@@ -1,6 +1,6 @@
 // Post-build checks for the PWA output (build/) and third-party-free sources. Run via `npm run verify:build`.
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
-import { dirname, extname, join } from 'node:path';
+import { dirname, extname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -62,6 +62,32 @@ function listFiles(dir) {
 	});
 }
 
+/**
+ * MapLibre must be lazy: never mentioned in entry chunks, but present as a real library chunk elsewhere.
+ * The library chunk is recognised by its own API names (setWorkerUrl and getWorkerCount), not by the text
+ * "maplibre", which also occurs in app code (URLs, attribution) and in page chunks that only call it.
+ * @param {string} buildDir @returns {string[]} problems
+ */
+export function checkLazyMapLibre(buildDir) {
+	/** @type {string[]} */
+	const problems = [];
+	const immutable = join(buildDir, '_app', 'immutable');
+	const entry = join(immutable, 'entry');
+	for (const file of listFiles(entry)) {
+		if (!['.js', '.css'].includes(extname(file))) continue;
+		if (readFileSync(file, 'utf8').includes('maplibre')) {
+			problems.push(`maplibre referenced in entry chunk ${relative(buildDir, file)}`);
+		}
+	}
+	const hasLibraryChunk = listFiles(immutable).some((file) => {
+		if (file.startsWith(entry) || !['.js', '.mjs'].includes(extname(file))) return false;
+		const text = readFileSync(file, 'utf8');
+		return text.includes('setWorkerUrl') && text.includes('getWorkerCount');
+	});
+	if (!hasLibraryChunk) problems.push('no lazily loaded maplibre chunk in _app/immutable');
+	return problems;
+}
+
 function main() {
 	/** @type {string[]} */
 	const problems = [];
@@ -97,6 +123,7 @@ function main() {
 	}
 
 	if (!existsSync(join(build, 'service-worker.js'))) problems.push('build/service-worker.js is missing');
+	problems.push(...checkLazyMapLibre(build));
 
 	if (existsSync(indexPath)) {
 		for (const tag of findExternalScripts(readFileSync(indexPath, 'utf8'))) {
