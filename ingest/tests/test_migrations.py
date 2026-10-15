@@ -22,7 +22,7 @@ def test_migrations_exist():
 
 
 def test_no_later_milestone_tables():
-    pattern = re.compile(r"create table[^;]*(sessions|rsvps|marine_hours)", re.I)
+    pattern = re.compile(r"create table[^;]*(sessions|rsvps)", re.I)
     assert not pattern.search(_sql())
 
 

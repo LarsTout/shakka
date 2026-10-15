@@ -203,6 +203,10 @@ def test_cascades():
         fake.seed("spots", [{"id": spot, "name": spot}])
         fake.seed("forecast_hours", [_forecast(spot, "knmi", HOUR)])
         fake.seed(
+            "marine_hours",
+            [{"spot_id": spot, "valid_at": HOUR, "wave_height_m": 1.0, "fetched_at": HOUR}],
+        )
+        fake.seed(
             "evaluations",
             [{"spot_id": spot, "valid_at": HOUR, "verdict": "no_go", "evaluated_at": HOUR}],
         )
@@ -217,7 +221,14 @@ def test_cascades():
     fake.seed("favorites", [{"user_id": "u1", "spot_id": "s-one"}])
     fake.seed("alert_rules", [{"user_id": "u1", "spot_id": "s-one"}])
     assert fake.delete("spots", filters={"id": "eq.s-one"}) == 1
-    for table in ("forecast_hours", "evaluations", "favorites", "alert_rules", "alert_state"):
+    for table in (
+        "forecast_hours",
+        "marine_hours",
+        "evaluations",
+        "favorites",
+        "alert_rules",
+        "alert_state",
+    ):
         assert [r["spot_id"] for r in fake.rows(table)] == ["s-two"], table
     assert [r["id"] for r in fake.rows("spots")] == ["s-two"]
     assert fake.writes == [("delete", "favorites"), ("delete", "spots")]

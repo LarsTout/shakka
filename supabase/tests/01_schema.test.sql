@@ -4,7 +4,7 @@ create extension if not exists pgtap with schema extensions;
 
 select plan(71);
 
-select tables_are('public'::name, array['spots', 'forecast_hours', 'tide_extremes', 'evaluations', 'profiles', 'favorites', 'alert_rules', 'alert_state', 'api_usage', 'ingest_runs', 'push_subscriptions']::name[], 'public has exactly the expected tables');
+select tables_are('public'::name, array['spots', 'forecast_hours', 'marine_hours', 'tide_extremes', 'evaluations', 'profiles', 'favorites', 'alert_rules', 'alert_state', 'api_usage', 'ingest_runs', 'push_subscriptions']::name[], 'public has exactly the expected tables');
 
 select columns_are('public'::name, 'spots'::name, array['id', 'name', 'region', 'lat', 'lon', 'shore_normal_deg', 'ridable_dirs', 'hazards', 'tide_sensitive', 'tide_min_level_cm', 'rws_station', 'season', 'status', 'level', 'default_min_kn', 'notes', 'verified', 'updated_at']::name[], 'spots columns');
 select columns_are('public'::name, 'forecast_hours'::name, array['spot_id', 'model', 'valid_at', 'wind_kn', 'gust_kn', 'dir_deg', 'fetched_at']::name[], 'forecast_hours columns');
@@ -50,6 +50,12 @@ select set_eq(
     ('forecast_hours', 'gust_kn', 'real', true),
     ('forecast_hours', 'dir_deg', 'smallint', true),
     ('forecast_hours', 'fetched_at', 'timestamp with time zone', false),
+    ('marine_hours', 'spot_id', 'text', false),
+    ('marine_hours', 'valid_at', 'timestamp with time zone', false),
+    ('marine_hours', 'wave_height_m', 'real', true),
+    ('marine_hours', 'wave_period_s', 'real', true),
+    ('marine_hours', 'wave_dir_deg', 'smallint', true),
+    ('marine_hours', 'fetched_at', 'timestamp with time zone', false),
     ('tide_extremes', 'station', 'text', false),
     ('tide_extremes', 'at', 'timestamp with time zone', false),
     ('tide_extremes', 'kind', 'text', false),
@@ -136,7 +142,7 @@ select set_eq(
   $q$select conrelid::regclass::text, confrelid::regclass::text, confdeltype::text
        from pg_constraint where contype = 'f' and connamespace = 'public'::regnamespace$q$,
   $q$values
-    ('forecast_hours', 'spots', 'c'), ('evaluations', 'spots', 'c'),
+    ('forecast_hours', 'spots', 'c'), ('marine_hours', 'spots', 'c'), ('evaluations', 'spots', 'c'),
     ('profiles', 'auth.users', 'c'),
     ('favorites', 'auth.users', 'c'), ('favorites', 'spots', 'c'),
     ('alert_rules', 'favorites', 'c'),
