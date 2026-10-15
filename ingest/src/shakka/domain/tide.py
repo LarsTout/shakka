@@ -8,6 +8,8 @@ from typing import Annotated, Any, Final, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
+from shakka.domain.defaults import TIDE_NEIGHBOUR_WINDOW
+
 TideKind = Literal["high", "low"]
 MAX_EXTREME_GAP: Final = timedelta(hours=9)  # gap > this between two extremes -> no estimate
 MAX_ABS_LEVEL_CM: Final = 1000  # sanity bound for NAP levels in cm
@@ -77,3 +79,24 @@ def estimate_tide_level(extremes: Sequence[TideExtreme], at: datetime) -> int | 
     f = (t - t0) / (t1 - t0)
     h = h0 + (h1 - h0) * (1 - math.cos(math.pi * f)) / 2
     return math.floor(h + 0.5)
+
+
+def relative_tide_position(extremes: Sequence[TideExtreme], at: datetime) -> float | None:
+    """Position of the estimated level at `at` between the nearest low (0.0) and the nearest
+    high (1.0) water within TIDE_NEIGHBOUR_WINDOW, clamped to [0, 1]. Ties: earliest wins.
+    None if estimate_tide_level is None, a kind is missing in the window, or high <= low.
+    Does not assume that high and low alternate (double low water is fine)."""
+    level = estimate_tide_level(extremes, at)
+    if level is None:
+        return None
+    t = at.astimezone(UTC)
+    near = [e for e in extremes if abs(e.at - t) <= TIDE_NEIGHBOUR_WINDOW]
+    lows = [e for e in near if e.kind == "low"]
+    highs = [e for e in near if e.kind == "high"]
+    if not lows or not highs:
+        return None
+    low = min(lows, key=lambda e: (abs(e.at - t), e.at))
+    high = min(highs, key=lambda e: (abs(e.at - t), e.at))
+    if high.level_cm <= low.level_cm:
+        return None
+    return min(1.0, max(0.0, (level - low.level_cm) / (high.level_cm - low.level_cm)))
