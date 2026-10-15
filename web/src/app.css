@@ -85,3 +85,106 @@ main,
 .error {
 	color: var(--color-error);
 }
+
+/* WP-14: spot list and spot page */
+.verdict {
+	display: inline-block;
+	padding: 0 0.4rem;
+	border-radius: 0.25rem;
+	color: #fff;
+	font-weight: 600;
+}
+
+.verdict-go {
+	background: #1b7f3b;
+}
+
+.verdict-marginal {
+	background: #8a5a00;
+}
+
+.verdict-no_go {
+	background: #a4161a;
+}
+
+.badge-unverified {
+	margin-left: 0.5rem;
+	padding: 0 0.3rem;
+	border: 1px solid #8a5a00;
+	border-radius: 0.25rem;
+	color: #8a5a00;
+	font-size: 0.8rem;
+}
+
+.muted {
+	color: var(--color-muted);
+}
+
+.prewrap {
+	white-space: pre-line;
+}
+
+.spot-list,
+.hours {
+	list-style: none;
+	padding: 0;
+	margin: 0;
+}
+
+.spot-item {
+	padding: 0.75rem 0;
+	border-bottom: 1px solid #ddd;
+}
+
+.spot-link {
+	font-weight: 600;
+}
+
+.day-summary,
+.no-data {
+	margin: 0.25rem 0 0;
+}
+
+.hour {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 0.25rem 0.75rem;
+	padding: 0.5rem 0;
+	border-bottom: 1px solid #ddd;
+}
+
+.hour time {
+	font-weight: 600;
+	min-width: 3rem;
+}
+
+.reasons {
+	flex-basis: 100%;
+	margin: 0;
+	padding-left: 1.25rem;
+	font-size: 0.875rem;
+}
+
+.wind-arrow {
+	vertical-align: middle;
+}
+
+.day h2 {
+	font-size: 1.1rem;
+	margin-top: 1.5rem;
+}
+
+.spot-profile dt {
+	font-weight: 600;
+	margin-top: 0.5rem;
+}
+
+.spot-profile dd {
+	margin-left: 0;
+}
+
+.banner.warning {
+	background: #fdecea;
+	border-color: #a4161a;
+}
