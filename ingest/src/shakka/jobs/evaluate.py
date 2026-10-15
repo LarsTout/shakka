@@ -12,7 +12,7 @@ from shakka.config import get_settings
 from shakka.db import DatabaseError, SupabaseRest, iso_utc
 from shakka.domain.evaluation import default_limits, evaluate_spot
 from shakka.jobs import runtime
-from shakka.jobs.inputs import load_inputs_checked, require_aware, short_error
+from shakka.jobs.inputs import MAX_FETCH_AGE, load_inputs_checked, require_aware, short_error
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +27,7 @@ class EvaluationJobResult:
     deleted: int  # rows removed (valid_at < now - 48h)
     failed: tuple[str, ...] = ()  # spot ids: invalid rows plus evaluation errors, sorted
     errors: tuple[str, ...] = ()  # one line per failed spot
+    stale: tuple[str, ...] = ()  # spots whose forecast rows were all older than MAX_FETCH_AGE
 
 
 def run_evaluation(db: SupabaseRest, *, now: datetime) -> EvaluationJobResult:
@@ -36,7 +37,7 @@ def run_evaluation(db: SupabaseRest, *, now: datetime) -> EvaluationJobResult:
     are evaluated too (the app labels them); only the alert job requires `verified`.
     """
     require_aware(now)
-    load = load_inputs_checked(db, now=now)
+    load = load_inputs_checked(db, now=now, max_fetch_age=MAX_FETCH_AGE)
     rows: list[dict] = []
     failed = list(load.invalid)
     errors = list(load.errors)
@@ -59,13 +60,16 @@ def run_evaluation(db: SupabaseRest, *, now: datetime) -> EvaluationJobResult:
     for spot_id in failed:  # spot ids are public data here (data/spots.yaml)
         logger.warning("evaluate: spot %s failed", spot_id)
     logger.info(
-        "evaluate: spots=%d rows=%d deleted=%d failed=%d",
+        "evaluate: spots=%d rows=%d deleted=%d failed=%d stale=%d",
         evaluated,
         len(rows),
         deleted,
         len(failed),
+        len(load.stale),
     )
-    return EvaluationJobResult(evaluated, len(rows), deleted, tuple(failed), tuple(errors))
+    return EvaluationJobResult(
+        evaluated, len(rows), deleted, tuple(failed), tuple(errors), tuple(load.stale)
+    )
 
 
 def run_evaluate_cli(*, echo: Callable[[str], None]) -> int:

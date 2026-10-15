@@ -111,3 +111,16 @@ def test_invalid_spot_reported(caplog):
 def test_naive_now():
     with pytest.raises(ValueError):
         run_evaluation(FakeSupabase(), now=datetime(2026, 7, 15, 6, 17))  # noqa: DTZ001
+
+
+def test_stale_spot_gets_no_new_evaluations():
+    db = FakeSupabase()
+    seed_spot(db)
+    seed_forecasts(db, fetched_at=NOW - timedelta(hours=3, seconds=1))
+    old = old_eval_row(floor_hour(NOW))
+    db.seed("evaluations", [old])
+    result = run_evaluation(db, now=NOW)
+    assert result.stale == (SPOT,)
+    assert result.rows == 0
+    (row,) = db.rows("evaluations")
+    assert datetime.fromisoformat(row["evaluated_at"]) == old["evaluated_at"]  # untouched

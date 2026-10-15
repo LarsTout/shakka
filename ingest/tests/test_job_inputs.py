@@ -191,3 +191,54 @@ def test_floor_hour():
 def test_naive_now():
     with pytest.raises(ValueError):
         load_inputs_checked(FakeSupabase(), now=datetime(2026, 7, 15, 6, 17))  # noqa: DTZ001
+
+
+MAX_AGE = timedelta(hours=3)
+
+
+def _seed_aged(db, age):
+    db.seed("forecast_hours", [one_model_row(at(10), NOW - age, "knmi")])
+
+
+def test_max_fetch_age_boundary_is_fresh():
+    db = FakeSupabase()
+    seed_spot(db)
+    _seed_aged(db, MAX_AGE)
+    load = load_inputs_checked(db, now=NOW, max_fetch_age=MAX_AGE)
+    assert len(load.inputs[SPOT].forecasts) == 1
+    assert load.stale == []
+
+
+def test_max_fetch_age_one_second_over_is_stale(caplog):
+    caplog.set_level(logging.INFO)
+    db = FakeSupabase()
+    seed_spot(db)
+    _seed_aged(db, MAX_AGE + timedelta(seconds=1))
+    load = load_inputs_checked(db, now=NOW, max_fetch_age=MAX_AGE)
+    assert load.inputs[SPOT].forecasts == []
+    assert load.stale == [SPOT]
+    assert "stale=1" in caplog.text and SPOT not in caplog.text
+
+
+def test_max_fetch_age_keeps_only_fresh_model():
+    db = FakeSupabase()
+    seed_spot(db)
+    db.seed(
+        "forecast_hours",
+        [
+            one_model_row(at(10), NOW - timedelta(hours=1), "icon"),
+            one_model_row(at(10), NOW - timedelta(hours=4), "knmi"),
+        ],
+    )
+    load = load_inputs_checked(db, now=NOW, max_fetch_age=MAX_AGE)
+    assert [f.model for f in load.inputs[SPOT].forecasts] == [ModelKey.ICON]
+    assert load.stale == []
+
+
+def test_without_max_fetch_age_old_rows_stay():
+    db = FakeSupabase()
+    seed_spot(db)
+    _seed_aged(db, timedelta(hours=10))
+    load = load_inputs_checked(db, now=NOW)
+    assert len(load.inputs[SPOT].forecasts) == 1
+    assert load.stale == []

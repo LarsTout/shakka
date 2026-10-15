@@ -58,6 +58,7 @@ from shakka.domain.push import push_tag
 from shakka.domain.spot import SpotProfile
 from shakka.jobs import runtime
 from shakka.jobs.inputs import (
+    MAX_FETCH_AGE,
     SpotInputs,
     db_error_summary,
     load_inputs,
@@ -223,7 +224,9 @@ def load_alert_context(
         )
         for f in fav_rows
     ]
-    inputs = load_inputs(db, now=now, spot_ids={f.spot_id for f in favorites})
+    inputs = load_inputs(
+        db, now=now, spot_ids={f.spot_id for f in favorites}, max_fetch_age=MAX_FETCH_AGE
+    )
     return AlertContext(favorites, inputs)
 
 

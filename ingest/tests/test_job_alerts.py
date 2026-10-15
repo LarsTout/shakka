@@ -549,3 +549,19 @@ def test_naive_now():
     db = make_db()
     with pytest.raises(ValueError):
         run_alerts(db, now=datetime(2026, 7, 15, 6, 17), base_url=None)  # noqa: DTZ001
+
+
+def test_stale_forecast_makes_favorite_ineligible():
+    from datetime import timedelta
+
+    db = make_db()
+    seed_favorite(db, USER_A, min_kn=12)
+    run_alerts(db, now=NOW, base_url=None)
+    before = alert_rows(db)
+    db.delete("forecast_hours", filters={"spot_id": f"eq.{SPOT}"})
+    seed_forecasts(db, fetched_at=NOW - timedelta(hours=4))
+    db.writes.clear()
+    result = run_alerts(db, now=NOW, base_url=None)
+    assert (result.ineligible, result.skipped, result.write_errors) == (1, 0, 0)
+    assert alert_rows(db) == before
+    assert [w for w in alert_writes(db) if w[1] == "alert_state" and w[0] != "delete"] == []

@@ -867,3 +867,33 @@ def test_blocked_target_warning(tmp_path):
     assert (
         "::warning::alerts: 1 push subscription(s) skipped: push service host not allowed"
     ) in report.annotations
+
+
+def test_per_spot_staleness_with_two_spots(tmp_path):
+    other = {**PIPELINE_SPOT, "id": "oud-strand", "name": "Oud strand"}
+    db = FakeSupabase()
+    seed_user(db)
+    old = NOW - timedelta(hours=4)
+    db.seed(
+        "forecast_hours",
+        [
+            {
+                "spot_id": "oud-strand",
+                "model": "knmi",
+                "valid_at": NOW.replace(minute=0, second=0, microsecond=0) + timedelta(hours=2),
+                "wind_kn": 15.0,
+                "gust_kn": 18.0,
+                "dir_deg": 270,
+                "fetched_at": old,
+            }
+        ],
+    )
+
+    def only_first(http, locations, **kw):
+        return fake_forecast_fetch(http, [loc for loc in locations if loc.spot_id == "test-strand"])
+
+    report = run_real(tmp_path, db, spots=(PIPELINE_SPOT, other), forecast_fetch=only_first)
+    spots = {r["spot_id"] for r in db.rows("evaluations")}
+    assert spots == {"test-strand"}
+    assert step(report, "evaluate").status in ("ok", "partial")
+    assert step(report, "alerts").status in ("ok", "partial")
