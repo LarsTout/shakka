@@ -1,5 +1,5 @@
 # Blueprint WP-14: Spotlijst en spotpagina
-Status: DRAFT
+Status: APPROVED
 Revisie: 1
 
 ## Doel
