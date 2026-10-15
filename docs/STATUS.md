@@ -1,5 +1,7 @@
 # Status
 
+Opdeling v2: goedgekeurd (Lars, 15 oktober 2026; scopewijzigingen WP-30 en WP-31 vragen nog expliciet akkoord vóór de start, WP-24 is op verzoek van Lars).
+
 Opdeling: goedgekeurd.
 
 | WP | Naam | Status | Notitie |
@@ -28,7 +30,23 @@ Opdeling: goedgekeurd.
 | WP-21 | Publieke sessiepagina en RSVP zonder account | done | AC-7 open: RSVP-test op telefoon zonder account + noindex in preview (RUNBOOK §16.9) |
 | WP-22 | Hardening backend en kostenbewaking | todo | |
 | WP-23 | Privacy, toegankelijkheid en performance | todo | |
+| WP-24 | E-mail als tweede meldingskanaal | todo | M5; scopewijziging, akkoord Lars nodig; niet parallel met WP-30 |
+| WP-25 | Moderatie voor organisatoren | todo | M5 |
+| WP-26 | Forecast-horizon 8 dagen (`days_ahead` 7 werkt) | todo | M5 |
+| WP-27 | Ingest-hygiëne: RWS-verbruik, stationvolgorde, `doctor`, puurheidscheck | todo | M5 |
+| WP-28 | Dependabot | todo | M5; besluit Lars (draait WP-22 A17 terug) |
+| WP-29 | Inloggen met een code | todo | M5; na eigen SMTP (WP-22) |
+| WP-30 | Stille uren voor meldingen | todo | M5; scopewijziging, akkoord Lars nodig; niet parallel met WP-24 |
+| WP-31 | Open aanmelden: crew organiseert zelf | todo | M5; scopewijziging, akkoord Lars nodig |
+| WP-32 | `cell_selection` per spot | todo | M5; voorwaardelijk: Lars wijst een spot aan |
+| WP-33 | Eigen app-icoon en installeerbaarheid | todo | M5; voorwaardelijk: icoon of bevindingen WP-23 AC-6 |
 
 Statussen: `todo`, `blueprint`, `in_review`, `approved`, `building`, `verifying`, `done`, `blocked`, `dropped` (vervallen door een scopebesluit van Lars; wordt niet gebouwd).
 
 Aanbevolen volgorde M2 (zie `docs/WORK_PACKAGES.md`, A-16 en A-17): WP-14 → WP-16 → WP-17 → WP-18 → WP-12 → WP-15.
+
+Aanbevolen volgorde M5 (zie `docs/WORK_PACKAGES_V2.md`). Alles start pas na WP-22 en WP-23.
+- Golf 1, parallel: WP-25, WP-26, WP-27 en WP-28.
+- Golf 2: WP-29 en WP-30.
+- Golf 3: WP-31 (na WP-25 en WP-29) en WP-24 (na WP-30).
+- Voorwaardelijk: WP-32 (na WP-26) en WP-33.

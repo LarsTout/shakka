@@ -152,6 +152,7 @@ Scopewijziging, besluit Lars op 15 oktober 2026: **Telegram vervalt volledig; We
 - **M2, "PWA"**: kaart, spotoordeel, eigen alertinstellingen, push op telefoon (het enige meldingskanaal).
 - **M3, "crew"**: "ik ga"-links in WhatsApp, RSVP zonder account, carpoolplekken.
 - **M4, "klaar voor anderen"**: hardening, daarna delen met kitevrienden en een studentenclub.
+- **M5, "v2"** (voorstel, wacht op akkoord van Lars): wat tijdens v1 bewust is uitgesteld. Zie sectie 9.
 
 Na elke mijlpaal: Lars test een week zelf. Pas door naar de volgende als de vorige echt gebruikt wordt.
 
@@ -197,3 +198,15 @@ Mechanisch werk (formatteren, lint fixen, seed-YAML valideren) mag naar `haiku`.
 ## 8. Open punten
 - Open-Meteo per mail bevestigen dat een gratis publieke app zonder ads onder niet-commercieel valt (vóór M4).
 - Spotprofielen verifiëren tegen NKV spotkaart en gemeentelijke regels; mogelijk de NKV benaderen voor een datapartnerschap.
+
+## 9. v2 (voorstel, wacht op akkoord van Lars)
+
+Na M4 volgt mijlpaal **M5 "v2"**. M5 bevat alles wat tijdens v1 (WP-00 t/m WP-23) bewust is uitgesteld. De uitwerking staat in `docs/WORK_PACKAGES_V2.md`: WP-24 t/m WP-33, met per WP de herkomst, de contracten en de acceptatiecriteria.
+
+- **Geen scopewijziging zonder akkoord.** Deze sectie verandert de scope, de non-goals en de harde randvoorwaarden niet. Drie v2-WP's zijn een scopewijziging en worden pas gebouwd nadat Lars ze expliciet goedkeurt. Dat akkoord wordt dan hier vastgelegd:
+  - **WP-24, e-mail als tweede meldingskanaal.** Wijkt af van het besluit van 15 oktober 2026 dat Web Push het enige kanaal is.
+  - **WP-30, stille uren voor meldingen.** Eerder besloten: niet in v1.
+  - **WP-31, open aanmelden.** Crewleden maken zelf een account en organiseren sessies.
+- **Opruimen en afmaken.** De andere WP's zijn opruimen en afmaken (moderatie voor organisatoren, een forecast-horizon van 8 dagen, ingest-hygiëne, inloggen met een code), of een besluit van Lars (Dependabot, `cell_selection` per spot, eigen app-icoon).
+- **Volgorde.** Drie sporen (opruimen, crew en sessies, meldingen), in golven. Alle v2-WP's starten pas als WP-22 en WP-23 `done` zijn.
+- **Na M5.** Lars test een week, zoals na elke mijlpaal.
