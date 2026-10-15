@@ -13,5 +13,12 @@ export const variables = defineEnvVars({
 		static: true,
 		schema: parsePublishableKey,
 		description: 'Supabase publishable key (sb_publishable_...). Never the secret key.'
+	},
+	PUBLIC_MAPTILER_KEY: {
+		public: true,
+		static: true,
+		schema: parseMaptilerKey,
+		description:
+			'MapTiler API key (public, restricted to allowed HTTP origins). Optional: empty = map unavailable, list keeps working.'
 	}
 });
