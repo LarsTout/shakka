@@ -66,6 +66,14 @@ def forecast_fetch(dry_run: bool) -> None:
     raise SystemExit(run_forecast_cli(dry_run=dry_run, echo=click.echo))
 
 
+@cli.command()
+def evaluate() -> None:
+    """Evaluate all spots with the spot defaults and store the hourly verdicts."""
+    from shakka.jobs.evaluate import run_evaluate_cli
+
+    raise SystemExit(run_evaluate_cli(echo=click.echo))
+
+
 @cli.group()
 def tides() -> None:
     """Rijkswaterstaat astronomical tide extremes."""
