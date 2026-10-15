@@ -2,10 +2,12 @@ import { supabase } from '#lib/supabase.js';
 import { addDaysToKey, floorHour, localDateKey, startOfLocalDay } from './time.js';
 import {
 	EVALUATION_COLUMNS,
+	MARINE_HOUR_COLUMNS,
 	SPOT_COLUMNS,
 	SUMMARY_COLUMNS,
 	TIDE_EXTREME_COLUMNS,
 	type Evaluation,
+	type MarineHour,
 	type Spot,
 	type SpotSummary,
 	type SummaryRow,
@@ -119,4 +121,16 @@ export async function getSpotSummaries(now: Date): Promise<Record<string, SpotSu
 			.order('valid_at', { ascending: true })
 	);
 	return summarizeSpots(rows, now);
+}
+
+export function getMarineHours(spotId: string, from: Date, to: Date): Promise<MarineHour[]> {
+	return fetchAllPages<MarineHour>('getMarineHours', () =>
+		supabase
+			.from('marine_hours')
+			.select(MARINE_HOUR_COLUMNS.join(','))
+			.eq('spot_id', spotId)
+			.gte('valid_at', from.toISOString())
+			.lt('valid_at', to.toISOString())
+			.order('valid_at', { ascending: true })
+	);
 }

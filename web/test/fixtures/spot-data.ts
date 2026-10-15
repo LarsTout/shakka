@@ -1,4 +1,4 @@
-import type { Evaluation, Spot, TideExtreme } from '../../src/lib/types.js';
+import type { Evaluation, MarineHour, Spot, TideExtreme } from '../../src/lib/types.js';
 
 // Test data only (never in data/spots.yaml).
 export const NOW_FRESH = '2026-07-15T12:30:00.000Z';
@@ -102,6 +102,21 @@ export const TIDES: TideExtreme[] = [
 	{ station: 'teststation', at: '2026-07-15T15:40:00+00:00', kind: 'low', level_cm: -70 }
 ];
 
+export const MARINE_FRESH: MarineHour = {
+	spot_id: 'test-strand',
+	valid_at: '2026-07-15T12:00:00+00:00',
+	wave_height_m: 1.24,
+	wave_period_s: 5.4,
+	wave_dir_deg: 250,
+	fetched_at: '2026-07-15T12:05:00+00:00'
+};
+// NOW_FRESH is 12:30Z: this row is 3 hours and 1 minute old.
+export const MARINE_STALE: MarineHour = {
+	...MARINE_FRESH,
+	valid_at: '2026-07-15T12:00:00+00:00',
+	fetched_at: '2026-07-15T09:29:00+00:00'
+};
+
 export function pageData(overrides: Record<string, unknown> = {}) {
 	return {
 		kind: 'ok' as const,
@@ -109,6 +124,7 @@ export function pageData(overrides: Record<string, unknown> = {}) {
 		spot: SPOT_UNVERIFIED,
 		evaluations: [EVAL_GO, EVAL_OFFSHORE, EVAL_LOWCONF, EVAL_DARK, EVAL_TOMORROW],
 		tides: TIDES,
+		marine: [] as MarineHour[],
 		...overrides
 	};
 }
