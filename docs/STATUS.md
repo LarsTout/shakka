@@ -6,9 +6,9 @@ Opdeling: goedgekeurd.
 |---|---|---|---|
 | WP-00 | Repo, tooling, CI en Supabase-koppeling | done | |
 | WP-01 | Datamodel M1, RLS en database-client | done | AC-7: `supabase db push` door Lars na merge |
-| WP-02 | Spotprofielen: schema, validatie, sync en startset | done | handmatige check op develop open (zie docs/wp/WP-02/verification.md) |
-| WP-03 | Forecast-ingest wind (Open-Meteo multi-model) met call-budget | done | handmatige check op develop open (zie docs/wp/WP-03/verification.md) |
-| WP-04 | Getij-ingest (Rijkswaterstaat) | done | handmatige check op develop open (zie docs/wp/WP-04/verification.md) |
+| WP-02 | Spotprofielen: schema, validatie, sync en startset | done | |
+| WP-03 | Forecast-ingest wind (Open-Meteo multi-model) met call-budget | done | |
+| WP-04 | Getij-ingest (Rijkswaterstaat) | done | |
 | WP-05 | Evaluatie-engine (puur) | todo | |
 | WP-06 | Kite-advies (puur) | todo | |
 | WP-07 | Alertregels en windows (puur) | todo | |
@@ -17,7 +17,7 @@ Opdeling: goedgekeurd.
 | WP-10 | Evaluatie- en alertjobs plus beheer-CLI | todo | |
 | WP-11 | Orkestratie: uurlijkse workflow, logging, foutmeldingen | todo | |
 | WP-12 | Marine-ingest (golven) | todo | |
-| WP-13 | PWA-basis | done | handmatige check op develop open (zie docs/wp/WP-13/verification.md) |
+| WP-13 | PWA-basis | done | AC-7 open: Cloudflare Pages + Supabase Auth-URLs door Lars (RUNBOOK §11) |
 | WP-14 | Spotlijst en spotpagina | todo | |
 | WP-15 | Kaart | todo | |
 | WP-16 | Profiel, favorieten en alertinstellingen | todo | |

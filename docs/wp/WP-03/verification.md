@@ -42,3 +42,13 @@ AC-8, exacte stappen (vanuit `ingest/`, na `supabase start` en `.env` tijdelijk 
 Geen fails.
 
 N-1 (informatief, geen fail): AC-8 blijft open voor Lars (zie hierboven). `wp/WP-03` is volgens `deviations.md` punt 7 door de builder niet gepusht, maar `origin/wp/WP-03` bestaat en staat op HEAD. Dit is daarmee achterhaald.
+
+## Handmatige check op develop (15 oktober 2026, AC-8)
+Uitgevoerd door de orchestrator tegen de lokale stack, met echte Open-Meteo-requests, na de merge op `develop` (`b794f7c`). Test-spot `test-strand` (52.47, 4.57).
+- `shakka forecast fetch` (1e): `forecast: spots=1 rows=571 calls=1.20 deleted=0 skipped_budget=no errors=0`, `forecast: ok`, exit 0.
+- `forecast_hours` per model: ecmwf 168, gfs 168, icon 168, knmi 67 (KNMI-horizon circa 2,5 dag).
+- `shakka forecast fetch` (2e): zelfde regel, zelfde tellingen (geen verdubbeling).
+- `api_usage`: `2026-10-15 | open_meteo_forecast | calls 2.40 | requests 2`.
+- Test-spot daarna verwijderd.
+
+**AC-8: PASS.** Resultaat WP-03: PASS.

@@ -35,3 +35,12 @@ SUPABASE_URL=http://127.0.0.1:54321 SUPABASE_SECRET_KEY=<local> uv run python -c
 SHAKKA_TEST_SUPABASE_URL=http://127.0.0.1:54321 SHAKKA_TEST_SUPABASE_SECRET_KEY=<local> uv run pytest tests/test_spots_sync_local.py
 ```
 Verwacht: de eerste sync meldt `25 of 25 spots upserted`, de telling geeft 25, de tweede sync meldt `0 of 25 spots upserted (25 unchanged)` en de lokale test slaagt.
+
+## Handmatige check op develop (15 oktober 2026, AC-6)
+Uitgevoerd door de orchestrator tegen de lokale stack (`supabase start`, `db reset`), na de merge op `develop` (`b794f7c`).
+- `shakka spots sync` (1e): `ok      25 of 25 spots upserted (0 unchanged)`, exit 0.
+- `shakka spots sync` (2e): `ok      0 of 25 spots upserted (25 unchanged)`, exit 0.
+- `select count(*) from spots`: 25.
+- `tests/test_spots_sync_local.py`: 1 passed.
+
+**AC-6: PASS.** Resultaat WP-02: PASS.
