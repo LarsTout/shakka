@@ -1,6 +1,12 @@
 import pytest
+import pywebpush
 
 import shakka.config
+
+
+def _blocked_webpush(*args, **kwargs):
+    # Failed is a BaseException: no `except Exception` swallows it, so the test really fails.
+    pytest.fail("real web push in a test", pytrace=False)
 
 
 @pytest.fixture(autouse=True)
@@ -9,3 +15,9 @@ def _isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path):
     for field in shakka.config.Settings.model_fields:
         monkeypatch.delenv(field.upper(), raising=False)
     monkeypatch.setattr(shakka.config, "ENV_FILE", tmp_path / "absent.env")
+
+
+@pytest.fixture(autouse=True)
+def _no_real_webpush(monkeypatch: pytest.MonkeyPatch):
+    """Make a real network push impossible in any test."""
+    monkeypatch.setattr(pywebpush, "webpush", _blocked_webpush)
