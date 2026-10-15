@@ -5,6 +5,8 @@
 -- 7 days after ends_at by purge_expired_sessions (pipeline step sessions_cleanup).
 -- Errors raised here: SQLSTATE PT400 (PostgREST: HTTP 400) with message exactly one of
 -- rate_limited, session_closed, session_full, invalid_input, invalid_token.
+-- The edit token is a secret: callers send it only in a POST body (supabase-js rpc()), never in a
+-- URL or query string, and only its sha256 is stored.
 
 create extension if not exists pgcrypto with schema extensions;
 
