@@ -164,7 +164,7 @@ Het root-bestand `.env.example` bevat alleen de ingest-variabelen. `web/.env.exa
 | Supabase e-mail | De standaard-SMTP stuurt alleen naar teamleden van het project, max. 2 per uur. Voor productie is eigen SMTP nodig. | https://supabase.com/docs/guides/auth/auth-smtp |
 | Supabase IPv4 | Directe DB-verbinding loopt via IPv6. GitHub Actions is alleen IPv4. De pooler of REST is wel bereikbaar. | https://supabase.com/docs/guides/database/connecting-to-postgres |
 | Supabase DB-tests | `supabase test db` (pgTAP) vereist een lokale stack (`supabase start`, Docker) | https://supabase.com/docs/guides/local-development/testing/overview |
-| MapTiler gratis | 5.000 map sessions/maand; daarna gepauzeerd tot de volgende maand (geen kosten); MapTiler-logo verplicht; niet-commercieel | https://www.maptiler.com/cloud/pricing/ |
+| MapTiler gratis | Met MapLibre GL (geen MapTiler-SDK, die stuurt telemetrie) rekent MapTiler in API-requests: 100.000/maand gratis, alleen tiles tellen (style, TileJSON, fonts niet); daarna gepauzeerd tot de volgende maand (geen kosten); MapTiler-logo en OSM-attributie verplicht; niet-commercieel. Key-restrictie op `Origin`: productiekey alleen Pages-domein, aparte lokale key (WP-15 N-10) | https://www.maptiler.com/cloud/pricing/ |
 | Cloudflare Pages | 500 builds/maand, 20.000 bestanden. Zonder `404.html` gedraagt de site zich als SPA (onbekende paden serveren `/`). | https://developers.cloudflare.com/pages/platform/limits/, https://developers.cloudflare.com/pages/configuration/serving-pages/ |
 | GitHub Actions | Gratis en onbeperkt in publieke repo's. Privé: 2.000 min/maand. In publieke repo's worden schedules na 60 dagen zonder commits stil uitgeschakeld. | https://docs.github.com/en/billing/concepts/product-billing/github-actions, https://docs.github.com/actions/managing-workflow-runs/disabling-and-enabling-a-workflow |
 | GitHub Actions-meldingen (gecontroleerd 15 oktober 2026) | Meldingen over geplande workflows gaan naar de gebruiker die de workflow heeft aangemaakt; wijzigt een ander de cron-syntax, dan naar die gebruiker. Instelbaar per gebruiker: e-mail en/of web, eventueel alleen bij gefaalde runs. Er is geen ingebouwde deduplicatie: elke gefaalde run geeft een melding. | https://docs.github.com/en/actions/concepts/workflows-and-actions/notifications-for-workflow-runs |
@@ -1015,7 +1015,7 @@ Vervallen (15 oktober 2026): Telegram is geschrapt; zie WP-17. Besluit van Lars,
 - AC-4: Een test laat zien dat zonder `PUBLIC_MAPTILER_KEY` de kaartwissel een fallbackmelding geeft en de lijst bruikbaar blijft.
 - AC-5: Uit de code of een test blijkt dat de attributiecontrol aan staat en niet verborgen is.
 - AC-6: Op de gedeployde site toont de kaart na een klik markers met de juiste oordelen. Dit is `NEEDS_LARS`.
-**Nodig van Lars:** Een gratis MapTiler-account en een API-key met domeinrestrictie (Pages-domein en localhost), ingesteld als `PUBLIC_MAPTILER_KEY` in Cloudflare Pages en in `web/.env`.
+**Nodig van Lars:** Een gratis MapTiler-account met twee API-keys: een productiekey met domeinrestrictie op alleen het Pages-domein (geen localhost), als `PUBLIC_MAPTILER_KEY` in Cloudflare Pages; en een aparte lokale key die alleen in `web/.env` staat.
 **Omvang:** S
 
 ## WP-16: Profiel, favorieten en alertinstellingen
