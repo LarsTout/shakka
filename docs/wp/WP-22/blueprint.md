@@ -1,5 +1,5 @@
 # Blueprint WP-22: Hardening backend en kostenbewaking
-Status: DRAFT
+Status: APPROVED
 Revisie: 2
 
 ## Doel
