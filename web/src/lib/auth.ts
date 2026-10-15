@@ -1,6 +1,7 @@
 import type { Session } from '@supabase/supabase-js';
 import { writable, type Readable } from 'svelte/store';
-import { initialUrlHash, supabase } from '#lib/supabase.js';
+import { releasePushForSignOut } from '#lib/push.js';
+import { initialUrlHash, supabase, supabaseOrigin } from '#lib/supabase.js';
 
 export const AUTH_MESSAGES = {
 	invalidEmail: 'Vul een geldig e-mailadres in.',
@@ -9,7 +10,10 @@ export const AUTH_MESSAGES = {
 	network: 'Geen verbinding met de server. Controleer je internet en probeer het opnieuw.',
 	generic: 'Het versturen van de inloglink is niet gelukt. Probeer het later opnieuw.',
 	linkExpired: 'Deze inloglink is verlopen of al gebruikt. Vraag een nieuwe aan.',
-	linkFailed: 'Inloggen via de link is niet gelukt. Vraag een nieuwe inloglink aan.'
+	linkFailed: 'Inloggen via de link is niet gelukt. Vraag een nieuwe inloglink aan.',
+	linkInvalid: 'Dit is geen geldige inloglink. Kopieer de link uit de mail van Shakka opnieuw.',
+	pastedLinkUsed:
+		'Deze inloglink is al gebruikt of verlopen. Een voorvertoning van de link in je mail-app telt ook als gebruik. Zet de linkvoorvertoningen uit (zie hierboven) en vraag een nieuwe link aan.'
 } as const;
 
 const store = writable<Session | null | undefined>(undefined);
@@ -54,8 +58,14 @@ export async function signInWithMagicLink(email: string): Promise<{ error?: stri
 	}
 }
 
-/** Signs out on this device only (scope 'local'). Never throws; logs a warning on error. */
+/** Signs out on this device only (scope 'local'). Never throws; logs a warning on error.
+ *  First removes this device's push subscription while the session is still valid (WP-17, WP-18). */
 export async function signOut(): Promise<void> {
+	try {
+		await releasePushForSignOut();
+	} catch {
+		// never blocks sign-out
+	}
 	try {
 		const { error } = await supabase.auth.signOut({ scope: 'local' });
 		if (error) console.warn('signOut failed');
@@ -99,4 +109,60 @@ export function parseAuthRedirectError(hash: string): string | null {
 /** parseAuthRedirectError(initialUrlHash) */
 export function initialAuthRedirectError(): string | null {
 	return parseAuthRedirectError(initialUrlHash);
+}
+
+/** Link types that sign a user in via verifyOtp({ token_hash, type }). recovery and email_change are refused. */
+export type PastedLinkType = 'magiclink' | 'signup' | 'invite';
+
+const PASTED_LINK_TYPES: readonly string[] = ['magiclink', 'signup', 'invite'];
+
+/** Token hash and type from a pasted Supabase Auth link of this project (text is trimmed first). Anything else -> null. */
+export function parseMagicLink(
+	text: string,
+	origin: string
+): { tokenHash: string; type: PastedLinkType } | null {
+	let url: URL;
+	try {
+		url = new URL(text.trim());
+	} catch {
+		return null;
+	}
+	if (url.origin !== origin || url.pathname !== '/auth/v1/verify') return null;
+	const type = url.searchParams.get('type');
+	const token = url.searchParams.get('token');
+	if (type === null || !PASTED_LINK_TYPES.includes(type)) return null;
+	if (!token || /\s/.test(token) || token.length > 256) return null;
+	return { tokenHash: token, type: type as PastedLinkType };
+}
+
+/** otp_expired -> pastedLinkUsed; network and rate limit as elsewhere; else linkFailed. */
+export function pastedLinkErrorMessage(error: unknown): string {
+	if (typeof error !== 'object' || error === null) return AUTH_MESSAGES.linkFailed;
+	const { name, status, code } = error as { name?: unknown; status?: unknown; code?: unknown };
+	if (code === 'otp_expired') return AUTH_MESSAGES.pastedLinkUsed;
+	if (name === 'AuthRetryableFetchError' || status === 0) return AUTH_MESSAGES.network;
+	if (
+		status === 429 ||
+		code === 'over_request_rate_limit' ||
+		code === 'over_email_send_rate_limit'
+	) {
+		return AUTH_MESSAGES.rateLimited;
+	}
+	return AUTH_MESSAGES.linkFailed;
+}
+
+/** Signs in with a pasted login link. Never throws and never logs the link.
+ *  Success: {} (the session store updates via onAuthStateChange). */
+export async function signInWithPastedLink(text: string): Promise<{ error?: string }> {
+	const parsed = parseMagicLink(text, supabaseOrigin);
+	if (!parsed) return { error: AUTH_MESSAGES.linkInvalid };
+	try {
+		const { error } = await supabase.auth.verifyOtp({
+			token_hash: parsed.tokenHash,
+			type: parsed.type
+		});
+		return error ? { error: pastedLinkErrorMessage(error) } : {};
+	} catch {
+		return { error: AUTH_MESSAGES.network };
+	}
 }

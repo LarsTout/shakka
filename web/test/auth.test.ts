@@ -5,15 +5,24 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const auth = vi.hoisted(() => ({
 	signInWithOtp: vi.fn(),
 	signOut: vi.fn(),
-	onAuthStateChange: vi.fn()
+	onAuthStateChange: vi.fn(),
+	verifyOtp: vi.fn()
 }));
-vi.mock('#lib/supabase.js', () => ({ supabase: { auth }, initialUrlHash: '' }));
+const push = vi.hoisted(() => ({ release: vi.fn(async () => {}) }));
+vi.mock('#lib/supabase.js', () => ({
+	supabase: { auth },
+	initialUrlHash: '',
+	supabaseOrigin: 'https://abc.supabase.co'
+}));
+vi.mock('#lib/push.js', () => ({ releasePushForSignOut: push.release }));
 
 import {
 	AUTH_MESSAGES,
 	authErrorMessage,
 	initAuth,
 	parseAuthRedirectError,
+	parseMagicLink,
+	signInWithPastedLink,
 	session,
 	signInWithMagicLink,
 	signOut
@@ -23,6 +32,7 @@ const OK = { data: { user: null, session: null }, error: null };
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	push.release.mockImplementation(async () => {});
 });
 
 describe('signInWithMagicLink', () => {
@@ -122,5 +132,93 @@ describe('signOut', () => {
 		expect(auth.signOut).toHaveBeenCalledWith({ scope: 'local' });
 		expect(warn).toHaveBeenCalledWith('signOut failed');
 		warn.mockRestore();
+	});
+});
+
+describe('signOut and push (WP-18)', () => {
+	it('releases the push subscription before signing out', async () => {
+		auth.signOut.mockResolvedValue({ error: null });
+		await signOut();
+		expect(push.release).toHaveBeenCalledTimes(1);
+		expect(push.release.mock.invocationCallOrder[0]!).toBeLessThan(
+			auth.signOut.mock.invocationCallOrder[0]!
+		);
+	});
+	it('still signs out when the release rejects', async () => {
+		push.release.mockRejectedValueOnce(new Error('x'));
+		auth.signOut.mockResolvedValue({ error: null });
+		await expect(signOut()).resolves.toBeUndefined();
+		expect(auth.signOut).toHaveBeenCalledWith({ scope: 'local' });
+	});
+});
+
+describe('parseMagicLink', () => {
+	const base = 'https://abc.supabase.co/auth/v1/verify';
+	const link = `${base}?token=abc123&type=magiclink&redirect_to=https%3A%2F%2Fapp.test`;
+	const O = 'https://abc.supabase.co';
+	it('parses a magic link, also with surrounding spaces', () => {
+		expect(parseMagicLink(link, O)).toEqual({ tokenHash: 'abc123', type: 'magiclink' });
+		expect(parseMagicLink(`  ${link}\n`, O)).toEqual({ tokenHash: 'abc123', type: 'magiclink' });
+	});
+	it('accepts signup and invite', () => {
+		expect(parseMagicLink(`${base}?token=abc123&type=signup`, O)).toEqual({
+			tokenHash: 'abc123',
+			type: 'signup'
+		});
+		expect(parseMagicLink(`${base}?token=abc123&type=invite`, O)).toEqual({
+			tokenHash: 'abc123',
+			type: 'invite'
+		});
+	});
+	it.each([
+		['other origin', 'https://evil.supabase.co/auth/v1/verify?token=abc123&type=magiclink'],
+		['other path', 'https://abc.supabase.co/auth/v1/other?token=abc123&type=magiclink'],
+		['recovery', `${base}?token=abc123&type=recovery`],
+		['email_change', `${base}?token=abc123&type=email_change`],
+		['no type', `${base}?token=abc123`],
+		['empty token', `${base}?token=&type=magiclink`],
+		['token with a space', `${base}?token=ab%20c&type=magiclink`],
+		['long token', `${base}?token=${'a'.repeat(257)}&type=magiclink`],
+		['no link', 'geen link']
+	])('refuses %s', (_n, text) => {
+		expect(parseMagicLink(text, O)).toBeNull();
+	});
+});
+
+describe('signInWithPastedLink', () => {
+	const link = 'https://abc.supabase.co/auth/v1/verify?token=abc123&type=magiclink';
+	it('calls verifyOtp with the token hash and type', async () => {
+		auth.verifyOtp.mockResolvedValue(OK);
+		expect(await signInWithPastedLink(link)).toEqual({});
+		expect(auth.verifyOtp).toHaveBeenCalledWith({ token_hash: 'abc123', type: 'magiclink' });
+	});
+	it('passes the signup type on', async () => {
+		auth.verifyOtp.mockResolvedValue(OK);
+		await signInWithPastedLink(link.replace('magiclink', 'signup'));
+		expect(auth.verifyOtp).toHaveBeenCalledWith({ token_hash: 'abc123', type: 'signup' });
+	});
+	it('refuses an invalid link without a call', async () => {
+		expect(await signInWithPastedLink('geen link')).toEqual({ error: AUTH_MESSAGES.linkInvalid });
+		expect(auth.verifyOtp).not.toHaveBeenCalled();
+	});
+	it('maps errors', async () => {
+		auth.verifyOtp.mockResolvedValue({ data: {}, error: { code: 'otp_expired', status: 403 } });
+		expect(await signInWithPastedLink(link)).toEqual({ error: AUTH_MESSAGES.pastedLinkUsed });
+		auth.verifyOtp.mockResolvedValue({
+			data: {},
+			error: { name: 'AuthRetryableFetchError', status: 0 }
+		});
+		expect(await signInWithPastedLink(link)).toEqual({ error: AUTH_MESSAGES.network });
+		auth.verifyOtp.mockRejectedValue(new Error('x'));
+		expect(await signInWithPastedLink(link)).toEqual({ error: AUTH_MESSAGES.network });
+		auth.verifyOtp.mockResolvedValue({ data: {}, error: { status: 500 } });
+		expect(await signInWithPastedLink(link)).toEqual({ error: AUTH_MESSAGES.linkFailed });
+		auth.verifyOtp.mockResolvedValue({ data: {}, error: { status: 429 } });
+		expect(await signInWithPastedLink(link)).toEqual({ error: AUTH_MESSAGES.rateLimited });
+	});
+	it('parseAuthRedirectError still gives linkExpired for otp_expired', () => {
+		expect(parseAuthRedirectError('#error=access_denied&error_code=otp_expired')).toBe(
+			AUTH_MESSAGES.linkExpired
+		);
 	});
 });

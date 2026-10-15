@@ -17,3 +17,6 @@ export const supabase: SupabaseClient = createClient(
 		}
 	}
 );
+
+/** Origin of the Supabase project (validated by env-schema); used to recognise pasted login links. */
+export const supabaseOrigin: string = PUBLIC_SUPABASE_URL;
