@@ -38,3 +38,13 @@ Met Docker en de lokale stack (`supabase start`, migraties toegepast, `SHAKKA_SU
 3. Controle: `select count(*) from tide_extremes where station='hoekvanholland' and at > now();` is ≥ 25.
 4. Tweede `--force`-run mag het aantal niet laten groeien (idempotent).
 Optioneel daarna: `SHAKKA_TEST_SUPABASE_URL=... SHAKKA_TEST_SUPABASE_SECRET_KEY=... uv run pytest tests/test_fake_parity.py`.
+
+## Handmatige check op develop (15 oktober 2026, AC-5)
+Uitgevoerd door de orchestrator tegen de lokale stack, met echte Rijkswaterstaat-requests, na de merge op `develop` (`b794f7c`). Test-spot `test-strand` met `rws_station='hoekvanholland'`.
+- `shakka tides fetch --force` (1e): `tides: fetched 1 station(s), 34 row(s), deleted 0 old row(s)`, exit 0.
+- `select count(*) from tide_extremes where station='hoekvanholland' and at > now()`: 30 (≥ 25).
+- `shakka tides fetch --force` (2e): zelfde regel, telling blijft 30 (idempotent).
+- Steekproef eerste zes extremen: high 138, low -45, high 119, low -47, high 133, low -39 (afwisselend, geen agger in dit venster).
+- Test-spot daarna verwijderd.
+
+**AC-5: PASS.** Resultaat WP-04: PASS.
