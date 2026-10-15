@@ -1,6 +1,6 @@
 # Blueprint WP-22: Hardening backend en kostenbewaking
 Status: DRAFT
-Revisie: 1
+Revisie: 2
 
 ## Doel
 
@@ -19,7 +19,7 @@ Daarnaast neemt deze WP de openstaande "Gevolgen → WP-22"-punten over die back
 
 Voorstellen waar nog geen besluit ligt. Lars kan ze bij de review omgooien.
 
-- **A1. `OPERATOR_USER_ID` bevestigd.** Het is de Supabase-user-id (UUID) van Lars, als GitHub Secret en in `.env`, en komt dus niet in de repo. `Settings.operator_user_id: str | None` valideert niet. De stap `usage_report` controleert het formaat met `uuid.UUID`: een ongeldige waarde laat de run niet falen, maar geeft een waarschuwing en geen push. De waarde komt in `secret_values`, zodat ze uit logs en `ingest_runs.error` wordt geredigeerd. Lars vindt zijn id in het Dashboard onder Authentication, Users (kolom UID).
+- **A1. `OPERATOR_USER_ID` bevestigd.** Het is de Supabase-user-id (UUID) van Lars, als GitHub Secret en in `.env`, en komt dus niet in de repo. `Settings.operator_user_id: str | None` valideert niet. De stap `usage_report` controleert het formaat met `uuid.UUID`: een ongeldige waarde laat de run niet falen, maar geeft een waarschuwing en geen push. De waarde komt in `secret_values`, zowel ruw (gestript) als in de canonieke vorm (kleine letters, met streepjes, zonder accolades) als die afwijkt, zodat ze uit logs en `ingest_runs.error` wordt geredigeerd. Lars vindt zijn id in het Dashboard onder Authentication, Users (kolom UID).
 - **A2. Drempels.**
   - Database: boven 300 MB, waarbij MB = 1024² bytes, zoals `pg_size_pretty` en het Supabase-dashboard tellen. "Boven" is strikt: precies 300 MB geeft geen waarschuwing.
   - Open-Meteo: boven 70% van de echte limieten (sectie 2 van het plan), dus meer dan 7.000 calls op de huidige UTC-dag of meer dan 210.000 in de huidige UTC-maand. Beide bronnen `open_meteo_*` tellen mee, zoals in `BudgetGuard`.
@@ -37,10 +37,12 @@ Voorstellen waar nog geen besluit ligt. Lars kan ze bij de review omgooien.
   |---|---|---|---|
   | Open-Meteo (`request_json`) | transportfout, 429, 5xx (ongewijzigd) | 3 | 1, 2; `Retry-After` bij 429 (1–30) |
   | Rijkswaterstaat (`_post_json`) | transportfout, 429, 5xx | 3 | 1, 2 |
-  | Supabase REST (`SupabaseRest`) | transportfout, 429, 502, 503, 504; alleen `select`, `upsert`, `update` en `delete` (idempotent) | 3 | 0,5, 1 |
+  | Supabase REST (`SupabaseRest`) | transportfout, 429, 502, 503, 504 en de Cloudflare-statussen 520–524; alleen `select`, `upsert`, `update` en `delete` (idempotent) | 3 | 0,5, 1 |
   | Web Push | geen retry binnen de run; de deferral van WP-17 is de retry | – | – |
 
   `insert` en `rpc` krijgen bewust geen retry. Een insert die na een time-out toch is doorgevoerd, zou anders dubbel staan. Een HTTP 500 van PostgREST is meestal een SQL-fout en wordt dus niet herhaald.
+
+  Gevolg voor tellers (review N-4): is een `update` of `delete` wél doorgevoerd maar ging het antwoord verloren, dan geeft de herhaling 0 rijen terug. Tellers die op het aantal teruggegeven rijen leunen (`removed` uit `update_subscriptions`, `deleted` van de retentiejobs, en `admin favorites remove`, dat dan "niet verwijderd" meldt) kunnen daardoor te laag uitvallen. De state zelf klopt wel. Stuur dus niet op die tellers; ze zijn indicatief.
 - **A7. Stroomonderbreker in `SupabaseRest`.** Zodra één aanroep al zijn pogingen opmaakt met een herhaalbare fout, doet hetzelfde `SupabaseRest`-object de rest van zijn leven (één uurlijkse run) nog maar één poging per aanroep. Zo groeit een Supabase-storing niet uit tot een run van 15 minuten.
 - **A8. Push-retrylimiet (WP-17 R1).**
   - HTTP 400, 401, 403, 413 en elke andere 4xx (behalve 404, 410 en 429) heten voortaan "mislukt, niet herhaalbaar" (`DeliveryResult.retryable = False`). Zo'n fout blokkeert de state van een favoriet niet meer: de state wordt opgeslagen en het event is voor dat apparaat verloren.
@@ -48,7 +50,13 @@ Voorstellen waar nog geen besluit ligt. Lars kan ze bij de review omgooien.
   - Herhaalbaar blijven: 429, 5xx, een `WebPushException` zonder status, en netwerkfouten (`OSError`; `requests.RequestException` erft van `IOError`).
   - Niet herhaalbaar: `ValueError` bij het bouwen van de payload, en elke andere exception, bijvoorbeeld `VapidException` of `TypeError`.
   - Zo is er geen nieuwe kolom of migratie nodig voor een teller.
-- **A9. Host-allowlist voor push-endpoints (WP-17 N-10, review N-3), afgedwongen in de ingest, niet in de database.** Toegestaan is `https://` zonder poort en zonder userinfo, met als host `fcm.googleapis.com` of een subdomein van `push.services.mozilla.com`, `push.apple.com` of `notify.windows.com`.
+  - **Zichtbaarheid (review B-2).** Elke mislukte aflevering die niet permanent en niet herhaalbaar is, telt in de stapteller `push_non_retryable` (stap `alerts`, in `ingest_runs`). Is die groter dan 0, dan:
+    - krijgt de stap een warning `f"{n} push delivery(ies) failed without retry; the alert is lost for that device (see push_failures in ingest_runs)"`, die als `::warning::alerts: …` in de Actions-log staat;
+    - wordt de stap `alerts` `partial`, net als bij `deferred` in WP-17. Een verkeerde `PUBLIC_VAPID_PUBLIC_KEY` (elke aflevering 403, WP-17 R1) is dus nog steeds in elke run zichtbaar: als warning, als `partial` stap, en in het weekrapport onder "Stappen niet ok".
+    - Bewuste afweging: één abonnement dat altijd 400 geeft, maakt elke run `partial`. Dat was onder WP-17 ook zo (eindeloos `deferred`). De exitcode blijft 0; er komt geen mail.
+- **A9. Host-allowlist voor push-endpoints (WP-17 N-10, review N-3), afgedwongen in de ingest, niet in de database.** Toegestaan is `https://` zonder poort en zonder userinfo, met als host exact `fcm.googleapis.com` of `jmt17.google.com`, of een subdomein van `push.services.mozilla.com`, `push.apple.com` of `notify.windows.com`.
+  - `jmt17.google.com` (review B-4) is het FCM-stagingendpoint van Chromium: Chrome Beta, Dev en Canary en Chromium-builds abonneren op `https://jmt17.google.com/fcm/send/…` (bron in Externe afhankelijkheden).
+  - `android.googleapis.com` (legacy GCM, `…/gcm/send/…`) blijft bewust buiten de lijst: GCM is uitgezet, zulke abonnementen kunnen geen push meer ontvangen. Er zijn geen andere Google-hosts bekend.
   - De check zit op twee plekken: bij het laden (een geblokkeerd abonnement telt mee in `blocked_targets` en wordt niet bediend) en in `WebPushNotifier.send_payload` (verdediging in de diepte: er gaat nooit een POST naar een andere host).
   - Waarom geen CHECK in de database:
     - Mozilla noemt de endpoint-URL "opaque" en kan hem wijzigen;
@@ -56,24 +64,46 @@ Voorstellen waar nog geen besluit ligt. Lars kan ze bij de review omgooien.
     - de pgTAP-fixtures van WP-17 gebruiken `push.example.test`.
 - **A10. Databasegrens: hoogstens 20 abonnementen per gebruiker** (trigger, `PT400 too_many_subscriptions`). De app houdt er 10 en ruimt na een nieuwe aanmelding op (WP-18 A8), dus 20 raakt een normale gebruiker nooit. Zonder deze grens kan één ingelogde gebruiker de database van 500 MB volschrijven.
 - **A11. Veroudering per spot (WP-11 N-1, WP-14 R3).** De evaluatie- en de alertjob laten forecastrijen weg met `fetched_at < now − 3 h`. Dat is absoluut, bovenop de bestaande relatieve regel.
-  - Een spot met alleen oude rijen krijgt geen nieuwe evaluaties. De oude rijen houden hun oude `evaluated_at`, dus de app toont na 3 uur zelf "verouderd" (WP-14 A5).
+  - Een spot met alleen oude rijen krijgt geen nieuwe evaluaties. De oude rijen houden hun oude `evaluated_at`, dus de app toont 3 uur daarna zelf "verouderd" (WP-14 A5).
+  - Wat dat begrenst (review N-1): een spot wordt nog geëvalueerd zolang zijn rijen hoogstens 3 uur oud zijn, dus het laatste `evaluated_at` ligt tot 3 uur na de laatste fetch. De banner van de app verschijnt 3 uur na dat `evaluated_at`. De forecast achter een oordeel kan dus tot ongeveer 6 uur oud zijn voordat de app "verouderd" toont. Dat is begrensd, waar het eerst onbegrensd was; "eerlijk tot op het uur" is het niet. Dit staat ook in RUNBOOK §17.3.
   - In de alertjob wordt de favoriet `ineligible`.
   - Precies 3 uur oud telt nog als vers, net als de globale stale-regel (WP-11 E4).
   - Hiermee vervalt het voorstel van WP-14 voor een extra kolom `fetched_at` in `evaluations`.
 - **A12. Tijdsbudget voor de hele run: 600 s** (WP-11 N-5, WP-04 R5). Vóór elke stap kijkt de run of er al 600 s verstreken zijn sinds de start van de stappen. Zo ja, dan krijgen alle resterende stappen `skipped` met reden `run_time_budget`, een `::error::`-annotatie en exitcode 1 (mail van GitHub). De job-timeout is 900 s. Zo wordt een trage run netjes vastgelegd in plaats van halverwege `alerts` afgebroken. Het getijbudget van 240 s blijft bestaan.
-- **A13. Bovengrens voor sessies (WP-19 N-4).** `starts_at <= created_at + 370 dagen` (CHECK). De app staat tot 365 dagen vooruit toe (`SESSION_MAX_DAYS_AHEAD`), dus deze grens raakt de UI niet. RSVP's worden daardoor hoogstens ongeveer een jaar plus 7 dagen bewaard in plaats van onbeperkt.
+  - Afweging (review N-11): omdat `alerts` na de ingeststappen komt, is het juist de belangrijkste stap die bij een trage ingest wordt overgeslagen. Dat accepteren we: zonder budget zou de job-timeout van 900 s de run halverwege `alerts` afbreken, zonder vastlegging. Met budget is het zichtbaar (`::error::`, exitcode 1, mail van GitHub) en draait `alerts` het volgende uur weer, met de dan aanwezige data.
+- **A13. Bovengrens voor sessies (WP-19 N-4, review B-5).** Een trigger `sessions_starts_at_horizon` (`BEFORE INSERT OR UPDATE OF starts_at`) dwingt `starts_at <= now() + interval '370 days'` af. Een CHECK kan dat niet, want een CHECK mag geen `now()` gebruiken.
+  - Bij een update geldt de grens alleen als `starts_at` echt verandert (`new.starts_at is distinct from old.starts_at`). Een bestaande rij die toevallig verder vooruit staat, blijft dus bewerkbaar zolang de begintijd gelijk blijft.
+  - De app staat bij aanmaken én bewerken tot vandaag + 365 dagen toe (`SESSION_MAX_DAYS_AHEAD`, `sessionDateBounds(new Date())`). Dat valt altijd binnen `now() + 370 dagen`, ook rond middernacht en bij zomer-/wintertijd. De grens raakt de UI dus niet; er is geen webwijziging nodig.
+  - Overtreding geeft SQLSTATE `23514` met de tekst `starts_at_too_far_ahead`. De app vertaalt `23514` al naar "een van de velden is ongeldig" (`sessionErrorMessage`).
+  - RSVP's worden daardoor hoogstens ongeveer een jaar plus 7 dagen bewaard in plaats van onbeperkt.
 - **A14. Open aanmelden (besluit WP-13: `shouldCreateUser: false` "tot WP-22").** De PWA stuurt voortaan `shouldCreateUser: true`. Of nieuwe gebruikers zich kunnen aanmelden, regelt Lars server-side met de Supabase-instelling "Allow new users to sign up".
   - Staat die uit, dan geeft GoTrue voor een onbekend adres `signup_disabled`, en de app toont de bestaande melding `notAuthorized`. Bestaande gebruikers loggen gewoon in.
-  - Lars zet de instelling uit vóór de merge en pas weer aan nadat eigen SMTP werkt (RUNBOOK §17).
+  - **Harde poort vóór de merge (review N-2):** "Allow new users to sign up" staat uit. Lars controleert dat nú, los van deze WP: de vlag in de client was nooit een beveiligingsgrens (met de publieke anon-sleutel kan iedereen `/auth/v1/otp` met `create_user: true` aanroepen). Staat de instelling vandaag aan, dan is aanmelden via de API al open.
+  - Lars zet de instelling pas weer aan nadat eigen SMTP werkt en de test van AC-6 geslaagd is (RUNBOOK §17.6).
+  - Voor de test van AC-6 maakt Lars de testgebruiker aan via Add user mét "Auto Confirm User". Een onbevestigde gebruiker gaat in GoTrue opnieuw door `Signup()` en krijgt `signup_disabled` zolang aanmelden uit staat.
   - Zo is er geen nieuwe publieke env-variabele nodig.
-- **A15. SMTP, provider-agnostisch.** Er komt geen code: SMTP stelt Lars in het Supabase-dashboard in. Het RUNBOOK beschrijft de velden (host, poort, gebruiker, wachtwoord/sleutel, afzender, naam) en de eisen:
+- **A15. SMTP, provider-agnostisch (review B-3).** Er komt geen code: SMTP stelt Lars in het Supabase-dashboard in (Authentication, SMTP Settings: host, poort, gebruiker, wachtwoord/sleutel, afzenderadres, afzendernaam). Dat werkt met elke dienst. Eisen aan de dienst:
   - een gratis tier;
-  - open- en kliktracking uit (harde regel "geen tracking"; kliktracking herschrijft bovendien de inloglink);
+  - open- en kliktracking aantoonbaar uit: standaard uit, of per account/domein/bericht uit te zetten op de gratis tier (harde regel "geen tracking"; kliktracking leidt bovendien de eenmalige inloglink via een redirectdomein van een derde, en een redirect of prefetch kan het token verbruiken);
   - een geverifieerde afzender.
 
-  Brevo staat erin als voorstel met geverifieerde waarden (300 mails per dag gratis, `smtp-relay.brevo.com:587`). De keuze is aan Lars. Alertkanalen (zoals het voorstel WP-24) blijven ongemoeid.
+  Onderzochte diensten (bronnen in Externe afhankelijkheden, gecontroleerd op 15 oktober 2026):
+
+  | Dienst | Gratis | Tracking | Eigen domein nodig | Oordeel |
+  |---|---|---|---|---|
+  | Resend | 3.000 per maand, 100 per dag | "disabled by default for all domains"; werkt alleen als je het per domein aanzet én een trackingsubdomein verifieert | Ja ("You must add and verify at least one domain") | **Voorkeur als er een domein is** |
+  | Postmark | 100 per maand | open: `TrackOpens` standaard `false`; links: standaard `None` (per server en per bericht) | Ja: een sender signature moet op een privédomein liggen (geen Gmail e.d.), en het account moet handmatig worden goedgekeurd | Voldoet, maar 100 per maand is te weinig zodra aanmelden open is |
+  | Gmail (apart Google-account voor Shakka, `smtp.gmail.com`, app-wachtwoord) | 500 per dag | Gmail heeft geen functie voor open- of kliktracking. Dat is niet als garantie gedocumenteerd; de test van AC-6 (link wijst direct naar Supabase) bevestigt het | Nee | **Voorkeur zonder domein**, met kanttekeningen (zie hieronder) |
+  | Brevo | 300 per dag | Bij transactionele mail niet uit te zetten op de gratis tier | Nee | **Afgewezen** |
+  | SMTP2GO | 1.000 per maand | Standaard niet te verifiëren in de eigen documentatie | Onduidelijk | Niet voorgesteld |
+
+  Voorkeur, met de voorwaarde:
+  - **Met een eigen domein: Resend.** Host `smtp.resend.com`, poort 465 (SMTPS) of 587 (STARTTLS), gebruiker `resend`, wachtwoord = een Resend-API-sleutel met permission `sending_access` ("Can only send emails"). Tracking niet aanzetten. Let op: een domein kost geld (registratie per jaar). Dat is een betaalde dienst en vergt volgens de harde regel het akkoord van Lars.
+  - **Zonder domein: een apart Gmail-account voor Shakka** (niet het persoonlijke adres van Lars), met tweestapsverificatie en een app-wachtwoord. Host `smtp.gmail.com`, poort 465 (SSL) of 587 (TLS), gebruiker = het volledige Gmail-adres, wachtwoord = het app-wachtwoord. Kanttekeningen: Google raadt app-wachtwoorden af ("aren't recommended") en kan ze ooit intrekken; dan stoppen de inloglinks tot er een andere dienst is. De afzender is een `@gmail.com`-adres. Google verwerkt de adressen van de ontvangers.
+  - De keuze is aan Lars. Alertkanalen (zoals het voorstel WP-24) blijven ongemoeid.
+  - Na de keuze moeten "De maildienst" op `/privacy` en in `docs/PRIVACY.md` (WP-23) de gekozen dienst noemen. Dat is een vervolgactie (zie Stappenplan, stap 13, en "Nodig van Lars").
 - **A16. Rate limits van Supabase Auth.** Het RUNBOOK zet de defaults op een rij (bron hieronder) met deze voorstellen:
-  - "Emails sent per hour" op 12 (blijft onder 300 per dag bij Brevo);
+  - "Emails sent per hour" op `floor(daglimiet van de dienst / 24)`, zodat de daglimiet nooit geraakt wordt: 4 bij Resend (100 per dag), 20 bij Gmail (500 per dag). Bij Postmark (100 per maand) is dat 0; daarom valt Postmark af zodra aanmelden open is. Lars mag hoger gaan als hij accepteert dat bij misbruik de daglimiet van de dienst bereikt wordt (dan werken inloglinks tot de volgende dag niet). Supabase begint na het instellen van eigen SMTP zelf met 30 per uur;
   - de andere limieten op de default (30 sign-ups/sign-ins per 5 minuten per IP, 60 s tussen OTP-aanvragen per gebruiker, 30 verificaties per 5 minuten, 150 tokenrefreshes per 5 minuten).
 
   Lars stelt ze in. Ze staan niet in `config.toml`, want lokaal gebruikt de stack Mailpit.
@@ -98,12 +128,12 @@ Voorstellen waar nog geen besluit ligt. Lars kan ze bij de review omgooien.
 - `httpx.Client(` blijft alleen in `shakka/http.py`. Een test bewaakt dat en ook dat de timeouts eindig zijn (AC-1).
 
 **Push-hardening.**
-- `DeliveryResult` krijgt een veld `retryable: bool = True`. `deliver_event` telt alleen herhaalbare fouten als "transient", waardoor 4xx-fouten een favoriet niet meer eindeloos uitstellen (A8).
+- `DeliveryResult` krijgt een veld `retryable: bool = True`. `deliver_event` telt alleen herhaalbare fouten als "transient", waardoor 4xx-fouten een favoriet niet meer eindeloos uitstellen (A8). Niet-herhaalbare fouten tellen apart (`non_retryable`), lopen via `PlanDelivery` en `run_alerts` door naar `AlertJobResult.push_non_retryable`, en maken de stap `alerts` `partial` met een warning.
 - `shakka.notify.base.endpoint_allowed` implementeert de allowlist (A9).
 - `load_all_targets_checked` geeft de doelen en het aantal geblokkeerde abonnementen terug. `load_all_targets` en `load_targets` filteren ook.
 - `run_alerts` telt `blocked_targets`; de stap `alerts` geeft daarbij een warning.
 - Het `Notifier`-protocol krijgt `send_payload`, dat `WebPushNotifier` al had. Daarmee kan de gebruiksstap "via de Notifier uit WP-17" een eigen `PushPayload` sturen.
-- In de database komt een trigger met hoogstens 20 abonnementen per gebruiker (A10).
+- In de database komt een trigger met hoogstens 20 abonnementen per gebruiker (A10). Die trigger is security invoker en heeft geen `EXECUTE`-rechten, dus hij komt in geen van de vier functiesets van `07_sessions.test.sql` voor (zie Database).
 
 **Veroudering per spot en runbudget.**
 - `load_inputs_checked` krijgt `max_fetch_age`. De evaluatie- en de alertjob geven `MAX_FETCH_AGE = 3 h` mee (A11), en `InputsLoad.stale` noemt de spots waarvan alle rijen te oud waren.
@@ -124,16 +154,21 @@ Elk uur leest de stap twee kleine dingen (`api_usage` van ruim een maand en éé
 
 **Database.** Twee nieuwe migraties:
 1. `…_drop_profiles_telegram_chat_id.sql`: verwijdert de kolom en zijn CHECK.
-2. `…_hardening.sql`: `db_usage()`, de trigger `push_subscriptions_limit` en de CHECK `sessions_starts_at_horizon`.
+2. `…_hardening.sql`: `db_usage()`, de trigger `push_subscriptions_limit` en de trigger `sessions_starts_at_horizon` (A13).
 
-pgTAP: `01`, `02` en `04` worden aangepast en `09_hardening.test.sql` is nieuw. De oude migraties blijven ongewijzigd.
+pgTAP:
+- `01`, `02` en `04` worden aangepast voor de verwijderde kolom.
+- `07_sessions.test.sql` regels 68 en 69 krijgen `db_usage` erbij (review B-1): `service_role` mag daarna `purge_expired_sessions` én `db_usage` uitvoeren, en `db_usage` is security definer. De twee nieuwe triggerfuncties (`push_subscriptions_limit`, `sessions_starts_at_horizon`) zijn security invoker zonder `EXECUTE` voor wie dan ook; ze staan bewust in geen van de vier sets (regels 66–69).
+- `10_hardening.test.sql` is nieuw. Prefix `10_`, omdat WP-23 `09_delete_my_account.test.sql` toevoegt (review N-3).
+- De oude migraties blijven ongewijzigd.
 
 **Web.** Alleen `auth.ts` verandert: `shouldCreateUser: true` en de mapping `signup_disabled` → `notAuthorized`. Verder komen er testaanpassingen (`auth`, `login`, de alter-guard in `schema-columns`).
 
 **Belangrijkste keuzes en waarom:**
 - Retries zitten in de bronmodules zelf, niet in de jobs. De jobs en hun tests blijven daardoor ongewijzigd, en de contracten (`request_json`, `fetch_tide_extremes`, `SupabaseRest`) houden dezelfde signatuur.
 - Deduplicatie via `ingest_runs` (contract) in plaats van een nieuwe tabel. De query's zijn klein omdat ze alleen draaien als er iets te versturen valt.
-- Veroudering wordt opgelost in de backend (A11) in plaats van met een nieuwe kolom en een UI-wijziging. Dat maakt de bestaande versheidsindicator van de app eerlijk.
+- Veroudering wordt opgelost in de backend (A11) in plaats van met een nieuwe kolom en een UI-wijziging. Daarmee is de leeftijd van de forecast achter een oordeel begrensd (tot ongeveer 6 uur voordat de app "verouderd" toont), waar die eerst onbegrensd was.
+- De sessiegrens is een trigger met `now()` in plaats van een CHECK op `created_at` (A13), zodat bewerken in de UI dezelfde grens houdt als aanmaken.
 
 ## Bestanden
 
@@ -146,15 +181,15 @@ pgTAP: `01`, `02` en `04` worden aangepast en `09_hardening.test.sql` is nieuw. 
 | `db.py` | wijzigen | `DB_ATTEMPTS`, `DB_BACKOFF_S`, `DB_RETRY_STATUSES`, `RETRYING_OPS`, `is_retryable_db_error`; `SupabaseRest(..., attempts=DB_ATTEMPTS)`, de stroomonderbreker, de property `retries_disabled` en een logger `shakka.db`. |
 | `notify/base.py` | wijzigen | `DeliveryResult.retryable`, `endpoint_allowed`, host-constanten, `BLOCKED_HOST_DETAIL`, `Notifier.send_payload`. |
 | `notify/webpush.py` | wijzigen | De allowlist-guard en de classificatie `retryable` in `send_payload`; `send` geeft bij een `ValueError` `retryable=False`. |
-| `jobs/push.py` | wijzigen | `TargetsLoad`, `load_all_targets_checked`; de allowlist in `load_all_targets` en `load_targets`; `deliver_event` telt alleen herhaalbare fouten. |
-| `jobs/alerts.py` | wijzigen | `AlertJobResult.blocked_targets`; `load_all_targets_checked`; `max_fetch_age` in `load_alert_context`. |
+| `jobs/push.py` | wijzigen | `TargetsLoad`, `load_all_targets_checked`; de allowlist in `load_all_targets` en `load_targets`; `deliver_event` telt alleen herhaalbare fouten als transient; `EventDelivery.non_retryable`. |
+| `jobs/alerts.py` | wijzigen | `AlertJobResult.blocked_targets` en `push_non_retryable`; `PlanDelivery.non_retryable`; `load_all_targets_checked`; `max_fetch_age` in `load_alert_context`; logregel en CLI-uitvoer met `non_retryable`. |
 | `jobs/inputs.py` | wijzigen | `MAX_FETCH_AGE`, `max_fetch_age`-parameter, `InputsLoad.stale`. |
 | `jobs/evaluate.py` | wijzigen | `max_fetch_age=MAX_FETCH_AGE`; `EvaluationJobResult.stale`. |
 | `jobs/usage.py` | aanmaken | De I/O en orkestratie van het gebruiksrapport, plus `run_usage_show_cli`. |
 | `domain/usage.py` | aanmaken | Puur: `UsageStats`, waarschuwingen, rapporttekst, pushteksten, tijdhelpers. |
-| `pipeline.py` | wijzigen | `step_usage_report`, `STEPS`/`STEP_NAMES`, `RUN_TIME_BUDGET_S`, `RUN_TIME_BUDGET`, `blocked_targets` in `alert_counts` en de warning, `exit_code_for`, `build_annotations`, de docstring. |
+| `pipeline.py` | wijzigen | `step_usage_report`, `STEPS`/`STEP_NAMES`, `RUN_TIME_BUDGET_S`, `RUN_TIME_BUDGET`, `blocked_targets` en `push_non_retryable` in `alert_counts` met hun warnings (`non_retryable_warning`), `partial` bij `push_non_retryable`, `exit_code_for`, `build_annotations`, de docstring. |
 | `config.py` | wijzigen | `operator_user_id: str \| None = None`. |
-| `logsetup.py` | wijzigen | `secret_values` neemt de gestripte `operator_user_id` op. |
+| `logsetup.py` | wijzigen | `secret_values` neemt de gestripte `operator_user_id` op, plus de canonieke UUID-vorm als die afwijkt. |
 | `cli.py` | wijzigen | De groep `usage` met het commando `show`; de docstring van `run-hourly` noemt alle stappen. |
 
 ### Ingest-tests (`ingest/tests/`)
@@ -166,9 +201,10 @@ pgTAP: `01`, `02` en `04` worden aangepast en `09_hardening.test.sql` is nieuw. 
 | `test_rws_tides.py` | wijzigen | Retrytests. |
 | `test_notify_webpush.py` | wijzigen | Classificatie `retryable`, de allowlist-guard. `test_payload_value_error_is_retryable` → `test_payload_value_error_is_not_retryable`. |
 | `test_push_allowlist.py` | aanmaken | `endpoint_allowed` en het filteren bij het laden. |
-| `test_job_push.py`, `test_job_alerts_push.py` | wijzigen | 4xx niet herhaalbaar; host `push.example.test` → `fcm.googleapis.com/fcm`. |
+| `test_job_push.py`, `test_job_alerts_push.py` | wijzigen | 4xx niet herhaalbaar en geteld in `non_retryable`/`push_non_retryable`; host `push.example.test` → `fcm.googleapis.com/fcm`. |
+| `test_cli_push.py` | wijzigen | Push-regel met `non_retryable=`; exitcode 1 bij een niet-herhaalbare fout. |
 | `push_fixtures.py` | wijzigen | `endpoint()` → `https://fcm.googleapis.com/fcm/send/{user_id[:8]}-{n}`; tekst van `FakeResponse` met dezelfde host; `FakeNotifier.send_payload` met lijst `payload_calls`. |
-| `test_pipeline.py` | wijzigen | Stapvolgorde (8 stappen), `len(report.steps) == 8`, laatste stap `usage_report` in `test_all_steps_ok_records_run`, het endpoint op r. 772 naar het fcm-host, tests voor het runbudget, veroudering per spot in de pipeline en de warning `blocked_targets`. |
+| `test_pipeline.py` | wijzigen | Stapvolgorde (8 stappen), `len(report.steps) == 8`, laatste stap `usage_report` in `test_all_steps_ok_records_run`, het endpoint op r. 772 naar het fcm-host, tests voor het runbudget, veroudering per spot in de pipeline, de warning `blocked_targets` en `test_non_retryable_push_is_partial_with_warning`. |
 | `test_job_inputs.py`, `test_job_evaluate.py`, `test_job_alerts.py` | wijzigen | Tests voor `max_fetch_age`. |
 | `test_usage.py` | aanmaken | AC-2: het domein (golden-tekst, waarschuwingen, pushteksten, tijdhelpers). |
 | `test_job_usage.py` | aanmaken | De I/O-functies en `run_usage_report`. |
@@ -176,7 +212,7 @@ pgTAP: `01`, `02` en `04` worden aangepast en `09_hardening.test.sql` is nieuw. 
 | `test_cli_usage.py` | aanmaken | `shakka usage show`. |
 | `fakes.py` | wijzigen | Ingebouwde RPC `db_usage` en attribuut `database_bytes`. |
 | `test_fakes.py` | wijzigen | De fake-`db_usage`. |
-| `test_config.py`, `test_logsetup.py` | wijzigen | `operator_user_id`. |
+| `test_config.py`, `test_logsetup.py` | wijzigen | `operator_user_id`; in `test_logsetup.py` ook de canonieke vorm (hoofdletters/accolades). |
 | `test_repo_hygiene.py` | wijzigen | `ENV_KEYS` + `OPERATOR_USER_ID`; `test_actions_pinned_to_commit_sha`. |
 | `test_hourly_workflow.py` | wijzigen | Env en secrets met `OPERATOR_USER_ID`. |
 | `test_migrations.py` | wijzigen | `test_db_usage_counts_every_table`. |
@@ -186,11 +222,12 @@ pgTAP: `01`, `02` en `04` worden aangepast en `09_hardening.test.sql` is nieuw. 
 | Bestand | Actie | Inhoud |
 |---|---|---|
 | `migrations/20261015220000_drop_profiles_telegram_chat_id.sql` | aanmaken | De kolom en de CHECK verwijderen. |
-| `migrations/20261015220100_hardening.sql` | aanmaken | `db_usage()`, de trigger `push_subscriptions_limit`, `sessions_starts_at_horizon`. |
+| `migrations/20261015220100_hardening.sql` | aanmaken | `db_usage()`, de trigger `push_subscriptions_limit`, de trigger `sessions_starts_at_horizon`. |
 | `tests/01_schema.test.sql` | wijzigen | `plan(70)`; `columns_are(profiles)` zonder de legacy-kolom; die rij uit de `set_eq` gehaald; de `throws_ok` voor het numerieke formaat verwijderd. |
 | `tests/02_privileges.test.sql` | wijzigen | `plan(54)`; de `column_privs_are` voor de legacy-kolom verwijderd. |
 | `tests/04_rls_users.test.sql` | wijzigen | `plan(40)`; de asserts op r. 80 en 86 verwijderd; de kopregel zonder legacy-kolom. |
-| `tests/09_hardening.test.sql` | aanmaken | AC-4 en de nieuwe grenzen (zie Testplan). |
+| `tests/07_sessions.test.sql` | wijzigen | Alleen regels 68 en 69 (exacte tekst in Interfaces); `plan(112)` blijft. |
+| `tests/10_hardening.test.sql` | aanmaken | AC-4 en de nieuwe grenzen, `plan(28)` (zie Testplan). |
 
 ### Web (`web/`)
 | Bestand | Actie | Inhoud |
@@ -206,8 +243,9 @@ pgTAP: `01`, `02` en `04` worden aangepast en `09_hardening.test.sql` is nieuw. 
 | `.env.example` | wijzigen | Regel `OPERATOR_USER_ID=` als laatste, met een commentaarregel erboven. |
 | `.github/workflows/hourly.yml` | wijzigen | `OPERATOR_USER_ID: ${{ secrets.OPERATOR_USER_ID }}` in de env van de pipelinestap; `actions/checkout` op SHA. |
 | `.github/workflows/ci.yml` | wijzigen | `actions/checkout` en `actions/setup-node` op SHA. |
-| `docs/RUNBOOK.md` | wijzigen | §4, §11.2, §11.5, §13.1, §13.6, §14.7, §14.14 en de nieuwe §17 (zie Stappenplan stap 13). |
+| `docs/RUNBOOK.md` | wijzigen | §4, §11.2, §11.5, §13.1, §13.6, §14.7, §14.14 en de nieuwe sectie "Hardening en kostenbewaking" (in deze blueprint §17; zie Stappenplan stap 13 voor het nummer). |
 | `docs/WORK_PACKAGES.md` | wijzigen | De env-rij `OPERATOR_USER_ID`: "(voorstel, de planner van WP-22 bevestigt)" → "(bevestigd in WP-22)". Verder niets. |
+| `docs/PRIVACY.md` | wijzigen, **alleen na merge WP-23** | Bestaat pas na WP-23. Alleen als het bestand na het rebasen op `develop` bestaat: in de rij "Profiel" de bijzin "; plus een ongebruikte, altijd lege legacy-kolom die WP-22 verwijdert" weghalen. De regel "Maildienst" blijft ongewijzigd tot Lars een SMTP-dienst kiest (A15). Zie stap 13. |
 
 ## Interfaces en contracten
 
@@ -286,7 +324,7 @@ Aanroep `with_retries(..., attempts=RWS_ATTEMPTS, backoff=RWS_BACKOFF_S, retry_i
 ```python
 DB_ATTEMPTS: Final = 3
 DB_BACKOFF_S: Final = 0.5
-DB_RETRY_STATUSES: Final = frozenset({429, 502, 503, 504})
+DB_RETRY_STATUSES: Final = frozenset({429, 502, 503, 504, 520, 521, 522, 523, 524})  # 52x: Cloudflare
 RETRYING_OPS: Final = frozenset({"select", "upsert", "update", "delete"})
 
 def is_retryable_db_error(exc: BaseException) -> bool:
@@ -306,7 +344,7 @@ class SupabaseRest:
 
 ### `shakka.notify.base`
 ```python
-PUSH_SERVICE_HOSTS: Final = frozenset({"fcm.googleapis.com"})
+PUSH_SERVICE_HOSTS: Final = frozenset({"fcm.googleapis.com", "jmt17.google.com"})  # jmt17: Chromium FCM staging (Chrome Beta/Dev/Canary)
 PUSH_SERVICE_HOST_SUFFIXES: Final = (".push.services.mozilla.com", ".push.apple.com", ".notify.windows.com")
 BLOCKED_HOST_DETAIL: Final = "blocked host"
 
@@ -352,7 +390,9 @@ def load_targets(db: SupabaseRest, user_id: str) -> list[DeliveryTarget]  # same
 ```
 - Volgorde in `load_all_targets_checked`: parsen (ongeldige rij → overslaan), dan de allowlist (→ `blocked += 1`), dan de grens van 10.
 - Is `blocked > 0`, dan logt de functie WARNING `"push: %d subscription(s) skipped: push service host not allowed"`, met alleen het aantal.
-- `deliver_event`: na een mislukte, niet-permanente aflevering geldt `if result.retryable: transient += 1`. De rest blijft gelijk.
+- `EventDelivery` krijgt als laatste veld `non_retryable: int = 0` (aantal afleveringen met `not ok and not permanent_failure and not retryable`).
+- `deliver_event`: na een mislukte, niet-permanente aflevering geldt `if result.retryable: transient += 1 else: non_retryable += 1`. `retryable=sent == 0 and transient > 0` blijft. De rest blijft gelijk.
+- Een `DeliveryResult` uit de `except Exception`-tak van `deliver_event` (een notifier die toch gooit) houdt de default `retryable=True`, zoals nu.
 
 ### `shakka.jobs.inputs`
 ```python
@@ -381,7 +421,10 @@ def load_inputs(db, *, now, spot_ids=None, max_fetch_age: timedelta | None = Non
 ### `shakka.jobs.alerts`
 - `load_alert_context` roept `load_inputs(db, now=now, spot_ids=..., max_fetch_age=MAX_FETCH_AGE)` aan.
 - `run_alerts` gebruikt `load_all_targets_checked`.
-- `AlertJobResult` krijgt een laatste veld `blocked_targets: int = 0`. De logregel van `run_alerts` krijgt `blocked=%d`.
+- `PlanDelivery` krijgt als laatste veld `non_retryable: int = 0`. `deliver_plan` telt `non_retryable += d.non_retryable` per event en geeft het in beide `PlanDelivery`-returns mee (ook bij `deferred=True`).
+- `run_alerts`: direct na `failures.update(d.failures)` (dus vóór de `if d.deferred`-tak) `counts["push_non_retryable"] += d.non_retryable`.
+- `AlertJobResult` krijgt twee laatste velden: `blocked_targets: int = 0` en `push_non_retryable: int = 0` (afleveringen die mislukten zonder herhaling; het event is voor dat apparaat verloren). De logregel van `run_alerts` krijgt `blocked=%d non_retryable=%d`.
+- `run_alerts_cli`: de push-regel wordt `f"push: sent=… failed=… no_target=… deferred=… non_retryable={result.push_non_retryable} removed=…"`, en `failed` (exitcode 1) geldt ook bij `result.push_non_retryable > 0`, gelijk aan de status van de pipelinestap.
 
 ### `shakka.domain.usage` (puur)
 ```python
@@ -609,14 +652,26 @@ def usage_counts(result: UsageReportResult) -> dict[str, Any]
   - `database_bytes` (int of None), `open_meteo_today` en `open_meteo_month` (afgerond op 2 decimalen, of None);
   - `warnings` (lijst), `delivery` (status of None), `sent`, `failed`, `removed`, `push_failures` (dict);
   - `runs_deleted`, `report` (str of None), `stats` (`usage_stats_json(stats)` als due, anders None), `errors` (lijst).
-- **`step_alerts`**: als `result.blocked_targets` groter dan 0 is, komt er een warning `f"{n} push subscription(s) skipped: push service host not allowed"`. `alert_counts` krijgt `"blocked_targets"`.
+- **`step_alerts`**:
+  - als `result.blocked_targets` groter dan 0 is, komt er een warning `f"{n} push subscription(s) skipped: push service host not allowed"`;
+  - als `result.push_non_retryable` groter dan 0 is, komt er een warning `non_retryable_warning(n)`:
+    ```python
+    def non_retryable_warning(count: int) -> str:
+        return (
+            f"{count} push delivery(ies) failed without retry; the alert is lost for that "
+            "device (see push_failures in ingest_runs)"
+        )
+    ```
+  - volgorde van de warnings: `PUSH_DISABLED_WARNING`, deferred, non-retryable, blocked;
+  - `partial = bool(result.skipped or result.write_errors or result.deferred or result.push_non_retryable)`;
+  - `alert_counts` krijgt `"blocked_targets"` en `"push_non_retryable"` (direct na `"deferred"`).
 - **`_run`**: in de lus `if _monotonic() - started >= RUN_TIME_BUDGET_S: report = StepReport(name, "skipped", 0, {}, reason=RUN_TIME_BUDGET) else: report = run_step(...)`. `started` wordt dan vóór de lus gezet; dat is het al. Het voortgangs-update blijft per stap.
 - **`exit_code_for`**: ook 1 als een stap `skipped` is met reden `RUN_TIME_BUDGET`.
 - **`build_annotations`**: zo'n stap geeft `::error::step {name} skipped: run time budget of {RUN_TIME_BUDGET_S:.0f} s reached`.
 
 ### Config en env
 - `Settings.operator_user_id: str | None = None`. De env-naam is `OPERATOR_USER_ID`.
-- `secret_values` voegt `operator_user_id.strip()` toe als die niet leeg is.
+- `secret_values` voegt `v = operator_user_id.strip()` toe als die niet leeg is. Daarna `try: c = str(uuid.UUID(v))` en, als `c != v`, ook `c`; een `ValueError` wordt genegeerd (de stap meldt een ongeldige waarde al). Zo wordt ook de canonieke vorm geredigeerd als de secret in hoofdletters of met accolades is gezet (review N-8).
 - `.env.example`, als laatste regels:
   ```
   # WP-22: your Supabase user id (Dashboard, Authentication, Users); weekly usage push
@@ -632,7 +687,9 @@ alter table public.profiles drop column if exists telegram_chat_id;
 ```
 
 ### SQL: `supabase/migrations/20261015220100_hardening.sql`
-Let op: zet het woord "grant" in dit bestand nergens vóór de body van `db_usage`. De statische test `test_no_grants_on_rsvps` matcht `grant … on … public.rsvps` tot de eerstvolgende `;`.
+Let op, twee statische tests lezen alle latere migraties:
+- zet het woord "grant" in dit bestand nergens vóór de body van `db_usage`: `test_no_grants_on_rsvps` matcht `grant … on … public.rsvps` tot de eerstvolgende `;`;
+- noem in dit bestand (ook niet in commentaar) de namen `get_public_session`, `rsvp_create`, `rsvp_update`, `rsvp_delete` of `purge_expired_sessions`, en schrijf geen `alter table … public.rsvps`: `web/test/rsvp-contract.test.ts` ("migration drift") weert die in latere migraties.
 ```sql
 -- WP-22: database usage for the weekly report (service role only), at most 20 push
 -- subscriptions per user, and an upper bound on how far ahead a session can start.
@@ -698,11 +755,55 @@ create trigger push_subscriptions_limit before insert on public.push_subscriptio
 revoke all on function public.push_subscriptions_limit()
   from public, anon, authenticated, service_role;
 
--- The app allows sessions up to 365 days ahead; RSVPs are kept until 7 days after ends_at.
-alter table public.sessions
-  add constraint sessions_starts_at_horizon
-  check (starts_at <= created_at + interval '370 days');
+-- Upper bound on how far ahead a session may start. A CHECK cannot use now(), so a trigger.
+-- The app allows up to 365 days ahead, on create and on edit. On update the bound only applies
+-- when starts_at actually changes, so an older row stays editable. Security invoker.
+create function public.sessions_starts_at_horizon()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  if tg_op = 'UPDATE' then
+    if new.starts_at is not distinct from old.starts_at then
+      return new;
+    end if;
+  end if;
+  if new.starts_at > now() + interval '370 days' then
+    raise sqlstate '23514' using message = 'starts_at_too_far_ahead';
+  end if;
+  return new;
+end;
+$$;
+
+create trigger sessions_starts_at_horizon before insert or update of starts_at on public.sessions
+  for each row execute function public.sessions_starts_at_horizon();
+
+revoke all on function public.sessions_starts_at_horizon()
+  from public, anon, authenticated, service_role;
 ```
+
+Opmerkingen:
+- `old` wordt alleen gelezen binnen `if tg_op = 'UPDATE'` (geneste `if`, want SQL garandeert geen kortsluiting van `and`/`or`). De builder test beide takken (Testplan AC-4, 22–28).
+- De trigger vuurt alleen als `starts_at` in de SET-lijst staat. Annuleren (`update … set cancelled_at`) raakt hem dus niet.
+- Triggers op dezelfde tabel lopen op naamvolgorde: `sessions_prepare_insert`, `sessions_set_updated_at`, `sessions_starts_at_horizon`. De volgorde maakt hier niet uit.
+
+### `supabase/tests/07_sessions.test.sql` (alleen regels 68 en 69)
+Regel 68 wordt:
+```sql
+select set_eq($$select p.proname::text from pg_proc p where p.pronamespace = 'public'::regnamespace and has_function_privilege('service_role', p.oid, 'EXECUTE')$$, $$values ('purge_expired_sessions'), ('db_usage')$$, 'service_role can execute exactly purge_expired_sessions and db_usage');
+```
+Regel 69 wordt:
+```sql
+select set_eq($$select p.proname::text from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prosecdef$$, $$values ('handle_new_user'), ('get_public_session'), ('rsvp_create'), ('rsvp_update'), ('rsvp_delete'), ('purge_expired_sessions'), ('db_usage')$$, 'security definer functions in public');
+```
+- `plan(112)` blijft gelijk. Regels 66, 67 en 70 blijven ongewijzigd.
+- **Samenloop met WP-23** (die `delete_my_account` toevoegt, security definer, `EXECUTE` alleen voor `authenticated`): wie als tweede merget, voegt beide samen. Na beide merges luiden de regels:
+  - regel 67: `… $$values ('get_public_session'), ('rsvp_create'), ('rsvp_update'), ('rsvp_delete'), ('delete_my_account')$$, 'authenticated can execute exactly the four public RPCs and delete_my_account');` (tekst van WP-23);
+  - regel 68: zoals hierboven;
+  - regel 69: `… $$values ('handle_new_user'), ('get_public_session'), ('rsvp_create'), ('rsvp_update'), ('rsvp_delete'), ('purge_expired_sessions'), ('delete_my_account'), ('db_usage')$$, 'security definer functions in public');`
+  - Is WP-23 al gemerged als de builder van WP-22 rebaset, dan schrijft hij direct deze eindvorm.
+- `push_subscriptions_limit` en `sessions_starts_at_horizon` staan bewust in geen van de sets van regels 66–69: ze zijn security invoker en niemand heeft `EXECUTE`. Regel 70 (`search_path` gepind) geldt alleen voor security-definerfuncties; beide hebben toch `set search_path = ''`.
 
 ### Web: `auth.ts`
 - `signInWithOtp({ email, options: { emailRedirectTo: window.location.origin, shouldCreateUser: true } })`.
@@ -733,7 +834,7 @@ alter table public.sessions
 | E18 | Endpoint `https://evilnotify.windows.com/x` | Niet toegestaan: `.notify.windows.com` vereist een punt. |
 | E19 | Endpoint `https://[::1]/x` of een ongeldige poort | Niet toegestaan, geen exception. |
 | E20 | Gebruiker met alleen een geblokkeerd abonnement | `no_target`, state opgeslagen, `blocked_targets == 1`, warning-annotatie. |
-| E21 | Aflevering HTTP 403 voor het enige abonnement | `failed`, niet `deferred`; state opgeslagen; abonnement blijft staan. |
+| E21 | Aflevering HTTP 403 voor het enige abonnement | `failed`, niet `deferred`; `push_non_retryable == 1`; state opgeslagen; abonnement blijft staan; stap `alerts` `partial` met de warning `1 push delivery(ies) failed without retry; …`. |
 | E22 | Aflevering HTTP 503 of `requests.ConnectTimeout` | Herhaalbaar: `deferred` zoals in WP-17. |
 | E23 | `RuntimeError` of `VapidException` uit `webpush()` | Niet herhaalbaar. |
 | E24 | Spot met alle rijen precies 3 uur oud | Vers: wordt geëvalueerd. |
@@ -759,11 +860,18 @@ alter table public.sessions
 | E44 | VAPID onvolledig, maar er is een push due | De factory geeft `ValueError` → `push_disabled` met note; de stap `alerts` faalt al (mail). |
 | E45 | `db_usage()` als anon of authenticated | `42501`. |
 | E46 | 21e abonnement van gebruiker A | `PT400 too_many_subscriptions`; B kan nog wel. |
-| E47 | Sessie met `starts_at` 400 dagen vooruit, of een update naar 400 dagen | `23514`. 360 dagen gaat goed. |
+| E47 | Sessie met `starts_at` 371 dagen vooruit, of een update naar 371 dagen | `23514 starts_at_too_far_ahead`. 365 dagen gaat goed. |
+| E47a | Sessie 10 dagen geleden aangemaakt, nu verzet naar vandaag + 369 dagen (review B-5) | Gaat goed: de grens hangt aan `now()`, niet aan `created_at`. |
+| E47b | Bestaande rij met `starts_at` verder dan 370 dagen vooruit (van vóór de migratie); update van `note` met dezelfde `starts_at` in de SET-lijst | Gaat goed (`starts_at` verandert niet). Een update die `starts_at` wél verandert naar > 370 dagen: `23514`. |
+| E47c | Annuleren van een sessie (`set cancelled_at`) | De trigger vuurt niet. |
 | E48 | Inloggen met een onbekend adres terwijl aanmelden uit staat | `signup_disabled` → melding "nog niet inloggen". |
 | E49 | Rapport met alle velden onbekend | Elke regel toont "onbekend"; pushbody `Runs ?% ok · DB ? MB · Open-Meteo max ?/dag\n? gebruikers, ? abonnementen`. |
-| E50 | Grote getallen (10¹² bytes, 10⁷ calls) | De titel blijft binnen 50 tekens en de body binnen 150; de drie waarschuwingen passen altijd samen (hoogstens 3 × 55 tekens). |
+| E50 | Grote getallen (10¹² bytes, 10⁷ calls) | De titel blijft binnen 50 tekens en de body binnen 150. Met deze testwaarden passen de drie waarschuwingen samen (ongeveer 136 tekens inclusief de twee regeleinden, dus onder 150). Bij nog grotere getallen kan dat niet meer; dan valt een waarschuwing weg volgens het algoritme van `usage_push_text` (regels vanaf het begin zolang ze passen), maar de grenzen blijven gelden. |
 | E51 | Week die over de maandgrens loopt (1 augustus) | `max_day` over 7 dagen die in juli beginnen; `month` alleen augustus. |
+| E52 | Endpoint `https://jmt17.google.com/fcm/send/abc` (Chrome Beta/Dev/Canary) | Toegestaan. `https://x.jmt17.google.com/…` en `https://android.googleapis.com/gcm/send/…` niet. |
+| E53 | Gebruiker met precies 20 abonnementen meldt een bestaand endpoint opnieuw aan (review N-6) | De trigger vuurt vóór de unieke check: `PT400 too_many_subscriptions` in plaats van `23505`. `addPushSubscription` geeft dan een generieke fout in plaats van `'exists'`. Zeldzaam, want de app snoeit naar 10. Geen codewijziging; staat in RUNBOOK §14.14. |
+| E54 | Database-select geeft 522 (Cloudflare), dan 200 | Herhaald, rijen terug, 2 requests. |
+| E55 | `OPERATOR_USER_ID` als `{AAAAAAAA-…}` (hoofdletters, accolades) | Push werkt (canoniek via `resolve_operator`); zowel de ruwe als de canonieke vorm worden geredigeerd. |
 
 ## Testplan
 
@@ -785,7 +893,7 @@ Tests eerst voor het domein (`test_usage.py`) en voor `with_retries`. Alle Pytho
     - zonder `sleep`-argument wordt `shakka.http._sleep` gebruikt (monkeypatch met een recorder).
 - `test_openmeteo_client.py`: blijft ongewijzigd groen (regressie van E5).
 - `test_rws_tides.py`: `test_fetch_retries_then_ok` (E6), `test_fetch_500_three_times` (E7), `test_fetch_no_retry_on_permanent` (E8, telt de requests), `test_fetch_transport_error_retried` (ConnectError, dan 200). De bestaande `test_fetch_errors` blijft groen (de fixture slaat het wachten over).
-- `test_db.py`: E9–E14 met de bestaande `make_db`. Wachttijden via `monkeypatch.setattr(shakka.http, "_sleep", rec.append)`.
+- `test_db.py`: E9–E14 en E54 met de bestaande `make_db`. Wachttijden via `monkeypatch.setattr(shakka.http, "_sleep", rec.append)`. Plus `test_retry_statuses`: `DB_RETRY_STATUSES == {429, 502, 503, 504, 520, 521, 522, 523, 524}` en 500 zit er niet in.
 - `test_notify_webpush.py`: `test_webpush_called_with_timeout` bestaat al (r. 54) en blijft.
 
 ### AC-2: `tests/test_usage.py` (puur)
@@ -858,8 +966,19 @@ Tests:
   - `test_all_steps_ok_records_run`: laatste stap `usage_report`, `ok`, `counts["due"] is False`;
   - `test_spots_sync_failure_continues`: `len(report.steps) == 8`.
 
-### AC-4: `supabase/tests/09_hardening.test.sql`
-Fixture: `auth.users` A (`1111…`) en B (`2222…`), plus spot `pgtap-spot`. Asserts, met `plan(21)`:
+### AC-4: `supabase/tests/10_hardening.test.sql`
+Opbouw zoals `07_sessions.test.sql`: `begin; create extension if not exists pgtap with schema extensions; select plan(28); … select * from finish(); rollback;`.
+
+Fixture (als postgres), letterlijk het patroon van `07_sessions.test.sql` regels 8–11:
+```sql
+insert into auth.users (id, email) values
+  ('11111111-1111-1111-1111-111111111111', 'a@example.test'),
+  ('22222222-2222-2222-2222-222222222222', 'b@example.test');
+insert into public.spots (id, name) values ('pgtap-spot', 'Pgtap Spot');
+```
+Elke sessie-insert geeft expliciet `id`, `slug` (≥ 10 tekens, uniek), `spot_id = 'pgtap-spot'`, `organizer_id`, `organizer_name`, `starts_at` en `ends_at` (ends_at = starts_at + 2 uur; hoogstens 16 uur en ná starts_at, anders faalt een andere CHECK).
+
+Asserts, met `plan(28)`:
 1. `has_function('public','db_usage', array[]::name[], …)`
 2. `is_definer('public','db_usage', array[]::name[], …)`
 3. `function_privs_are(… 'db_usage' … 'anon', '{}')`
@@ -878,32 +997,48 @@ Fixture: `auth.users` A (`1111…`) en B (`2222…`), plus spot `pgtap-spot`. As
 16. als A: `lives_ok` van het verwijderen van `…/a1`
 17. als A: `lives_ok` van het 21e na dat verwijderen
 18. als B: `lives_ok` van een insert (`…/b1`): de grens geldt per gebruiker
-19. als postgres: `throws_ok` van een sessie-insert met `starts_at = now() + interval '400 days'` en `ends_at = … + 2 hours` (organizer A), met `'23514'`
-20. als postgres: `lives_ok` van dezelfde insert met 360 dagen
-21. als postgres: `throws_ok` van een `update public.sessions set starts_at = now() + interval '400 days', ends_at = now() + interval '400 days 2 hours' where organizer_id = A`, met `'23514'`
+19. `has_trigger('public','sessions','sessions_starts_at_horizon', …)`
+20. `function_privs_are('public','sessions_starts_at_horizon', array[]::name[], 'authenticated', '{}', …)`
+21. `isnt_definer('public','sessions_starts_at_horizon', array[]::name[], …)`
+22. als postgres: `throws_ok` van `insert into public.sessions (id, slug, spot_id, organizer_id, organizer_name, starts_at, ends_at) values ('d0000000-0000-4000-8000-000000000009', 'pgtap-horizon-0009', 'pgtap-spot', '1111…', 'Anna', now() + interval '371 days', now() + interval '371 days 2 hours')`, met `'23514', 'starts_at_too_far_ahead'`
+23. als postgres: `lives_ok` van een insert met `id 'd0000000-0000-4000-8000-000000000001'`, slug `'pgtap-horizon-0001'`, organizer A, `starts_at = now() + interval '365 days'`, `ends_at = … + 2 hours` en `created_at = now() - interval '10 days'` (het bewerkgeval van review B-5)
+24. als A (`set local role authenticated`, claims A): `lives_ok` van `update public.sessions set starts_at = now() + interval '369 days', ends_at = now() + interval '369 days 2 hours' where id = 'd0000000-…-000000000001'`
+25. als postgres: `ok((select starts_at > now() + interval '368 days' from public.sessions where id = 'd0000000-…-000000000001'), …)`: de update van 24 is echt doorgevoerd (met de oude CHECK op `created_at + 370` zou dit `23514` geven)
+26. als A: `throws_ok` van `update … set starts_at = now() + interval '371 days', ends_at = now() + interval '371 days 2 hours' where id = 'd0000000-…-000000000001'`, met `'23514', 'starts_at_too_far_ahead'`
+27. Vóór dit assert, als postgres (geen assert): `alter table public.sessions disable trigger sessions_starts_at_horizon;` dan een insert met `id 'd0000000-0000-4000-8000-000000000002'`, slug `'pgtap-horizon-0002'`, organizer A, `starts_at = now() + interval '400 days'`, `ends_at = … + 2 hours`; dan `alter table public.sessions enable trigger sessions_starts_at_horizon;`. Assert als A: `lives_ok` van `update public.sessions set note = 'pgtap-legacy', starts_at = starts_at where id = 'd0000000-…-000000000002'` (E47b: `starts_at` in de SET-lijst maar ongewijzigd)
+28. als A: `throws_ok` van `update public.sessions set starts_at = starts_at + interval '1 day', ends_at = ends_at + interval '1 day' where id = 'd0000000-…-000000000002'`, met `'23514', 'starts_at_too_far_ahead'`
 
-Wissel van rol zoals in `05`/`07` (`set local role …`, `select set_config('request.jwt.claims', …, true)`, `reset role`).
+Schrijf de verkorte id's (`1111…`, `d0000000-…-000000000001`) in het bestand voluit. Wissel van rol zoals in `05`/`07` (`set local role …`, `select set_config('request.jwt.claims', …, true)`, `reset role`). Het `alter table … disable/enable trigger` werkt als postgres (eigenaar van de tabel) en wordt door de `rollback` aan het eind ook teruggedraaid.
 
 ### AC-5
 De builder draait `cd web && npm audit --omit=dev --audit-level=high` (exitcode 0) en legt de uitvoer vast in de PR-beschrijving. De verifier herhaalt het.
 
 ### AC-6 (`NEEDS_LARS`)
-RUNBOOK §17 bevat de velden "Open-Meteo-bevestiging: datum … / uitkomst …" en "Gekozen SMTP-dienst: …", ingevuld met "nog in te vullen door Lars". Lars vult ze in en test een magic link naar een adres dat geen teamlid is.
+RUNBOOK §17 bevat de velden "Open-Meteo-bevestiging: datum … / uitkomst …" en "Gekozen SMTP-dienst: …", ingevuld met "nog in te vullen door Lars". Lars vult ze in en test een magic link naar een adres dat geen teamlid is:
+1. eigen SMTP ingesteld, "Allow new users to sign up" nog uit;
+2. de testgebruiker aangemaakt via Authentication, Add user, mét "Auto Confirm User" (A14);
+3. in de app een inloglink aangevraagd: de mail komt aan;
+4. de link in de mail wijst direct naar `https://<project-ref>.supabase.co/auth/v1/verify?…` en niet naar een redirect- of trackingdomein van de maildienst (review B-3). Controleer dat door de link te kopiëren in plaats van erop te klikken;
+5. inloggen met die link lukt;
+6. pas daarna "Allow new users to sign up" aan.
 
 ### AC-7
-- `supabase test db` is groen. `01_schema` noemt de legacy-kolom niet meer in `columns_are(profiles)` en in de `set_eq`.
+- `supabase test db` is groen, inclusief `07_sessions.test.sql` met de nieuwe regels 68 en 69 (review B-1). `01_schema` noemt de legacy-kolom niet meer in `columns_are(profiles)` en in de `set_eq`.
 - `grep -rni "telegram" ingest/src web/src` geeft niets (ook nu al niet).
 - `git diff origin/develop -- supabase/migrations/2026101509* supabase/migrations/20261015150000* supabase/migrations/20261015180000* supabase/migrations/20261015200000*` is leeg.
 - Web: `schema-columns.test.ts` is groen met de aangepaste guard.
 
 ### Gevolgen-punten (geen AC, wel getest)
 - **Push:**
-  - `test_push_allowlist.py`: tabel van `endpoint_allowed` (E15–E19, plus geldige endpoints voor FCM, Mozilla `updates.push.services.mozilla.com/wpush/v2/…`, Apple `web.push.apple.com/…` en WNS `wns2-par02p.notify.windows.com/w/?token=…`);
+  - `test_push_allowlist.py`: tabel van `endpoint_allowed` (E15–E19 en E52, plus geldige endpoints voor FCM, Chrome-staging `jmt17.google.com/fcm/send/…`, Mozilla `updates.push.services.mozilla.com/wpush/v2/…`, Apple `web.push.apple.com/…` en WNS `wns2-par02p.notify.windows.com/w/?token=…`);
   - `load_all_targets_checked` met 1 geblokkeerde en 1 geldige rij geeft `blocked == 1`, en de logregel bevat geen endpoint;
   - `load_targets` filtert;
   - `test_notify_webpush.py`: geblokkeerde host geeft `DeliveryResult(False, False, "blocked host", retryable=False)` zonder aanroep van `webpush_fn`. Status 400, 403 en 413 → `retryable=False`; 429, 500 en 503 → `True`; `ConnectTimeout` → `True`; `RuntimeError` → `False`; `WebPushException` zonder response → `True`; `ValueError` uit de payload → `False`.
-  - `test_job_push.py`: `deliver_event` met één 403 (`retryable=False`) geeft `retryable is False`.
-  - `test_job_alerts_push.py`: `test_non_retryable_4xx_is_stored` (E21: state opgeslagen, `deferred == 0`, `failed == 1`, abonnement bestaat nog) en `test_blocked_host_is_no_target` (E20).
+  - `test_job_push.py`: `deliver_event` met één 403 (`retryable=False`) geeft `retryable is False` en `non_retryable == 1`; met één 503 `retryable is True` en `non_retryable == 0`; met 403 + 503 op twee doelen `retryable is True` en `non_retryable == 1`.
+  - `test_job_alerts.py` of `test_job_alerts_push.py`: `deliver_plan` geeft `non_retryable` door, ook bij `deferred=True`.
+  - `test_job_alerts_push.py`: `test_non_retryable_4xx_is_stored` (E21: state opgeslagen, `deferred == 0`, `failed == 1`, `push_non_retryable == 1`, abonnement bestaat nog) en `test_blocked_host_is_no_target` (E20).
+  - `test_pipeline.py::test_non_retryable_push_is_partial_with_warning` (review B-2): een pipeline-run waarin de `FakeNotifier` voor het enige abonnement een niet-herhaalbaar resultaat geeft (`DeliveryResult(False, False, "HTTP 403", retryable=False)`): stap `alerts` is `partial`, `counts["push_non_retryable"] == 1`, `counts["push_failures"] == {"HTTP 403": 1}`, `counts["deferred"] == 0`, en de annotaties bevatten `"::warning::alerts: 1 push delivery(ies) failed without retry; the alert is lost for that device (see push_failures in ingest_runs)"`. De exitcode is 0.
+  - `test_cli_push.py`: de verwachte regels op r. 79 en 95 worden `"push: sent=1 failed=0 no_target=0 deferred=0 non_retryable=0 removed=0"` en `"push: sent=0 failed=1 no_target=0 deferred=1 non_retryable=0 removed=0"`. Nieuwe test: met een niet-herhaalbare fout `"push: sent=0 failed=1 no_target=0 deferred=0 non_retryable=1 removed=0"`, `alerts: failed` en exitcode 1.
 - **Veroudering:**
   - `test_job_inputs.py`: E24–E26 en `stale`; zonder `max_fetch_age` blijft het gedrag gelijk;
   - `test_job_evaluate.py`: E25 (geen upsert voor die spot, `stale == ("test-strand",)`, oude evaluatierijen bestaan nog);
@@ -922,7 +1057,7 @@ RUNBOOK §17 bevat de velden "Open-Meteo-bevestiging: datum … / uitkomst …" 
   - `test_fakes.py`: de fake-`db_usage` geeft de tabellen van `TABLE_KEYS` met hun aantallen en `database_bytes`;
   - `test_migrations.py::test_db_usage_counts_every_table`: in `20261015220100_hardening.sql` levert de regex `'(\w+)', \(select count\(\*\) from public\.(\w+)\)` paren met naam == tabel, en de set is gelijk aan `set(TABLE_KEYS)`;
   - `test_cli_usage.py`: met `runtime.open_db` gepatcht naar een `FakeSupabase` toont `usage show` de rapportregels met exit 0; `db_usage` met een fout geeft een regel `error   db_usage: …` en exit 1; zonder configuratie exit 1;
-  - `test_config.py` en `test_logsetup.py`: `OPERATOR_USER_ID` wordt gelezen; `secret_values` bevat de gestripte waarde;
+  - `test_config.py` en `test_logsetup.py`: `OPERATOR_USER_ID` wordt gelezen; `secret_values` bevat de gestripte waarde; met `"{AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA}"` bevat hij ook `"aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"`; met een canonieke waarde staat die er één keer in; met `"not-a-uuid-12345"` alleen de ruwe waarde, zonder exception (E55);
   - `test_repo_hygiene.py`: `ENV_KEYS` krijgt `OPERATOR_USER_ID` erbij (waarde leeg). `test_actions_pinned_to_commit_sha`: elke `uses:` in `.github/workflows/*.yml` matcht `^[\w.-]+/[\w.-]+@[0-9a-f]{40}$`;
   - `test_hourly_workflow.py`: de verwachte env en `test_only_known_secrets` krijgen `OPERATOR_USER_ID` erbij.
 - **Web:**
@@ -944,14 +1079,21 @@ Gecontroleerd op 15 oktober 2026:
 | Mozilla autopush | Productie-endpoint `https://updates.push.services.mozilla.com/wpush/…`. De URL is "opaque", en Mozilla mag hem wijzigen. | https://autopush.readthedocs.io/en/latest/http.html |
 | Microsoft WNS | Het kanaal-URI moet het domein `notify.windows.com` gebruiken; "never push notifications to a channel on any other domain". Edge gebruikt subdomeinen zoals `*.notify.windows.com`. | https://docs.microsoft.com/en-us/windows/uwp/controls-and-patterns/tiles-and-notifications-windows-push-notification-services--wns--overview |
 | Chrome/FCM | Endpoints `https://fcm.googleapis.com/fcm/send/…`. Alleen bevestigd via voorbeelden in de praktijk, niet via een Google-pagina. Daarom wordt geblokkeerd verkeer geteld en zichtbaar gemaakt (R2). | (zie R2) |
+| Chrome-staging `jmt17.google.com` (review B-4) | "Chrome on every channel but Stable subscribes at `https://jmt17.google.com/fcm/send/…`, Chromium's FCM staging endpoint", met verwijzing naar `chrome/browser/push_messaging/push_messaging_constants.cc` en `push_messaging_utils.cc` in Chromium. De Chromium-bestanden zelf kon ik niet ophalen (Gitiles en GitHub-mirror gaven 404 voor de raw-weergave); de bron is de PR die de reviewer ook noemt. Andere Google-hosts dan `fcm.googleapis.com` en `jmt17.google.com` worden daar niet genoemd. | https://github.com/Significant-Gravitas/AutoGPT/pull/15356 |
 | Supabase Auth rate limits | Instelbaar onder Authentication > Rate Limits. E-mails: 2 per uur met de ingebouwde provider, en instelbaar met eigen SMTP. Sign-ups/sign-ins: 30 per 5 minuten per IP. OTP: 60 s per gebruiker. Verificaties: 30 per 5 minuten. Tokens: 150 per 5 minuten. Een overschrijding geeft 429. | https://supabase.com/docs/guides/auth/rate-limits |
-| Supabase eigen SMTP | Velden: host, poort, gebruiker, wachtwoord, afzenderadres, afzendernaam. Na het inschakelen geldt eerst een "low rate-limit of 30 messages per hour". Een eigen domein met DKIM, DMARC en SPF wordt aangeraden. Brevo staat erin als voorbeeld. | https://supabase.com/docs/guides/auth/auth-smtp |
+| Supabase eigen SMTP | Velden: host, poort, gebruiker, wachtwoord, afzenderadres, afzendernaam. Na het inschakelen geldt eerst een "low rate-limit of 30 messages per hour". Een eigen domein met DKIM, DMARC en SPF wordt aangeraden. Genoemde diensten: Resend, AWS SES, Postmark, Twilio SendGrid, ZeptoMail, Brevo. | https://supabase.com/docs/guides/auth/auth-smtp |
+| Supabase e-mailtemplates | `{{ .ConfirmationURL }}` = `https://project-ref.supabase.co/auth/v1/verify?token=…&type=…&redirect_to=…`. Linkscanners kunnen het token verbruiken ("Token has expired or is invalid"). "disable email tracking features with external providers, as they can overwrite Supabase links". | https://supabase.com/docs/guides/auth/auth-email-templates |
+| Resend | Gratis: 3.000 per maand, "limited to 100 emails per day", 3 domeinen. "Open and click tracking is disabled by default for all domains"; tracking werkt alleen als het per domein aan staat én een trackingsubdomein geverifieerd is. "You must add and verify at least one domain to send emails with Resend." SMTP: `smtp.resend.com`, poorten 25, 465, 587, 2465, 2587, gebruiker `resend`, wachtwoord = API-sleutel; vereist een geverifieerd domein. API-sleutelpermissie `sending_access`: "Can only send emails." | https://resend.com/pricing, https://resend.com/docs/dashboard/domains/tracking, https://resend.com/docs/dashboard/domains/introduction, https://resend.com/docs/send-with-smtp, https://resend.com/docs/api-reference/api-keys/create-api-key |
+| Postmark | Gratis (Developer): "100 emails/month", verloopt niet, geen overages. Links: default "None - No links will be replaced or tracked. This is the default setting for all messages and new and existing servers"; per bericht via SMTP-header `X-PM-TrackLinks`. Opens: "The default value of `TrackOpens` is `false`", maar een serverinstelling "Open tracking" aan overschrijft dat. Sender signature: "it needs to be a private domain that you have access to" (geen Gmail/Yahoo). Vóór handmatige goedkeuring van het account alleen mail naar de eigen geverifieerde domeinen. SMTP `smtp.postmarkapp.com`, poorten 25, 2525, 587. | https://postmarkapp.com/pricing, https://postmarkapp.com/developer/user-guide/tracking-links, https://postmarkapp.com/developer/user-guide/tracking-opens/tracking-opens-per-email, https://postmarkapp.com/developer/user-guide/managing-your-account/managing-sender-signatures, https://postmarkapp.com/support/article/1084-how-does-the-account-approval-process-work, https://postmarkapp.com/developer/user-guide/send-email-with-smtp |
+| Gmail SMTP | Server `smtp.gmail.com`, "For SSL, enter 465. For TLS, enter 587", met volledig adres en app-wachtwoord (pagina voor Workspace; dezelfde server geldt voor gewone accounts). App-wachtwoorden: "can only be used with accounts that have 2-Step Verification turned on"; "aren't recommended and are unnecessary in most cases". Limiet persoonlijk account: meer dan 500 e-mails per dag geeft een blokkade van 1 tot 24 uur. | https://knowledge.workspace.google.com/admin/gmail/send-email-from-a-printer-scanner-or-app, https://support.google.com/accounts/answer/185833, https://support.google.com/mail/answer/22839 |
+| Brevo (afgewezen) | Brevo-medewerker op het eigen forum: "Disabling tracking is not planned (at least not yet), for security reasons. EDIT: Disabling tracking will be available, upon request and to our Enterprise plans." | https://community.brevo.com/t/no-way-to-disable-by-option-tracking-in-transactional-e-mail/201 |
+| SMTP2GO (niet voorgesteld) | Gratis 1.000 per maand, 200 per dag, 25 per uur tot het domein geverifieerd is. Het standaardgedrag van tracking staat niet in die bron; alleen in reviews van derden. | https://www.smtp2go.com/blog/know-your-sending-limits/ |
+| MapTiler (maandcheck, review B-6) | Met MapLibre GL JS (geen MapTiler-SDK) rekent MapTiler in API-requests: 100.000 per maand gratis, alleen tiles tellen. Map sessions gelden alleen voor de MapTiler-SDK en de Leaflet-plugin, dus niet voor Shakka. Overgenomen uit WORK_PACKAGES ("Gecontroleerde externe documentatie") en de blueprint van WP-15. | https://www.maptiler.com/cloud/pricing/, https://docs.maptiler.com/guides/maps-apis/maps-platform/tile-requests-and-map-sessions-compared/ |
 | Supabase-foutcodes | `signup_disabled`: "Sign ups (new account creation) are disabled on the server."; `otp_disabled`; `email_address_not_authorized` | https://supabase.com/docs/guides/auth/debugging/error-codes |
 | GoTrue | Bij een onbekende gebruiker met `CreateUser=false` volgt `ErrorCodeOTPDisabled` ("Signups not allowed for otp"). Met `CreateUser=true` doet `MagicLink` een `Signup()`, en dat geeft bij `config.DisableSignup` `ErrorCodeSignupDisabled`. | https://raw.githubusercontent.com/supabase/auth/master/internal/api/otp.go, …/magic_link.go, …/signup.go |
 | Supabase "Allow new users to sign up" | "If this config is disabled, only existing users can sign in." | https://supabase.com/docs/guides/auth/general-configuration |
 | Supabase databasegrootte | Aanbevolen query: `sum(pg_database_size(pg_database.datname)) from pg_database`. Boven 500 MB gaat een Free-project in read-only. | https://supabase.com/docs/guides/platform/database-size |
 | Open-Meteo-voorwaarden | Niet-commercieel = "private or non-profit websites or apps that do not have subscriptions or advertising". Limieten: 600 per minuut, 5.000 per uur, 10.000 per dag, 300.000 per maand. Contact: info@open-meteo.com. | https://open-meteo.com/en/terms |
-| Brevo SMTP | Server `smtp-relay.brevo.com`, poort 587 (ook 465 en 2525), de login uit Settings > SMTP & API (soms `[ID]@smtp-brevo.com`), een SMTP-sleutel (geen API-sleutel). Het gratis plan heeft 300 mails per dag. | https://help.brevo.com/hc/en-us/articles/7924908994450-Send-transactional-emails-using-Brevo-SMTP, https://www.brevo.com/free-smtp-server/ |
 | pip-audit | `pip-audit --require-hashes -r <file>`; `--disable-pip` mag bij gehashte requirements; exitcode 1 bij bevindingen | https://raw.githubusercontent.com/pypa/pip-audit/main/README.md |
 | uv export | `uv export --format requirements-txt --frozen --no-emit-project -o <file>` (standaard met hashes) | https://docs.astral.sh/uv/reference/cli/ |
 | npm audit | `--omit=dev` laat dev-dependencies weg; `--audit-level` bepaalt vanaf welke ernst de exitcode niet 0 is | https://raw.githubusercontent.com/npm/cli/latest/docs/lib/content/commands/npm-audit.md |
@@ -959,16 +1101,26 @@ Gecontroleerd op 15 oktober 2026:
 
 ## Risico's
 
-- **R1. Langere runs door retries.** In het slechtste geval kost één Open-Meteo-chunk 3 × 30 + 3 s, een RWS-station 93 s en een DB-aanroep 3 × 30 + 1,5 s. De stroomonderbreker (A7), het getijbudget (240 s) en het runbudget (600 s, A12) houden de run onder de job-timeout van 900 s. Eén stap die na de budgetcheck start, kan nog uitlopen; dat accepteren we.
+- **R1. Langere runs door retries.** In het slechtste geval kost één Open-Meteo-chunk 3 × 30 + 3 s, een RWS-station 93 s en een DB-aanroep 3 × 30 + 1,5 s. De stroomonderbreker (A7), het getijbudget (240 s) en het runbudget (600 s, A12) houden de run onder de job-timeout van 900 s. Eén stap die na de budgetcheck start, kan nog uitlopen; dat accepteren we. Bij een trage ingest is het juist `alerts` die wordt overgeslagen (A12, review N-11). Herhaalde `update`/`delete` kunnen tellers te laag laten uitvallen (A6, review N-4).
 - **R2. Allowlist te streng.** Verandert een push-service van host (Mozilla behoudt zich dat voor), dan krijgen die gebruikers geen meldingen meer. Zichtbaar via `blocked_targets`, een `::warning::` per run en de logregel. Herstel: een host toevoegen aan `PUSH_SERVICE_HOSTS` of de suffixen (een codewijziging en een release).
-- **R3. Een tijdelijke 403 gaat verloren** (bijvoorbeeld klokverschil bij de VAPID-JWT). Dat event komt dan niet aan. Volgende events wel; het abonnement blijft.
+- **R3. Een tijdelijke 403 gaat verloren** (bijvoorbeeld klokverschil bij de VAPID-JWT). Dat event komt dan niet aan. Volgende events wel; het abonnement blijft. Zichtbaar via `push_non_retryable`, de warning en de `partial` stap (A8).
+- **R3a. Verkeerde `PUBLIC_VAPID_PUBLIC_KEY` in de PWA** (WP-17 R1). Elke aflevering geeft 403; alle alerts gaan verloren zolang de fout bestaat, in plaats van uitgesteld te worden. Zichtbaar in elke run (warning, `partial`, `push_failures {"HTTP 403": n}`) en in het weekrapport. Herstel: RUNBOOK §14.10 (sleutels gelijk zetten, abonnementen opnieuw aanmaken).
 - **R4. Open aanmelden.** Wie zich aanmeldt maar nooit klikt, laat een rij achter in `auth.users`/`profiles`. Misbruik wordt begrensd door de Auth-rate-limits (30 per 5 minuten per IP, e-mails per uur) en de daglimiet van de SMTP-dienst. De groei is zichtbaar in het weekrapport (`profiles`). Opruimen hoort bij WP-23 (privacy).
-- **R5. Volgorde van deploy.** Na de merge naar `develop` draait de nieuwe `auth.ts` op de Cloudflare-preview, en na de promotie naar `main` in productie. Staat "Allow new users to sign up" dan nog aan zonder eigen SMTP, dan kunnen onbekende adressen een account aanmaken. De standaard-SMTP mailt alleen aan teamleden, maar de rij in `auth.users` ontstaat mogelijk wel. Mitigatie: Lars zet de instelling uit vóór de merge (Nodig van Lars, punt 1). Dat kan nu al: met `shouldCreateUser: false` verandert er niets.
+- **R5. Volgorde van deploy.** Na de merge naar `develop` draait de nieuwe `auth.ts` op de Cloudflare-preview, en na de promotie naar `main` in productie. Staat "Allow new users to sign up" dan nog aan zonder eigen SMTP, dan kunnen onbekende adressen een account aanmaken. De standaard-SMTP mailt alleen aan teamleden, maar de rij in `auth.users` ontstaat mogelijk wel. Mitigatie: Lars zet de instelling uit vóór de merge (Nodig van Lars, punt 1, een harde poort). Dat kan nu al: met `shouldCreateUser: false` verandert er niets. Omdat de client-vlag nooit een beveiligingsgrens was, controleert Lars de instelling direct, los van deze WP (A14).
 - **R6. `db_usage` wijkt af van het dashboard.** De som over databases met `CONNECT`-recht kan een interne database missen. De drempel van 300 MB laat ruim marge tot 500 MB. Lars vergelijkt bij de eerste maandcheck.
 - **R7. Weekrapport gemist** als alle maandagruns tussen 08:00 en 22:00 falen (A3). Een gefaalde run geeft al een mail van GitHub.
 - **R8. Verouderde SHA-pins.** Zonder Dependabot moet Lars de actions zelf bijwerken (maandcheck). Een oude actie blijft werken; het risico is alleen dat beveiligingsfixes uitblijven.
 - **R9. `npm audit` faalt op een advisory zonder fix** (AC-5). Dan stopt de builder en schrijft hij een `deviations.md` (geen `--force`, geen ongeteste major-upgrade).
-- **R10. Mergeconflicten.** De bestanden `pipeline.py`, `push_fixtures.py`, `test_pipeline.py` en `RUNBOOK.md` worden ook door WP-23 geraakt als die parallel loopt. Dat zijn additieve wijzigingen; houd bij een conflict beide kanten aan.
+- **R10. Samenloop met WP-23 (review N-3).**
+  - Bestanden die beide raken: `supabase/tests/07_sessions.test.sql` (regels 67–69; eindvorm in Interfaces), `docs/RUNBOOK.md`, `ci.yml` en mogelijk `package-lock.json`. Dat zijn additieve wijzigingen; houd bij een conflict beide kanten aan. Bij `package-lock.json`: opnieuw `npm install` op de gemergde `package.json`.
+  - pgTAP: WP-23 heeft `09_delete_my_account.test.sql`, WP-22 `10_hardening.test.sql`. Geen botsing.
+  - RUNBOOK: de nieuwe sectie krijgt het eerstvolgende vrije nummer bij de merge. Merget WP-22 eerst, dan is het §17 en wordt die van WP-23 §18 (zoals WP-23 zelf vastlegt). Merget WP-23 eerst, dan wordt die van WP-22 §18; de builder past dan alle verwijzingen in deze WP (§11.2, §11.5, §14.7, §14.14, de sectie zelf) aan.
+  - Migraties: die van WP-23 (`20261016090000`) heeft een latere tijdstempel dan die van WP-22 (`20261015220000`, `20261015220100`). Staat die van WP-23 al op het remote project, dan heeft de push van WP-22 `supabase db push --include-all` nodig (RUNBOOK §17.5).
+  - `docs/PRIVACY.md` (van WP-23): na de verwijdering van de legacy-kolom klopt de bijzin in de rij "Profiel" niet meer. Wie als tweede merget, haalt hem weg (stap 13).
+- **R12. Een eigen domein kost geld.** Resend en Postmark vereisen een domein; registratie is een jaarlijkse uitgave. Dat botst met "€0 per maand, geen betaalde dienst zonder akkoord van Lars". Daarom staat er een voorstel zonder domein naast (Gmail, A15). Lars beslist.
+- **R13. Gmail als SMTP-dienst** (als Lars die kiest): Google kan app-wachtwoorden beperken of het account blokkeren bij verdacht verkeer. Dan komen er geen inloglinks meer; bestaande sessies blijven werken. Zichtbaar doordat inloggen faalt; herstel is een andere dienst kiezen (A15).
+- **R14. Linkscanners** van maildiensten of virusscanners kunnen een magic link openen en het token verbruiken. Dat staat los van tracking en bestond al. De test in AC-6 controleert dat de link direct naar Supabase wijst. Inloggen met een code (in plaats van een link) blijft buiten scope.
+- **R15. `alter table … disable trigger` in de pgTAP-test** vereist dat `postgres` eigenaar is van `public.sessions`. Dat is zo als de migraties lokaal als `postgres` draaien (`supabase db reset`). Faalt het toch (`42501 must be owner`), dan gebruikt de builder deze terugvaloptie: rij `…0002` wordt zonder `disable trigger` ingevoegd met `starts_at = now() + interval '369 days'`; assert 27 blijft (`note` bijwerken met `starts_at = starts_at`); assert 28 zet `starts_at = starts_at + interval '2 days'` (dus 371 dagen) en verwacht `23514`. Hij noteert dat in `deviations.md`. Die variant toetst de "ongewijzigd"-tak minder scherp, maar het aantal asserts blijft 28.
 - **R11. Push buiten het venster.** Waarschuwingen tussen 22:00 en 08:00 wachten tot 08:17. Voor database- en budgetdrempels is dat ruim op tijd (de guard stopt bij 80%).
 
 ## Buiten scope
@@ -976,7 +1128,7 @@ Gecontroleerd op 15 oktober 2026:
 | Punt (bron) | Reden |
 |---|---|
 | Kolom `fetched_at` in `evaluations` en een UI-wijziging (WP-14 R3) | Opgelost in de backend met A11, zonder schema- of UI-wijziging. |
-| Moderatie-RPC voor de organisator (WP-19 N-7, WP-21 R6) | Staat niet in de WP-22-sectie. Zonder UI in WP-20/21 heeft hij geen nut, en die UI is frontendwerk. Voorstel: een aparte kleine WP, als Lars dat wil. Tot dan geldt RUNBOOK §16.5 (SQL-editor). |
+| Moderatie-RPC voor de organisator (WP-19 N-7, WP-21 R6, review N-10) | Staat niet in de WP-22-sectie. WP-23 zet hem onder "WP-22", WP-22 niet: zonder vastlegging valt hij tussen wal en schip. **Open punt voor de orchestrator:** voorstel een aparte WP-25 (RPC plus UI op de sessiepagina voor de organisator), niet nu. Tot dan geldt RUNBOOK §16.5 (SQL-editor). |
 | Dubbele `browserStorage` (WP-20/21) | Frontend-opruiming; WP-21 noemt "uiterlijk WP-23". |
 | Inputs delen tussen evaluatie- en alertjob (WP-10 R5, WP-11 A8) | De egress (≈ 2 GB van 5 GB) past. Bewaking via de maandcheck, met een actiedrempel bij 3,5 GB. |
 | `profiles` zonder filter in de uurlijkse run (WP-10) | Bij 1.000 gebruikers ≈ 70 MB egress per maand. Paginering dekt de correctheid al (WP-10 review N-4). Opnieuw bekijken boven 500 gebruikers. |
@@ -984,7 +1136,9 @@ Gecontroleerd op 15 oktober 2026:
 | `cell_selection` of model per spot (WP-03, WP-12) | Werk aan spotdata dat de verificatie van Lars vergt; er is nog geen geval. |
 | `api_usage` voor RWS (WP-04 A7) | RWS publiceert geen limiet; er valt niets te bewaken. |
 | Gedeelde `requests.Session` voor push (WP-17 R3) | Alleen performance op schaal; het runbudget dekt de looptijd. |
-| Inloggen met een code (WP-13 A6, WP-18) | Vergt een UI en een e-mailtemplate; kan na eigen SMTP in een volgende WP. |
+| Inloggen met een code (WP-13 A6, WP-18) | Vergt een UI en een e-mailtemplate; kan na eigen SMTP in een volgende WP. Het zou ook R14 (linkscanners) oplossen. |
+| Een eigen domein registreren | Betaald; alleen met akkoord van Lars (R12). |
+| De regel "De maildienst" op `/privacy` en in `docs/PRIVACY.md` | Hangt af van de keuze van Lars (A15). Vervolgactie zodra die keuze er is (Nodig van Lars, punt 4). |
 | "Ik ga" voor uitgelogde crew (WP-20 A16) | Een UI-besluit. |
 | E-mail als alertkanaal (voorstel WP-24) | Nog niet besloten; alertkanalen blijven ongemoeid. |
 | CAPTCHA, IP-limieten | Een script van derden in de browser (privacy, CSP), en de gratis tier heeft geen per-IP-limiet op PostgREST. |
@@ -1005,16 +1159,16 @@ Werk op branch `wp/WP-22` in `/Users/larst/Dev/Shakka/.claude/worktrees/WP-22`. 
 4. **Supabase REST.** Retries, stroomonderbreker en logging in `SupabaseRest`, met nieuwe tests in `test_db.py`. Bestaande tests moeten groen blijven; een test die van één request uitging bij een herhaalbare fout, krijgt het juiste aantal.
 5. **Push-hardening.**
    - `notify/base.py`: `retryable`, allowlist, `send_payload` in het Protocol.
-   - `notify/webpush.py` en `jobs/push.py`: `TargetsLoad` en de filtering.
-   - `jobs/alerts.py`: `blocked_targets`; in `pipeline.py` `alert_counts` en de warning.
+   - `notify/webpush.py` en `jobs/push.py`: `TargetsLoad`, de filtering en `EventDelivery.non_retryable`.
+   - `jobs/alerts.py`: `blocked_targets`, `PlanDelivery.non_retryable`, `push_non_retryable`, logregel en CLI; in `pipeline.py` `alert_counts`, `non_retryable_warning`, de warnings en `partial` (A8, review B-2). `test_cli_push.py` mee aanpassen.
    - `push_fixtures.py`: het fcm-endpoint, `FakeResponse` en `FakeNotifier.send_payload`.
    - Vervang `push.example.test` in `test_job_push.py:110`, `test_pipeline.py:772` en `test_notify_webpush.py:286` door `fcm.googleapis.com/fcm`.
    - Voeg `test_push_allowlist.py` toe en pas de tests aan uit Testplan, "Gevolgen-punten, Push".
 6. **Veroudering per spot.** `jobs/inputs.py`, `jobs/evaluate.py`, `jobs/alerts.py` met hun tests (E24–E27).
 7. **Runbudget.** `pipeline.py` (`RUN_TIME_BUDGET_S`, `_run`, `exit_code_for`, `build_annotations`) en `test_run_time_budget_skips_remaining_steps`.
 8. **Database.**
-   - De twee migraties.
-   - pgTAP: `01`, `02` en `04` aanpassen, `09_hardening.test.sql` toevoegen.
+   - De twee migraties (let op de twee statische tests, zie Interfaces).
+   - pgTAP: `01`, `02` en `04` aanpassen; `07_sessions.test.sql` regels 68 en 69 (review B-1; staat `supabase/tests/09_delete_my_account.test.sql` van WP-23 al in de werkboom, schrijf dan direct de eindvorm met `delete_my_account` uit Interfaces); `10_hardening.test.sql` toevoegen.
    - In `fakes.py` de ingebouwde RPC `db_usage` (importeer `DB_USAGE_RPC` uit `shakka.jobs.usage`; maak in deze stap `jobs/usage.py` aan met alleen die constante) en `self.database_bytes = 50 * 1024 * 1024`.
    - Test in `test_fakes.py`, plus `test_migrations.py::test_db_usage_counts_every_table`.
    - Web: de guard in `schema-columns.test.ts`.
@@ -1038,22 +1192,24 @@ Werk op branch `wp/WP-22` in `/Users/larst/Dev/Shakka/.claude/worktrees/WP-22`. 
       - §11.5: de standaard-SMTP-beperking geldt tot eigen SMTP (§17.6).
       - §13.1: de stappenlijst met `usage_report`.
       - §13.6: exitcode 1 ook bij `run_time_budget`.
-      - §14.7: `deferred` alleen bij 429, 5xx en netwerkfouten; 400/401/403/413 tellen als `failed` zonder herhaling, en het abonnement blijft; `blocked_targets`.
-      - §14.14: hoogstens 20 abonnementen per account in de database.
-      - **Nieuwe §17 "Hardening en kostenbewaking (vanaf WP-22)":**
+      - §14.7 (review B-2), nieuwe tekst van de tellers: `sent`, `failed`, `no_target`, `deferred`, `push_non_retryable`, `blocked_targets`, `removed`, `push_enabled` en `push_failures`. `deferred` alleen bij 429, 5xx en netwerkfouten: de state blijft staan en de volgende run probeert het opnieuw. 400/401/403/413 en andere 4xx (behalve 404/410/429) tellen in `push_non_retryable`: geen herhaling, het event is voor dat apparaat verloren, het abonnement blijft staan. Dan staat er `::warning::alerts: <n> push delivery(ies) failed without retry …` in de Actions-log en is de stap `partial`. Staat die warning in elke run en toont `push_failures` `HTTP 403`, controleer dan of `PUBLIC_VAPID_PUBLIC_KEY` in Cloudflare gelijk is aan `VAPID_PUBLIC_KEY` en volg punt 10. `blocked_targets`: zie §17.4.
+      - §14.14: hoogstens 20 abonnementen per account in de database. Bij precies 20 geeft het opnieuw aanmelden van een bestaand apparaat een algemene foutmelding in plaats van "staat al aan" (E53); verwijder dan oude abonnementen in de SQL-editor (`delete from public.push_subscriptions where user_id = '<id>' and last_success_at is null;` of de oudste).
+      - **Nieuwe sectie "Hardening en kostenbewaking (vanaf WP-22)"**, met het eerstvolgende vrije nummer (§17 als WP-23 nog niet gemerged is, anders §18; zie R10). Hieronder heet ze §17.
         1. **Gebruiksrapport en waarschuwingen.** Wat, wanneer (A3), waar (`ingest_runs`, stap `usage_report`, `counts.report`), drempels (A2), `shakka usage show`.
         2. **`OPERATOR_USER_ID` instellen.** Dashboard, Authentication, Users, UID kopiëren; `gh secret set OPERATOR_USER_ID` (plakken bij de prompt); `.env`; push aanzetten op de telefoon (§14.12).
-        3. **Retries en budgetten.** Tabel A6, stroomonderbreker, runbudget 600 s, `run_time_budget`-annotatie.
-        4. **Push.** Allowlist (A9) en wat te doen bij `blocked_targets`; de grens van 20.
-        5. **Migraties van WP-22.** Vóór `supabase db push` in de SQL-editor `select count(*) from public.sessions where starts_at > created_at + interval '370 days';`, wat 0 moet zijn. Daarna `supabase db push` (vóór de promotie naar `main`, anders is `usage_report` elk uur `partial` door `PGRST202`). Bij `PGRST202`: `notify pgrst, 'reload schema';`.
+        3. **Retries en budgetten.** Tabel A6 (met de opmerking over tellers na een herhaling), stroomonderbreker, runbudget 600 s en de afweging dat dan `alerts` wordt overgeslagen (A12), `run_time_budget`-annotatie, veroudering per spot en de begrenzing tot ongeveer 6 uur (A11).
+        4. **Push.** Allowlist (A9, inclusief `jmt17.google.com` voor Chrome Beta/Dev/Canary) en wat te doen bij `blocked_targets` (host controleren, toevoegen aan `PUSH_SERVICE_HOSTS` of de suffixen, release); de grens van 20.
+        5. **Migraties van WP-22.** `supabase db push` na de merge en vóór de promotie naar `main` (anders is `usage_report` elk uur `partial` door `PGRST202`). Staat de migratie van WP-23 (`20261016090000_…`) al op het remote project, gebruik dan `supabase db push --include-all`, omdat de migraties van WP-22 een eerdere tijdstempel hebben. Bij `PGRST202`: `notify pgrst, 'reload schema';`. De sessiegrens (A13) controleert bestaande rijen niet; een controlequery vooraf is niet nodig.
         6. **Eigen SMTP en aanmelden.**
-           - Eisen: gratis tier, open- en kliktracking uit, geverifieerde afzender (bij voorkeur een eigen domein met SPF, DKIM en DMARC; een gratis mailadres als afzender wordt vaak als spam gezien).
-           - Voorstel Brevo met de geverifieerde waarden.
-           - Instellen onder Authentication, SMTP Settings (host, poort 587, gebruiker, SMTP-sleutel, afzender, naam "Shakka").
-           - Test: een magic link naar een adres dat geen teamlid is (Lars maakt de gebruiker eerst aan via Add user).
+           - Eerst, los van deze WP: controleer dat "Allow new users to sign up" (Dashboard, Authentication, de algemene instellingen; de docs linken naar `https://supabase.com/dashboard/project/_/auth`) uit staat (A14).
+           - Eisen: gratis tier, open- en kliktracking aantoonbaar uit, geverifieerde afzender.
+           - De tabel uit A15 met de onderzochte diensten, de voorkeur met de voorwaarde (met domein: Resend; zonder domein: een apart Gmail-account) en de waarschuwing dat een domein geld kost (akkoord van Lars). Brevo staat er als "afgewezen: tracking niet uit te zetten".
+           - Instellen onder Authentication, SMTP Settings: host, poort, gebruiker, wachtwoord/sleutel, afzenderadres, afzendernaam "Shakka". Per voorgestelde dienst de waarden uit A15. Tracking bij de dienst niet aanzetten (Resend: niets aanzetten; Gmail: n.v.t.).
+           - Test (AC-6): de zes stappen uit Testplan AC-6, met de controle dat de link direct naar `https://<project-ref>.supabase.co/auth/v1/verify?…` wijst.
            - Daarna "Allow new users to sign up" aanzetten.
+           - Daarna "De maildienst" op `/privacy` en in `docs/PRIVACY.md` laten bijwerken (vervolgactie, een kleine wijziging met test).
            - Veld "Gekozen SMTP-dienst: nog in te vullen door Lars".
-        7. **Rate limits van Supabase Auth.** Tabel met defaults en voorstellen (A16), waar je ze instelt, en wat een 429 in de app betekent ("Te veel inlogpogingen").
+        7. **Rate limits van Supabase Auth.** Tabel met defaults en voorstellen (A16, "Emails sent per hour" = daglimiet van de dienst / 24, naar beneden afgerond), waar je ze instelt, en wat een 429 in de app betekent ("Te veel inlogpogingen").
         8. **Maandcheck (handmatig, eerste werkdag van de maand).** Tabel:
 
            | Dienst | Waar | Gratis grens | Actie bij |
@@ -1061,21 +1217,53 @@ Werk op branch `wp/WP-22` in `/Users/larst/Dev/Shakka/.claude/worktrees/WP-22`. 
            | Supabase egress | Dashboard, Usage | 5 GB | > 3,5 GB |
            | Supabase database | Dashboard, Usage, en het weekrapport | 500 MB | > 300 MB |
            | Open-Meteo | Weekrapport | 10.000 per dag, 300.000 per maand | warning |
-           | MapTiler | Cloud, Analytics | 100.000 requests | > 70.000 |
+           | MapTiler | Cloud, Analytics (requests) | 100.000 requests per maand, alleen tiles | > 70.000 |
            | GitHub Actions | Actions-tab (publieke repo: minuten onbeperkt) | – | Schedule niet actief, of geen run in de laatste 2 uur |
            | Cloudflare Pages | Builds | 500 per maand | > 350 |
-           | SMTP-dienst | Dashboard van de dienst | bijv. 300 per dag | dicht bij de grens |
+           | SMTP-dienst | Dashboard van de dienst | Resend 100 per dag en 3.000 per maand; Gmail 500 per dag | > 70% |
            | Dependencies | `npm audit` en `pip-audit` (punt 10) | – | high of critical |
            | Actions-pins | Releases van `actions/checkout` en `actions/setup-node` | – | Nieuwe release |
+
+           Onder de tabel één zin: "MapTiler rekent Shakka in requests, omdat de kaart MapLibre GL JS gebruikt en niet de MapTiler-SDK; de grens van 5.000 map sessions uit het projectplan geldt alleen voor die SDK en is hier niet van toepassing." (review B-6)
 
         9. **Open-Meteo-bevestiging.** Een conceptmail aan info@open-meteo.com (Engels, kort: gratis publieke PWA zonder ads of abonnementen, server-side gecachet, ongeveer 40.000 calls per maand, met bronvermelding). Velden "Datum: nog in te vullen door Lars" en "Uitkomst: nog in te vullen door Lars".
         10. **Dependency-audit.** De commando's van stap 12, en hoe je een SHA-pin bijwerkt (`gh api …`, commentaar met de versie).
     - **`docs/WORK_PACKAGES.md`:** alleen de env-rij `OPERATOR_USER_ID` ("(bevestigd in WP-22)").
+    - **`docs/PRIVACY.md`, alleen na merge WP-23:** bestaat het bestand in de werkboom, haal dan in de rij "Profiel" de bijzin "; plus een ongebruikte, altijd lege legacy-kolom die WP-22 verwijdert" weg (de rest van de rij blijft letterlijk staan). Laat de regel "Maildienst: Supabase (tot WP-22)" staan tot Lars een dienst kiest. Bestaat het bestand niet, dan doet de builder niets; WP-23 haalt de bijzin dan zelf weg als die als tweede merget (de orchestrator geeft dat door). `/privacy` (web) wijzigt niet in deze WP.
     - Commit: `docs(WP-22): runbook hardening and cost monitoring`.
 
 **Nodig van Lars** (de orchestrator legt dit voor; dit is niet aan de builder):
-1. Vóór de merge: in Supabase Authentication "Allow new users to sign up" uitzetten (R5).
-2. Na de merge en vóór de promotie naar `main`: de check uit §17.5, dan `supabase db push`.
+1. **Harde poort, nu en in elk geval vóór de merge:** in Supabase Authentication controleren dat "Allow new users to sign up" uit staat, en zo niet, uitzetten (A14, R5, review N-2). Zonder deze bevestiging geen merge.
+2. Na de merge en vóór de promotie naar `main`: `supabase db push` (met `--include-all` als de migratie van WP-23 al gepusht is, §17.5).
 3. `OPERATOR_USER_ID` in `.env` en als GitHub Secret; push aan op de telefoon.
-4. Een SMTP-dienst kiezen en instellen, de Auth-rate-limits instellen, de test met een magic link (AC-6), en daarna aanmelden aanzetten.
+4. Een SMTP-dienst kiezen (A15: met domein Resend, zonder domein een apart Gmail-account; een domein kost geld en vergt dus zijn akkoord), instellen, de Auth-rate-limits instellen, de test met een magic link (AC-6: testgebruiker via Add user mét "Auto Confirm User", link wijst direct naar Supabase), en daarna aanmelden aanzetten. Daarna een kleine vervolgwijziging voor "De maildienst" op `/privacy` en in `docs/PRIVACY.md`.
 5. De mail aan Open-Meteo, en datum en uitkomst invullen in §17.9 (AC-6).
+
+**Open punten voor de orchestrator:**
+- Moderatie-RPC voor organisatoren (review N-10): vastleggen als open punt, voorstel een aparte WP-25, niet nu.
+- Samenloop met WP-23 (R10): wie als tweede merget, voegt `07_sessions.test.sql` regels 67–69 samen tot de eindvorm in Interfaces, kiest het volgende vrije RUNBOOK-nummer en haalt (als WP-23 tweede is) de legacy-bijzin uit `docs/PRIVACY.md`.
+- De vervolgwijziging "De maildienst" na de SMTP-keuze van Lars.
+
+## Verwerking review
+
+Ronde 1 (CHANGES_REQUIRED). Per punt wat er is aangepast.
+
+| Punt | Verwerking |
+|---|---|
+| **B-1** `07_sessions.test.sql` breekt door `db_usage` | Overgenomen. `07_sessions.test.sql` staat in Bestanden; de exacte nieuwe regels 68 (`('purge_expired_sessions'), ('db_usage')`) en 69 (lijst plus `('db_usage')`) staan in Interfaces, `plan(112)` blijft. De eindvorm na samenvoegen met WP-23 (`delete_my_account` in regels 67 en 69) staat erbij: wie als tweede merget, voegt beide samen; is WP-23 al in de werkboom, dan schrijft de builder direct de eindvorm (stap 8). Vastgelegd dat `push_subscriptions_limit` en `sessions_starts_at_horizon` (security invoker, geen `EXECUTE`) bewust in geen van de vier sets staan (Ontwerp, Interfaces). |
+| **B-2** 401/403 worden stil | Overgenomen. Nieuwe teller `push_non_retryable` (`EventDelivery.non_retryable` → `PlanDelivery.non_retryable` → `AlertJobResult.push_non_retryable` → `alert_counts`). Bij > 0 een warning `non_retryable_warning(n)` en de stap `alerts` `partial` (A8, Interfaces Pipeline). CLI toont `non_retryable=` en geeft exitcode 1. Tests: `test_non_retryable_4xx_is_stored` uitgebreid, `test_non_retryable_push_is_partial_with_warning` met de annotatie, `test_job_push.py`, `test_cli_push.py`. RUNBOOK §14.7 herschreven (diagnose verkeerde `PUBLIC_VAPID_PUBLIC_KEY` via deze warning); R3a toegevoegd. WP-17 R1 is een afgesloten blueprint en wordt niet aangepast; RUNBOOK §14.7 is de actuele bron. |
+| **B-3** Brevo kan tracking niet uitzetten | Overgenomen. Brevo afgewezen. Onderzocht en geverifieerd: Resend (tracking standaard uit, vereist domein), Postmark (opens en links standaard uit, maar 100 per maand, privédomein en goedkeuring vereist), Gmail via app-wachtwoord (geen tracking, geen domein, kanttekeningen), SMTP2GO (standaardtracking niet verifieerbaar). Voorkeur met voorwaarde: met domein Resend, zonder domein een apart Gmail-account; de keuze en het eventuele domein (kosten) liggen bij Lars (A15, R12, R13). De Supabase-instelling blijft provider-agnostisch. RUNBOOK-test toegevoegd: de link wijst direct naar `<project>.supabase.co/auth/v1/verify…` (AC-6, §17.6), met de Supabase-bron die tracking uitzetten aanraadt. A16 rekent het uurlimiet nu af van de daglimiet van de gekozen dienst. |
+| **B-4** `jmt17.google.com` ontbreekt | Overgenomen. Exacte host in `PUSH_SERVICE_HOSTS`, rij in `test_push_allowlist.py`, E52, bron in Externe afhankelijkheden. Verder gezocht: geen andere Google-hosts genoemd; `android.googleapis.com` (legacy GCM) blijft bewust buiten de lijst (A9). |
+| **B-5** CHECK botst met bewerken | Optie (a). De CHECK is vervangen door de trigger `sessions_starts_at_horizon` (`BEFORE INSERT OR UPDATE OF starts_at`, `starts_at <= now() + 370 dagen`, alleen als `starts_at` verandert, SQLSTATE `23514`). De UI-grens (vandaag + 365) valt daarbinnen; geen webwijziging. pgTAP-asserts voor het bewerkgeval (sessie 10 dagen oud, verzet naar 369 dagen: gaat goed; naar 371: `23514`) en voor een ongewijzigde `starts_at` op een oudere rij (asserts 22–28). De controlequery vóór `db push` is vervallen. |
+| **B-6** MapTiler-sessies ontbreken | Volgens de beslissing van de orchestrator: de grens blijft 100.000 requests per maand (alleen tiles), met één zin in §17.8 dat map sessions alleen voor de MapTiler-SDK gelden en voor Shakka niet van toepassing zijn. Bron toegevoegd. |
+| N-1 | A11 en "Belangrijkste keuzes" geformuleerd als "begrensd tot ongeveer 6 uur", niet "eerlijk"; ook in RUNBOOK §17.3. |
+| N-2 | "Allow new users to sign up" uit is een harde poort vóór de merge, en Lars controleert het nu al (A14, R5, Nodig van Lars 1). "Auto Confirm User" bij de test van AC-6. |
+| N-3 | pgTAP-bestand heet `10_hardening.test.sql`. RUNBOOK-sectie: eerstvolgend vrij nummer (§17 of §18), consistent met WP-23. `--include-all` in §17.5. `docs/PRIVACY.md`-wijziging als "alleen na merge WP-23" (Bestanden, stap 13), anders doet WP-23 het als tweede. |
+| N-4 | Toegevoegd in A6 en R1: tellers na een herhaalde `update`/`delete` zijn indicatief. |
+| N-5 | 520–524 toegevoegd aan `DB_RETRY_STATUSES` (A6, Interfaces, E54, `test_retry_statuses`). |
+| N-6 | E53 en RUNBOOK §14.14. Geen codewijziging. |
+| N-7 | E50 gecorrigeerd: de drie waarschuwingen passen bij de testwaarden (ongeveer 136 tekens); bij grotere getallen begrenst het algoritme. |
+| N-8 | `secret_values` neemt ook de canonieke UUID-vorm op als die afwijkt (A1, Config, E55, test in `test_logsetup.py`). |
+| N-9 | Fixture en insertpatroon van `07_sessions.test.sql` letterlijk opgenomen in Testplan AC-4, met alle verplichte kolommen. |
+| N-10 | Vastgelegd als open punt voor de orchestrator, voorstel WP-25 (Buiten scope, Open punten). |
+| N-11 | Afweging expliciet in A12 en R1. |
