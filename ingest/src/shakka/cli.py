@@ -66,5 +66,77 @@ def forecast_fetch(dry_run: bool) -> None:
     raise SystemExit(run_forecast_cli(dry_run=dry_run, echo=click.echo))
 
 
+@cli.group()
+def tides() -> None:
+    """Rijkswaterstaat astronomical tide extremes."""
+
+
+@tides.command("fetch")
+@click.option("--force", is_flag=True, help="Ignore the 20-hour freshness rule.")
+def tides_fetch(force: bool) -> None:
+    """Fetch tide extremes for every station used by a spot."""
+    import functools
+    from datetime import UTC, datetime
+
+    import pydantic
+
+    import shakka.jobs.tides as job
+    import shakka.rws.tides as rws
+    from shakka.config import get_settings
+    from shakka.db import DatabaseError, SupabaseRest
+    from shakka.http import make_client
+
+    try:
+        settings = get_settings()
+    except pydantic.ValidationError:
+        click.echo("tides fetch: configuration incomplete (run 'shakka doctor')")
+        raise SystemExit(1) from None
+    try:
+        with (
+            SupabaseRest.from_settings(settings) as db,
+            make_client(timeout=rws.OBSERVATIONS_TIMEOUT_S) as http,
+        ):
+            result = job.run_tide_ingest(
+                db,
+                now=datetime.now(UTC),
+                force=force,
+                fetch=functools.partial(rws.fetch_tide_extremes, http=http),
+            )
+    except DatabaseError as exc:
+        click.echo(f"tides fetch: database error: {exc}")
+        raise SystemExit(1) from None
+    click.echo(
+        f"tides: fetched {result.stations} station(s), {result.rows} row(s), "
+        f"deleted {result.deleted} old row(s)"
+    )
+    if result.skipped:
+        click.echo(f"tides: skipped (fetched < 20h ago): {', '.join(result.skipped)}")
+    if result.failed:
+        click.echo(f"tides: failed: {', '.join(result.failed)}")
+        for line in result.errors:
+            click.echo(f"  {line}")
+    raise SystemExit(1 if result.failed else 0)
+
+
+@tides.command("stations")
+@click.option("--search", default=None, help="Case-insensitive filter on code or name.")
+def tides_stations(search: str | None) -> None:
+    """List stations with astronomical high and low water (code, name, lat, lon)."""
+    import shakka.rws.tides as rws
+
+    try:
+        stations = rws.list_tide_stations()
+    except rws.TideFetchError as exc:
+        click.echo(f"tides stations: {exc}", err=True)
+        raise SystemExit(1) from None
+    if search:
+        needle = search.lower()
+        stations = [s for s in stations if needle in s.code.lower() or needle in s.name.lower()]
+    click.echo("code\tname\tlat\tlon")
+    for s in stations:
+        click.echo(f"{s.code}\t{s.name}\t{s.lat:.5f}\t{s.lon:.5f}")
+    click.echo(f"{len(stations)} stations")
+
+
 def main() -> None:
     cli()
