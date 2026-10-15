@@ -1,13 +1,27 @@
 <script lang="ts">
 	import { goto } from '$app/navigation';
-	import { page } from '$app/state';
-	import { onMount } from 'svelte';
-	import { goTarget } from '#lib/go.js';
+	import { session } from '#lib/auth.js';
+	import { browserStorage } from '#lib/browser-storage.js';
+	import { saveReturnTo } from '#lib/local-prefs.js';
+	import type { PageProps } from './$types';
 
-	// Safety net: the load in +page.ts normally redirects before this renders. replace keeps the
-	// back button from returning to /go (review N-4).
-	onMount(() => {
-		void goto(goTarget(new URL(page.url.href)), { replace: true });
+	let { data }: PageProps = $props();
+
+	let handledFor: string | null = null; // plain variable, not $state: the returnPath already redirected for
+
+	// Signed out: remember this exact link and log in first (A2). Signed in: straight to the form.
+	// replace keeps /go out of the history, so Back does not loop (WP-14 N-4).
+	$effect(() => {
+		const s = $session;
+		const returnPath = data.returnPath;
+		if (s === undefined || handledFor === returnPath) return;
+		handledFor = returnPath;
+		if (s === null) {
+			saveReturnTo(browserStorage(), returnPath, Date.now());
+			void goto('/login', { replace: true });
+		} else {
+			void goto(data.target, { replace: true });
+		}
 	});
 </script>
 

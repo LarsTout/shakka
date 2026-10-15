@@ -176,3 +176,54 @@ export function parseGoParams(url: URL): GoParams | null {
 	if (!s || !e || s.getTime() >= e.getTime()) return null;
 	return { spot, start: s, end: e };
 }
+
+/** SLUG.test(s) && s.length <= MAX_SLUG_LENGTH (the spot-id rule parseGoParams uses). */
+export function isSpotSlug(s: string): boolean {
+	return SLUG.test(s) && s.length <= MAX_SLUG_LENGTH;
+}
+
+/**
+ * UTC instants whose Europe/Amsterdam wall clock reads `dateKey` + `time` ('HH:MM').
+ * Ascending; [] in the spring-forward gap, 2 items in the autumn overlap.
+ */
+export function localWallTimeCandidates(dateKey: string, time: string): Date[] {
+	const { y, m, d } = parseKey(dateKey);
+	const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(time);
+	if (!match) throw new RangeError(`malformed time: ${time}`);
+	const hh = Number(match[1]);
+	const mm = Number(match[2]);
+	const naive = Date.UTC(y, m - 1, d, hh, mm);
+	const out: Date[] = [];
+	for (const off of [2, 1]) {
+		const t = naive - off * 3_600_000;
+		const p = localParts(new Date(t));
+		if (p.year === y && p.month === m && p.day === d && p.hour === hh && p.minute === mm) {
+			out.push(new Date(t));
+		}
+	}
+	return out;
+}
+
+/** preferred (same getTime()) if it is a candidate; else the earliest candidate; else null. */
+export function localWallTimeToUtc(
+	dateKey: string,
+	time: string,
+	preferred?: Date | null
+): Date | null {
+	const candidates = localWallTimeCandidates(dateKey, time);
+	if (preferred) {
+		const hit = candidates.find((c) => c.getTime() === preferred.getTime());
+		if (hit) return hit;
+	}
+	return candidates[0] ?? null;
+}
+
+/** Mirror of WP-08 format_window_local. RangeError when start >= end. */
+export function formatWindowLocal(start: Date, end: Date): string {
+	if (!(start.getTime() < end.getTime())) throw new RangeError('start must be before end');
+	const lastMoment = new Date(end.getTime() - 1);
+	if (localDateKey(start) === localDateKey(lastMoment)) {
+		return `${formatLocal(start, 'dateTime')}–${formatLocal(end, 'time')}`;
+	}
+	return `${formatLocal(start, 'dateTime')} – ${formatLocal(end, 'dateTime')}`;
+}

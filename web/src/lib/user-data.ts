@@ -1,6 +1,12 @@
 import { supabase } from '#lib/supabase.js';
 import { DataError, fetchAllPages } from './data.js';
 import {
+	SESSION_COLUMNS,
+	type NewSession,
+	type SessionRow,
+	type SessionUpdate
+} from './session-model.js';
+import {
 	ALERT_RULE_COLUMNS,
 	PROFILE_COLUMNS,
 	PUSH_SUBSCRIPTION_COLUMNS,
@@ -12,7 +18,7 @@ import {
 	type PushSubscriptionKeys
 } from './types.js';
 
-// The only module that reads or writes profiles, favorites, alert_rules and push_subscriptions.
+// The only module that reads or writes profiles, favorites, alert_rules, push_subscriptions and sessions.
 
 export async function getProfile(userId: string): Promise<Profile | null> {
 	const { data, error } = await supabase
@@ -140,4 +146,68 @@ export async function addPushSubscription(keys: PushSubscriptionKeys): Promise<'
 export async function removePushSubscription(id: string): Promise<void> {
 	const { error } = await supabase.from('push_subscriptions').delete().eq('id', id);
 	if (error) throw new DataError('removePushSubscription', error.code ?? null);
+}
+
+/**
+ * Inserts exactly the eight organizer columns. organizer_id comes from the column default
+ * auth.uid(), slug from the trigger (WP-19). PT400 'rate_limited' -> DataError code 'rate_limited'.
+ */
+export async function insertSession(values: NewSession): Promise<{ slug: string }> {
+	const payload = {
+		spot_id: values.spot_id,
+		organizer_name: values.organizer_name,
+		starts_at: values.starts_at,
+		ends_at: values.ends_at,
+		note: values.note,
+		seats_free: values.seats_free,
+		departure_point: values.departure_point,
+		tikkie_url: values.tikkie_url
+	};
+	const { data, error } = await supabase.from('sessions').insert(payload).select('slug').single();
+	if (error) {
+		if (error.code === 'PT400' && error.message === 'rate_limited') {
+			throw new DataError('insertSession', 'rate_limited');
+		}
+		throw new DataError('insertSession', error.code ?? null);
+	}
+	const slug = (data as { slug?: unknown } | null)?.slug;
+	if (typeof slug !== 'string') throw new DataError('insertSession', 'no_slug');
+	return { slug };
+}
+
+/** Own sessions with ends_at > now, by starts_at then id (RLS limits to the organizer as well). */
+export function listOwnSessions(userId: string, now: Date): Promise<SessionRow[]> {
+	return fetchAllPages<SessionRow>('listOwnSessions', () =>
+		supabase
+			.from('sessions')
+			.select(SESSION_COLUMNS.join(','))
+			.eq('organizer_id', userId)
+			.gt('ends_at', now.toISOString())
+			.order('starts_at', { ascending: true })
+			.order('id', { ascending: true })
+	);
+}
+
+/** Own session by slug (RLS), or null. */
+export async function getOwnSession(slug: string): Promise<SessionRow | null> {
+	const { data, error } = await supabase
+		.from('sessions')
+		.select(SESSION_COLUMNS.join(','))
+		.eq('slug', slug)
+		.maybeSingle();
+	if (error) throw new DataError('getOwnSession', error.code ?? null);
+	return (data as unknown as SessionRow | null) ?? null;
+}
+
+/** Updates exactly the given keys; 0 rows -> DataError('updateOwnSession', 'not_found'). */
+export async function updateOwnSession(id: string, payload: SessionUpdate): Promise<void> {
+	const { data, error } = await supabase
+		.from('sessions')
+		.update(payload)
+		.eq('id', id)
+		.select('id');
+	if (error) throw new DataError('updateOwnSession', error.code ?? null);
+	if (((data as unknown[] | null) ?? []).length === 0) {
+		throw new DataError('updateOwnSession', 'not_found');
+	}
 }

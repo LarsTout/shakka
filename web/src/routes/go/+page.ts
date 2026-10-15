@@ -1,7 +1,10 @@
 import { redirect } from '@sveltejs/kit';
-import { goTarget } from '#lib/go.js';
+import { newSessionHref } from '#lib/go.js';
+import { parseGoParams } from '#lib/time.js';
 import type { PageLoad } from './$types';
 
 export const load: PageLoad = ({ url }) => {
-	redirect(307, goTarget(url));
+	const p = parseGoParams(url);
+	if (!p) redirect(307, '/');
+	return { returnPath: url.pathname + url.search, target: newSessionHref(p) };
 };

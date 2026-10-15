@@ -2,9 +2,13 @@ import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { favoritesState, toggleFavoriteMock } from './helpers/fake-favorites.js';
-import { USER_ID } from './helpers/fake-session.js';
+import { SESSION, USER_ID, sessionStore } from './helpers/fake-session.js';
 import { WAVES_NOTE_NL } from '../src/lib/marine.js';
 import {
+	EVAL_DARK,
+	EVAL_LOWCONF,
+	EVAL_OFFSHORE,
+	EVAL_TOMORROW,
 	MARINE_FRESH,
 	MARINE_STALE,
 	NOW_FRESH,
@@ -20,6 +24,7 @@ vi.mock('#lib/supabase.js', () => {
 	throw new Error('page tests must not import the Supabase client');
 });
 
+vi.mock('#lib/auth.js', async () => (await import('./helpers/fake-session.js')).authModule);
 vi.mock('#lib/favorites.js', async () => (await import('./helpers/fake-favorites.js')).favoritesModule);
 
 import Page from '../src/routes/spot/[id]/+page.svelte';
@@ -31,6 +36,7 @@ const hourOf = (time: string): HTMLElement =>
 beforeEach(() => {
 	vi.clearAllMocks();
 	favoritesState.set({ status: 'signed_out' });
+	sessionStore.set(null);
 });
 
 describe('spot page (AC-3)', () => {
@@ -189,5 +195,41 @@ describe('waves (WP-12, AC-6)', () => {
 		render(Page, props(pageData({ marine: [dark] })));
 		expect(document.querySelectorAll('.waves')).toHaveLength(0);
 		expect(document.querySelector('.waves-note')).toBeNull();
+	});
+});
+
+describe('Ik ga links (WP-20, A16)', () => {
+	const goLinks = () => screen.queryAllByRole('link', { name: /^Ik ga/ });
+
+	it('(a) signed in: one link per go run, with the go href', () => {
+		sessionStore.set(SESSION);
+		render(Page, props(pageData()));
+		const links = goLinks();
+		expect(links.map((a) => a.textContent)).toEqual(['Ik ga 14:00–15:00', 'Ik ga 10:00–11:00']);
+		expect(links[0]).toHaveAttribute(
+			'href',
+			'/go?spot=test-strand&start=2026-07-15T12%3A00%3A00Z&end=2026-07-15T13%3A00%3A00Z'
+		);
+		expect(links[1]).toHaveAttribute(
+			'href',
+			'/go?spot=test-strand&start=2026-07-16T08%3A00%3A00Z&end=2026-07-16T09%3A00%3A00Z'
+		);
+	});
+	it('(b) a day without go hours has no link', () => {
+		sessionStore.set(SESSION);
+		render(
+			Page,
+			props(pageData({ evaluations: [EVAL_OFFSHORE, EVAL_LOWCONF, EVAL_DARK, EVAL_TOMORROW] }))
+		);
+		expect(goLinks().map((a) => a.textContent)).toEqual(['Ik ga 10:00–11:00']);
+	});
+	it('(c) signed out or unknown: no links, hours still shown', () => {
+		const { unmount } = render(Page, props(pageData()));
+		expect(goLinks()).toHaveLength(0);
+		expect(screen.getAllByText('14:00', { selector: 'time' }).length).toBeGreaterThan(0);
+		unmount();
+		sessionStore.set(undefined);
+		render(Page, props(pageData()));
+		expect(goLinks()).toHaveLength(0);
 	});
 });

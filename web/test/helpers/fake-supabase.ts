@@ -24,6 +24,7 @@ export function createFakeSupabase() {
 			'select',
 			'eq',
 			'gte',
+			'gt',
 			'lt',
 			'not',
 			'order',
