@@ -62,3 +62,50 @@ def make_forecast_payload(
             element["location_id"] = index
         elements.append(element)
     return elements[0] if n_locations == 1 else elements
+
+
+# -- Marine ----------------------------------------------------------------------------------
+
+Triple = tuple[
+    Value | Sequence[Value], Value | Sequence[Value], Value | Sequence[Value]
+]  # height, period, direction
+
+_MARINE_UNITS = {"wave_height": "m", "wave_period": "s", "wave_direction": "°"}
+
+
+def make_marine_payload(
+    n_locations: int,
+    *,
+    start: datetime,
+    hours: int = 3,
+    ewam: Triple = (1.2, 5.0, 250.0),
+    ecmwf: Triple = (1.4, 6.0, 260.0),
+    units: Mapping[str, str] | None = None,
+) -> Any:
+    """Both models of MARINE_MODELS; object for one location, list otherwise."""
+    from shakka.openmeteo.marine import MARINE_MODELS, MARINE_VARIABLES
+
+    start_ts = int(start.timestamp())
+    by_model = dict(zip(MARINE_MODELS, (ewam, ecmwf), strict=True))
+    elements: list[dict[str, Any]] = []
+    for index in range(n_locations):
+        hourly_units: dict[str, str] = {"time": "unixtime"}
+        hourly: dict[str, Any] = {"time": [start_ts + k * 3600 for k in range(hours)]}
+        for model_id, triple in by_model.items():
+            for variable, value in zip(MARINE_VARIABLES, triple, strict=True):
+                key = f"{variable}_{model_id}"
+                hourly_units[key] = _MARINE_UNITS[variable]
+                hourly[key] = _expand(value, hours)
+        hourly_units.update(units or {})
+        element: dict[str, Any] = {
+            "latitude": 52.0,
+            "longitude": 4.0,
+            "utc_offset_seconds": 0,
+            "timezone": "GMT",
+            "hourly_units": hourly_units,
+            "hourly": hourly,
+        }
+        if index >= 1:
+            element["location_id"] = index
+        elements.append(element)
+    return elements[0] if n_locations == 1 else elements
