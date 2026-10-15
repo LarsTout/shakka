@@ -42,6 +42,9 @@ def test_pipeline_step_env(job):
     assert step["env"] == {
         "SUPABASE_URL": "${{ secrets.SUPABASE_URL }}",
         "SUPABASE_SECRET_KEY": "${{ secrets.SUPABASE_SECRET_KEY }}",
+        "VAPID_PUBLIC_KEY": "${{ secrets.VAPID_PUBLIC_KEY }}",
+        "VAPID_PRIVATE_KEY": "${{ secrets.VAPID_PRIVATE_KEY }}",
+        "VAPID_SUBJECT": "${{ secrets.VAPID_SUBJECT }}",
         "APP_BASE_URL": "${{ vars.APP_BASE_URL }}",
     }
     assert "env" not in job or not any("secrets." in str(v) for v in job["env"].values())
@@ -63,7 +66,13 @@ def test_activity_step_skipped_when_sync_fails(job):
 
 def test_only_known_secrets():
     names = set(re.findall(r"secrets\.([A-Z_]+)", HOURLY.read_text(encoding="utf-8")))
-    assert names <= {"SUPABASE_URL", "SUPABASE_SECRET_KEY"}
+    assert names == {
+        "SUPABASE_URL",
+        "SUPABASE_SECRET_KEY",
+        "VAPID_PUBLIC_KEY",
+        "VAPID_PRIVATE_KEY",
+        "VAPID_SUBJECT",
+    }
 
 
 @pytest.mark.parametrize("path", sorted(WORKFLOWS.glob("*.yml")), ids=lambda p: p.name)
