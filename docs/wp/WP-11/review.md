@@ -1,42 +1,71 @@
-# Review WP-11, ronde 1
-Oordeel: CHANGES_REQUIRED
+# Review WP-11, ronde 2
+Oordeel: APPROVED
 
-Kort: het ontwerp is goed en dekt de acceptatiecriteria en de harde regels. Het gaat om secrets alleen in de env van de pipelinestap, redactie plus alleen `error_type` in de log, httpx en httpcore op WARNING, `AlertJobResult.errors` alleen in `ingest_runs`, `ref: main` bij de schedule, `concurrency` zonder cancel-in-progress, de schakelaar `HOURLY_ENABLED`, de stale-regel met exitcode 1 en de activiteitscheck zonder keepalive. Ik heb de GitHub-claims tegen de documentatie gecontroleerd en ze kloppen (zie onder). Er zijn twee blokkerende punten, allebei in het testplan: een test die met het ontwerp in tegenspraak is, en een privacytest die niet uitvoerbaar is zoals hij er staat. Beide zijn klein om te repareren.
+Ronde 2 beoordeelt revisie 2 van het blueprint. Beide blokkerende punten uit ronde 1 zijn echt opgelost. De nieuwe onderdelen (getijbudget, JSON-conversie binnen `run_step`, `FlakyIngestRuns`, het escapen van annotaties) heb ik tegen de bestaande code en de toolkit-broncode gecontroleerd. Ze kloppen en introduceren geen blokkerende punten.
+
+## Controle van de punten uit ronde 1
+
+- **B-1 (opgelost).** De AC-1-assertie zoekt nu de eerste `insert` en eist `db.writes[:first_insert] == [("update", "ingest_runs")]`. Dat klopt met de code:
+  - `FakeSupabase.writes` is een `list[tuple[str, str]]`;
+  - `update` registreert `("update", table)` vóór de match, dus ook bij 0 rijen (`fakes.py` r. 315);
+  - `seed` komt niet in `writes` (r. 109-111);
+  - `spots_sync` draait pas na de insert.
+
+  `test_progress_update_after_each_step` (`len(steps) + 2`) blijft hiermee consistent.
+- **B-2 (opgelost).** De verwachte tekst komt nu uit een aparte fake `db2` met `sync_spots(db2, load_spots(yaml_path))`, `seed_forecasts(db2, fetched_at=NOW)`, `seed_user(db2)` en `run_alerts(..., dry_run=True)`. `seed_forecasts` heeft de keyword `fetched_at` en schrijft dezelfde `MODELS3`/`WINDS`-rijen als `fake_forecast_fetch` via `ForecastHour.to_row(fetched_at=now)` in `run_forecast_ingest`. `run_alerts` heeft `dry_run` (alerts.py r. 318). De toestand is dus gelijk aan die van de CLI-run vóór de alertstap. Er staan drie controles in die voorkomen dat de test ongemerkt niets toetst:
+  - `assert len(dry.messages) == 1`;
+  - de controle op `counts["events"] == 1` in de CLI-run;
+  - de controle van titel en bodyregels tegen log, stdout en stderr.
+
+  Geen enkele bestaande logregel bevat de spotnaam of bodytekst (alle `logger.`-aanroepen nagelopen).
+- **N-1 t/m N-10:** verwerkt zoals beschreven in "Verwerking review".
+
+## Controle van de nieuwe onderdelen
+
+- **Getijbudget via `bounded_fetch`.**
+  - **`shakka.jobs.tides` blijft echt ongewijzigd.** `run_tide_ingest(db, *, now, force=False, fetch=...)` accepteert een `TideFetcher` `(station, start, end)` en vangt per station elke `Exception` af (r. 119). Een `TimeoutError` uit `bounded_fetch` komt daardoor als `"<station>: TimeoutError: tide step time budget of 240 s reached"` in `failed`/`errors`. Daarna volgen `delete_old_tides` en het normale resultaat.
+  - **De testverwachtingen kloppen** (`failed` gesorteerd, de prefix van de errorregel, `budget_skipped == 1`). `STATION_CODE_RE` accepteert `station-a`/`station-b`.
+  - **Een lopend request** wordt niet afgebroken. `fetch_tide_extremes` doet geen retries (één `client.post`). De stap duurt dus hooguit 240 s plus één request met de per-fase timeouts van 30 s.
+  - **De run blijft binnen `timeout-minutes: 15`.** Daarnaast loopt alleen de forecast-retry (een paar pogingen met backoff, één chunk). Bij een normaal bereikbare database past de run ruim binnen 15 minuten. Een hangende database is het vangnet van E25/A10.
+- **JSON-conversie binnen `run_step`.** `shakka.db.to_json` gebruikt `allow_nan=False`, en `json.dumps` geeft dan direct een `ValueError`. Naïeve datetimes en onbekende types geven via `_json_default` ook een `ValueError`. E28 en `test_counts_not_json_fails_step` zijn daarmee correct. `except StepSkipped` staat vóór `except Exception`; dat is correct.
+- **`FlakyIngestRuns`.** De vier soorten zijn disjunct en herkenbaar:
+  - de wezen-update filtert op `status`;
+  - de voortgangs- en slotupdate filteren op `id`;
+  - alleen de slotupdate heeft `finished_at` in `values` (de wezen-update ook, maar die heeft geen `id`-filter).
+
+  `DatabaseError("boom", status=503)` klopt met de constructor (`message, *, status, code`). De fout wordt vóór `super()` gegooid, dus `writes` registreert hem niet.
+- **Escapen van annotaties.** `escapeData` in `actions/toolkit` (`packages/core/src/command.ts`) vervangt `%`→`%25`, `\r`→`%0D` en `\n`→`%0A`. Dubbele punten en komma's worden alleen in properties geëscapet, niet in de berichtdata. Het blueprint neemt `%`→`%25` over, in de juiste volgorde (eerst `%`), en maakt van CR/LF spaties. Dat is veilig en levert één regel op. De testverwachtingen kloppen: `"83% of\r\nthe guard"` wordt `"::warning::83%25 of  the guard"` met twee spaties, en `"%0A"` wordt `"%250A"`.
+- **Budgetgrens 6.400 in de test.** `BudgetGuard.record` rondt af op 2 decimalen (`round(old + weight, 2)`), dus 6.398,8 + 1,2 wordt precies 6400.0. `0.8 * 8000` geeft in float ook precies 6400.0. "Strikt boven" werkt dus zoals de test verwacht.
 
 ## Blokkerend
-
-B-1: De AC-1-test eist dat de eerste schrijfactie een insert is, maar het ontwerp doet eerst een update. Waar: Testplan, AC-1 ("de eerste schrijfactie is `("insert", "ingest_runs")`"), tegenover Ontwerp, "Verloop van `run_hourly`", stap 2 en 3. Waarom: stap 2 (de wezen-rijen sluiten) doet `db.update("ingest_runs", ...)` vóór de insert in stap 3. `FakeSupabase.update` registreert `("update", "ingest_runs")` in `writes` ook bij 0 geraakte rijen (`fakes.py` r. 315). Het blueprint gaat daar in `test_progress_update_after_each_step` zelf van uit (`len(steps) + 2`). De AC-1-test faalt dus zoals hij beschreven is, en de builder moet zelf kiezen tussen de test aanpassen of de volgorde omdraaien. Voorstel: houd de volgorde (eerst de wezen-rijen, dan de insert) en verander de AC-1-assertie. Bijvoorbeeld: "de eerste `insert` is `("insert", "ingest_runs")`, en er is geen schrijfactie op een andere tabel vóór die insert". Of: "`db.writes[:2] == [("update", "ingest_runs"), ("insert", "ingest_runs")]`".
-
-B-2: De privacytest kan de titel en de body van het bericht niet bepalen. Waar: Testplan, Overige tests, `test_cli_pipeline.py::test_no_user_ids_or_message_texts_in_output` ("te bepalen met `run_alerts(..., dry_run=True)` op een kopie van de fake vóór de run"). Waarom: vóór de run bevat de fake alleen `seed_user` (profiel en favoriet). De rij in `spots` komt pas in de run via `spots_sync` uit de YAML, en `forecast_hours` via de nep-fetch in de forecaststap. Een dry run op die kopie geeft daarom 0 berichten: de favoriet is `ineligible` ("spot not loaded"). `messages[0]` bestaat dan niet, of de check op berichtteksten toetst niets. Dit is de test voor de harde privacyregel "geen berichtteksten in de openbare Actions-logs", en de builder moet hem zelf herontwerpen. Voorstel: bepaal de verwachte titel en body op een aparte fake met dezelfde toestand ná spots en forecast. Concreet: `seed_spot(db2, verified=True)`, `seed_forecasts(db2, fetched_at=NOW)`, `seed_user(db2)` en dan `run_alerts(db2, now=NOW, base_url=None, dry_run=True)`. Of hergebruik de bekende eerste bodyregel uit WP-10 (`FIRST_LINE_A`). Zet er altijd `assert len(dry.messages) == 1` bij, zodat de test niet ongemerkt niets toetst. Laat de test ook nagaan dat de CLI-run zelf `alerts.counts["events"] == 1` vastlegt (er is echt een bericht gemaakt).
+Geen.
 
 ## Niet-blokkerend
 
-N-1: De stale-regel en per-spot-veroudering. Waar: A4 ("Per spot filtert WP-10 al verouderde rijen weg (WP-10 A5)"). Die zin klopt niet helemaal. `load_inputs_checked` houdt rijen met `fetched_at >= newest_van_die_spot - 3 h`. Dat is relatief aan de nieuwste fetch van díe spot, niet aan `now`. Een spot met alleen rijen van 10 uur oud wordt dus nog gebruikt. In M1 (≤ 50 spots, één chunk) is de globale controle gelijk aan een per-spot-controle, dus nu geen probleem. Bij meer dan 50 spots kan één gefaalde chunk plus één geslaagde chunk ervoor zorgen dat er alerts komen op verouderde data voor de spots in de gefaalde chunk, zonder `stale_forecast`. Voorstel: pas de zin aan en zet bij "Gevolgen → WP-22" (of bij de WP die de 50 spots passeert) dat de stale-regel dan per spot moet, bijvoorbeeld door in `load_inputs` rijen met `fetched_at < now - 3 h` weg te laten.
+N-1: Importpad van de hulpfuncties. `short_error` en `db_error_summary` (gebruikt in `run_step` en de stappen) staan in `shakka.jobs.inputs`, niet in `shakka.db`. Het blueprint noemt het pad niet. De builder vindt ze makkelijk, maar één zin in "Interfaces" voorkomt zoekwerk of een kopie.
 
-N-2: `FlakyIngestRuns(fail_on={"insert"|"update"|"final"})` is dubbelzinnig. Waar: Testplan, Fixtures. Niet gedefinieerd is of "update" ook de update van de wezen-rijen en de slotupdate laat falen, en waaraan de subklasse "final" herkent. Voorstel: "final" = een update waarvan de `values` `finished_at` bevatten, maar geen `status: failed`-wezenupdate. Herkennen kan op het filter `id=eq.<run_id>` samen met de sleutel `finished_at`. "update" = alleen voortgangsupdates (alleen de sleutel `steps`).
+N-2: Volgorde van stations onder het budget. `run_tide_ingest` loopt de stations alfabetisch af. Blijven de eerste stations bij een gedeeltelijke RWS-storing steeds hangen (30 s per stuk), dan komen latere stations onder het budget van 240 s pas aan bod als die eerste weer reageren. In M1, met een handvol stations, past alles ruim (minstens 8 stations per run, ook als alles time-out geeft). Vermeld het eventueel bij WP-22 (uniform budget).
 
-N-3: De volgorde van caplog in de AC-3-test. `caplog.set_level(logging.DEBUG)` wordt vóór `run_hourly_cli` aangeroepen, en `configure_logging` zet de root daarna terug op `INFO`. De test toetst dan alleen INFO en hoger. Dat is voldoende voor AC-3 (de log komt in de Actions-logs ook op INFO), maar zeg het expliciet. Of laat `test_httpx_and_httpcore_quiet` het DEBUG-deel dragen; daar is de volgorde wel goed: eerst `configure_logging`, dan caplog.
+N-3: `TIDE_STEP_BUDGET_S` is `Final`, maar wordt in `test_tide_budget_zero_still_runs_alerts` gemonkeypatcht. Dat werkt alleen als `step_tides` de module-global bij elke aanroep leest. Gebruik hem dus niet als default-argument of als waarde die bij het importeren vastligt. De pseudocode doet het goed; een korte comment bij de constante helpt de builder.
 
-N-4: Een pending run die wordt vervangen, krijgt de status "cancelled". Volgens de docs annuleert een nieuwe wachtende run in de groep de vorige wachtende run (`queue: single` is de default). Dat komt alleen voor als een run langer dan een uur duurt plus een dispatch. Zet in RUNBOOK §13 dat een "cancelled" run in de lijst daardoor kan komen en geen storing is.
+N-4: Faalt `uv sync`, dan draait de activiteitsstap (`if: !cancelled()`) toch `uv run` en geeft een tweede fout. Dat is onschuldig, want de run is dan al rood. Het kan eventueel worden voorkomen met `if: ${{ !cancelled() && steps.<sync>.outcome == 'success' }}`. Geen actie vereist.
 
-N-5: De job-timeout tegenover WP-04 R5. Bij een RWS-storing met veel stations kan de getijstap tot ongeveer 12,5 minuten duren (30 s per station). Daarna komen `evaluate` en `alerts` nog, dus de timeout van 15 minuten kan een run afbreken vóór de alerts. Dan blijft de rij `running` en volgt er een mail (E25). In M1 met een handvol stations is dat geen probleem. Zet het bij "Gevolgen → WP-22" (totaalbudget per stap), naast de bestaande opmerking in WP-04.
-
-N-6: De JSON-conversie van `counts` staat buiten de `try` in `run_step`. Geeft `to_json` een `ValueError` (NaN, of een onbekend type in een toekomstige `StepOutcome`), dan breekt de hele run af met een traceback en blijft de rij `running`. Voorstel: doe de conversie binnen de foutisolatie (stap `failed`, `error_type="ValueError"`), of vang hem apart af.
-
-N-7: Escapen in annotaties. GitHub interpreteert `%25`, `%0D` en `%0A` in een workflow command. Alleen `\n` en `\r` vervangen is in de praktijk voldoende (de teksten komen van ons), maar escape `%` als `%25` voor de zekerheid. Een warning-tekst bevat al "% of the guard".
-
-N-8: De Supabase-pauze. PROJECT_PLAN §2 rekent erop dat de uurlijkse job het Supabase-project actief houdt (pauze na 7 dagen zonder activiteit). Zet in RUNBOOK §13 (punt 6, "Pauzeren") dat `HOURLY_ENABLED=false` langer dan ongeveer een week het project laat pauzeren.
-
-N-9: `HOURLY_ENABLED` ontbreekt in de env-tabel van WORK_PACKAGES. Het blueprint legt dat terecht bij de orchestrator (A11, Buiten scope).
-
-N-10: Duur van de run. De schatting komt ruim onder 5 minuten uit: `uv sync` met cache, één Open-Meteo-request, een paar RWS-requests en ongeveer 40 PostgREST-calls. De repo is publiek, dus de Actions-minuten zijn gratis. Geen actie nodig. Het wordt zichtbaar via `duration_ms` in `ingest_runs`.
+N-5: R10 zegt terecht dat een lopend request niet wordt onderbroken. Let wel: de httpx-timeout van 30 s geldt per fase en per leesoperatie, dus een server die heel langzaam data blijft sturen kan één request langer laten duren. De job-timeout blijft het vangnet (E25). Geen actie.
 
 ## Gecontroleerde bronnen
-- https://docs.github.com/en/actions/reference/workflows-and-actions/events-that-trigger-workflows: schedule draait "on the latest commit on the default branch", minimum 5 minuten, vertraging "including the start of every hour", runs kunnen wegvallen, uitgeschakeld na 60 dagen zonder activiteit in publieke repo's; `workflow_dispatch` alleen als het bestand op de default branch staat. Klopt met A5, A6, A7 en R1.
-- https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency: een wachtende run wordt geannuleerd en vervangen door een nieuwere; `queue: single` is de default; `cancel-in-progress: true` breekt de lopende run af. Klopt met de keuze `cancel-in-progress: false`.
-- https://docs.github.com/en/actions/reference/workflows-and-actions/contexts: in `jobs.<id>.if` zijn `vars` en `inputs` beschikbaar; in `steps.with` en `steps.env` zijn `secrets`, `vars` en `inputs` beschikbaar; een niet-gezette variable geeft een lege string. Klopt met de job-`if` en de `ref`-expressie.
-- https://docs.github.com/en/actions/concepts/workflows-and-actions/notifications-for-workflow-runs: de meldingen gaan naar wie de workflow aanmaakte, naar een andere gebruiker die de cron wijzigt, of naar wie hem opnieuw aanzette; e-mail of web, eventueel alleen bij gefaalde runs. Klopt met A1, R7 en "Nodig van Lars".
-- https://docs.github.com/en/rest/commits/commits: `sha` is standaard de default branch, `per_page` maximaal 100, `commit.committer.date` aanwezig. Klopt met de activiteitsstap.
-- https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-commands: de syntax van `::warning::` en `::error::`.
-- https://www.python-httpx.org/logging/: `httpx` logt requests op INFO, `httpcore` op DEBUG.
-- Code in de worktree: `ingest/src/shakka/{db.py,budget.py,config.py,cli.py,jobs/runtime.py,jobs/forecast.py,jobs/tides.py,jobs/evaluate.py,jobs/alerts.py,jobs/inputs.py,spots/sync.py,domain/spot.py,openmeteo/models.py}`, `ingest/tests/{fakes.py,conftest.py,job_fixtures.py,evaluation_fixtures.py,test_job_alerts.py,test_repo_hygiene.py}`, `.github/workflows/ci.yml` en de migraties voor `ingest_runs`. Contracten gecontroleerd: signatures van de jobs, resultvelden, `BudgetGuard.usage/daily_limit`, het gewicht van 1,2 per locatie (3 variabelen × 4 modellen), identity `id` en 428C9 in de fake, CHECKs op `ingest_runs`, `env_ignore_empty`.
+- https://github.com/actions/toolkit/blob/main/packages/core/src/command.ts: `escapeData` vervangt `%`→`%25`, `\r`→`%0D` en `\n`→`%0A`; `escapeProperty` doet daarnaast `:` en `,`. De commandovorm is `::name props::data`. Dat klopt met `escape_command_data` en `github_annotation`.
+- De GitHub-documentatie uit ronde 1 (events, concurrency, contexts, notifications, REST commits, workflow commands, httpx logging). Workflow en claims zijn sinds ronde 1 niet inhoudelijk gewijzigd.
+- Code in de worktree:
+  - `ingest/src/shakka/jobs/tides.py` (signature, `TideFetcher`, foutafhandeling per station);
+  - `ingest/src/shakka/rws/tides.py` (`fetch_tide_extremes` zonder retries, `STATION_CODE_RE`, `TideFetchError`);
+  - `ingest/src/shakka/db.py` (`to_json`, `DatabaseError`);
+  - `ingest/src/shakka/jobs/forecast.py` (`run_forecast_ingest`, `ForecastFetchError` per chunk);
+  - `ingest/src/shakka/openmeteo/client.py` (retries);
+  - `ingest/src/shakka/jobs/alerts.py` (`run_alerts(..., dry_run)`, logging, `errors`);
+  - `ingest/src/shakka/jobs/inputs.py` (`short_error`, `db_error_summary`);
+  - `ingest/src/shakka/domain/messages.py` (titel en body);
+  - `ingest/src/shakka/budget.py` (afronding in `record`);
+  - `ingest/src/shakka/spots/{loader,sync}.py`, `ingest/src/shakka/domain/spot.py` en `ingest/src/shakka/jobs/runtime.py`;
+  - `ingest/tests/{fakes.py,job_fixtures.py,evaluation_fixtures.py,test_job_alerts.py}`;
+  - `.github/workflows/ci.yml`;
+  - de WP-11-sectie in `docs/WORK_PACKAGES.md`.

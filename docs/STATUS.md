@@ -15,7 +15,7 @@ Opdeling: goedgekeurd.
 | WP-08 | Alert-deduplicatie en berichtopbouw (puur) | done | drempels 2 uur / 4 kn toetsen in M1-testweek |
 | WP-09 | Telegram-kanaal | dropped | Telegram vervallen, zie WP-17 (besluit Lars, 15 oktober 2026) |
 | WP-10 | Evaluatie- en alertjobs plus beheer-CLI | done | AC-11 open: M1-check door Lars (RUNBOOK §12, verification.md) |
-| WP-11 | Orkestratie: uurlijkse workflow, logging, foutmeldingen | in_review | |
+| WP-11 | Orkestratie: uurlijkse workflow, logging, foutmeldingen | approved | |
 | WP-12 | Marine-ingest (golven) en golven op de spotpagina | todo | weergave verhuisd uit WP-14 (A-17) |
 | WP-13 | PWA-basis | done | AC-7 open: Cloudflare Pages + Supabase Auth-URLs door Lars (RUNBOOK §11) |
 | WP-14 | Spotlijst en spotpagina | todo | |

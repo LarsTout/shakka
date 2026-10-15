@@ -1,5 +1,5 @@
 # Blueprint WP-11: Orkestratie: uurlijkse workflow, logging, foutmeldingen
-Status: DRAFT
+Status: APPROVED
 Revisie: 2
 
 ## Doel
