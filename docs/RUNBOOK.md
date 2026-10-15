@@ -49,6 +49,7 @@ Wat `uv run shakka doctor` meldt:
 | `SUPABASE_PUBLISHABLE_KEY` | `.env` | ingest (`shakka doctor`) | WP-00 |
 | `SUPABASE_SECRET_KEY` | `.env`, GitHub Secret | ingest | WP-00 |
 | `APP_BASE_URL` | `.env`, GitHub Actions variable | ingest: "ik ga"-links in berichten | WP-14 |
+| `HOURLY_ENABLED` | GitHub Actions variable | workflow hourly.yml: schedule aan (true) of uit | WP-11 |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | `.env`, GitHub Secrets | ingest | WP-17 |
 | `PUBLIC_SUPABASE_URL`, `PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `web/.env`, Cloudflare Pages | web | WP-13 |
 | `NODE_VERSION` | Cloudflare Pages | build | WP-13 |
@@ -154,3 +155,30 @@ In M1 worden er nog geen meldingen verstuurd. De alertjob berekent per favoriet 
 8. **Exitcodes.** `alerts run` geeft exitcode 1 bij `skipped` (een kapotte regel-, profiel- of staterij), `write_errors`, een databasefout, een onvolledige config of een ongeldige `APP_BASE_URL`. `ineligible` (spot niet geverifieerd, niet geladen of nog geen forecastdata: "no forecast data") en `disabled` (regel uitgezet) zijn geen fout: exitcode 0. `shakka evaluate` geeft exitcode 1 als een spot niet geladen of geëvalueerd kan worden; een spot zonder forecastrijen is geen fout.
 9. **Waarschuwing.** `alerts run` en `admin alerts preview` tonen berichtteksten. Gebruik ze lokaal en nooit in een GitHub-workflow: de logs van een publieke repo zijn openbaar. De uurlijkse workflow (WP-11) roept de functies aan, niet deze commando's.
 10. **Oude `TELEGRAM_*`-variabelen.** Die mag je uit je lokale `.env` halen. Ze worden genegeerd en zijn niet meer nodig.
+
+## 13. Uurlijkse run (vanaf WP-11)
+1. **Wat draait er.** Elk uur om :17 UTC (geen garantie: GitHub kan vertragen of een run overslaan) draait `shakka run-hourly`: `spots_sync`, `forecast`, `tides`, `evaluate`, `alerts`, met foutisolatie per stap. De schedule draait de code van `main`, met het workflowbestand van `develop` (de default branch). Alleen als de variable `HOURLY_ENABLED` op `true` staat. Er draait één run tegelijk.
+2. **Eenmalige setup.**
+   - Repo Settings, Secrets and variables, Actions: secrets `SUPABASE_URL` en `SUPABASE_SECRET_KEY`; optioneel de variable `APP_BASE_URL` (pas zinvol na WP-14).
+   - Settings, Actions, General: Actions aan.
+   - E-mailmeldingen: github.com, Settings, Notifications, onderdeel voor Actions ("workflow runs updates on repositories set up with GitHub Actions"). Zet e-mail aan, desgewenst alleen bij gefaalde workflows. De GitHub-documentatie noemt deze opties maar geeft het exacte menupad niet; controleer de namen in de actuele interface.
+   - Wie de mail krijgt: wie `hourly.yml` heeft aangemaakt, of als laatste de cron wijzigde, of de workflow opnieuw aanzette. Controleer dat jij dat bent.
+3. **Handmatig starten.** Actions, hourly, Run workflow (kies `ref`), of `gh workflow run hourly.yml -f ref=main`. `ref = develop` schrijft naar dezelfde database; bedoeld als test vóór een promotie.
+4. **Runs bekijken.** `gh run list --workflow hourly.yml --limit 5` en `gh run view <run-id> --log`. Annotaties (`::warning::`, `::error::`) staan bovenaan de samenvatting van een run. Een run met status "cancelled" in de lijst is geen storing: duurt een run lang en komen er intussen twee nieuwe starts (schedule en/of dispatch), dan vervangt de nieuwste de wachtende, en die wachtende krijgt "cancelled" (`concurrency`). Een getijstap met de warning "time budget of 240 s reached" betekent dat RWS traag of onbereikbaar is; de overgeslagen stations volgen in een latere run.
+5. **`ingest_runs` lezen** (Dashboard, SQL Editor):
+   - `select id, started_at, finished_at, status, error_summary from public.ingest_runs order by started_at desc limit 24;`
+   - `select jsonb_pretty(steps) from public.ingest_runs where id = <id>;`
+   - Per stap: `status`, `duration_ms`, `counts`, `error` (alleen hier leesbaar, secrets geredigeerd), `error_type`, `reason` (bij `skipped`) en `warnings`. Stapstatussen: `ok`, `partial` (de job draaide, maar meldde fouten per onderdeel), `failed` (exception), `skipped` (voorwaarde ontbrak, bijvoorbeeld `stale_forecast`). Runstatussen: `running`, `ok`, `partial`, `failed`.
+6. **Wat een gefaalde run betekent** (mail van GitHub):
+   - exitcode 1 bij `failed`: de alertstap faalde, niets werkte, of de run kon niet worden vastgelegd;
+   - bij `stale_forecast`: de forecast faalt en de nieuwste is ouder dan 3 uur, dus geen alerts;
+   - bij een onvolledige configuratie (secrets);
+   - bij de activiteitscheck vanaf 53 dagen (punt 8).
+
+   De oorzaak vind je in de annotaties en in `ingest_runs`. `partial` geeft geen mail. Tijdens een storing komt er elk uur een mail (GitHub dedupliceert niet; bewust geaccepteerd). Pauzeren: zet `HOURLY_ENABLED` op `false`. **Let op:** de uurlijkse run houdt het gratis Supabase-project actief (PROJECT_PLAN §2). Staat `HOURLY_ENABLED` langer dan ongeveer een week op `false` (Supabase pauzeert na 7 dagen zonder activiteit), dan pauzeert het project. Zet de run dus binnen een week weer aan, of start tussendoor handmatig een run (punt 3). Is het project toch gepauzeerd: herstel het via het Supabase-dashboard.
+7. **Budgetwaarschuwing.** Boven 80% van de guard (6.400 calls per dag, of 192.000 per maand) volgt een `::warning::`-annotatie en een warning in de stap `forecast`; geen mail.
+8. **60-dagenregel.** GitHub schakelt geplande workflows in een publieke repo uit na 60 dagen zonder activiteit. De activiteitscheck (`shakka check-activity`) kijkt naar de laatste commit op de default branch: vanaf 45 dagen een warning, vanaf 53 dagen een fout (elk uur een mail). Oplossing: merge een kleine wijziging naar `develop` via een PR, bijvoorbeeld de regel "Laatste activiteitscommit" onderaan deze sectie bijwerken. Is de schedule toch uitgeschakeld: `gh workflow enable hourly.yml` (de meldingen gaan daarna naar jou als je hem aanzet) en daarna een commit.
+9. **Wijzigingen aan `hourly.yml`** moeten werken met de code op `main`: de schedule gebruikt het workflowbestand van `develop` maar de code van `main`. Is er nieuwe code voor nodig, promoveer dan eerst of zet `HOURLY_ENABLED` tijdelijk uit.
+10. **Lokaal.** `cd ingest && uv run shakka run-hourly` doet een echte run tegen de database uit `.env` en legt die vast in `ingest_runs`. De uitvoer bevat geen berichtteksten.
+
+Laatste activiteitscommit: 2026-10-15

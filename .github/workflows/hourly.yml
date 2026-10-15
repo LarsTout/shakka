@@ -1,0 +1,60 @@
+name: hourly
+
+on:
+  schedule:
+    # Not on the hour: GitHub delays or drops runs at the start of every hour.
+    - cron: "17 * * * *"
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch to run. The schedule always runs main."
+        required: true
+        default: main
+        type: choice
+        options:
+          - main
+          - develop
+
+permissions:
+  contents: read
+
+# One run at a time (api_usage has no lock); never cancel a running pipeline.
+concurrency:
+  group: hourly
+  cancel-in-progress: false
+
+jobs:
+  run:
+    # Schedule only when the repository variable HOURLY_ENABLED is 'true' (docs/RUNBOOK.md, 13).
+    if: ${{ github.event_name == 'workflow_dispatch' || vars.HOURLY_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: ingest
+    env:
+      UV_LOCKED: "1"
+      PYTHONUNBUFFERED: "1"
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && inputs.ref || 'main' }}
+          persist-credentials: false
+      - uses: astral-sh/setup-uv@1c37ad07a6a961277cf70c0d37d6f313000f5884 # v10.3.0
+        with:
+          working-directory: ingest
+      - id: sync
+        run: uv sync
+      - name: Hourly pipeline
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+          APP_BASE_URL: ${{ vars.APP_BASE_URL }}
+        run: uv run shakka run-hourly
+      - name: Repository activity (schedules stop after 60 days without activity)
+        if: ${{ !cancelled() && steps.sync.outcome == 'success' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          last="$(gh api "repos/${GITHUB_REPOSITORY}/commits?per_page=1" --jq '.[0].commit.committer.date' || true)"
+          uv run shakka check-activity --last-commit-at "${last}"
