@@ -265,3 +265,13 @@ fieldset label {
 .push-settings { padding: 0.75rem 0; border-bottom: 1px solid #ddd; }
 .push-settings h2 { font-size: 1.1rem; margin: 0 0 0.25rem; }
 .paste-link { margin-top: 1.5rem; padding-top: 0.75rem; border-top: 1px solid #ddd; }
+
+/* WP-21: public session page */
+.session-when { font-weight: 600; margin: 0.25rem 0; }
+.participant-list, .carpool-drivers, .carpool-seekers { padding-left: 1.25rem; }
+.participant-list li, .carpool-drivers li, .carpool-seekers li { overflow-wrap: anywhere; margin: 0.125rem 0; }
+.rsvp-panel { margin: 1rem 0; padding: 0.75rem; border: 1px solid #ddd; border-radius: 0.25rem; }
+.rsvp-panel h2 { font-size: 1.1rem; margin: 0 0 0.25rem; }
+.rsvp-panel button + button { margin-left: 0.5rem; }
+.notice-ok { color: #1b7f3b; }
+.session-hours h3 { font-size: 1rem; margin: 1rem 0 0.25rem; }

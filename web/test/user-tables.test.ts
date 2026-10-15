@@ -14,6 +14,9 @@ function walk(dir: string): string[] {
 const files = walk(SRC).filter((p) => /\.(ts|svelte)$/.test(p));
 const text = new Map(files.map((p) => [relative(SRC, p), readFileSync(p, 'utf8')]));
 
+// Anonymous session RPCs live only in lib/rsvp.ts (WP-21). A later module that needs an RPC is added here.
+const RPC_FILES = ['lib/rsvp.ts'];
+
 describe('only data.ts and user-data.ts talk to tables', () => {
 	it(".from(' occurs in exactly lib/data.ts and lib/user-data.ts", () => {
 		const hits = [...text].filter(([, t]) => /\.from\('/.test(t)).map(([f]) => f);
@@ -44,7 +47,11 @@ describe('only data.ts and user-data.ts talk to tables', () => {
 			expect(t.slice(Math.max(0, m.index! - 40), m.index! + m[0].length)).toMatch(/\.from\('alert_rules'\)\s*\.upsert\($/);
 		}
 	});
-	it('no file uses .rpc(', () => {
-		for (const [f, t] of text) expect(t, f).not.toMatch(/\.rpc\(/);
+	it('.rpc( occurs only in the allowed modules', () => {
+		const hits = [...text]
+			.filter(([, t]) => /\.rpc\(/.test(t))
+			.map(([f]) => f)
+			.sort();
+		expect(hits).toEqual([...RPC_FILES].sort());
 	});
 });
