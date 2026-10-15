@@ -18,8 +18,6 @@ def test_defaults(monkeypatch):
     _required(monkeypatch)
     s = get_settings()
     assert s.supabase_publishable_key is None
-    assert s.telegram_bot_token is None
-    assert s.telegram_chat_id is None
     assert s.app_base_url is None
     assert s.vapid_public_key is None
     assert s.vapid_private_key is None
@@ -63,11 +61,11 @@ def test_empty_string_counts_as_missing(monkeypatch):
 
 def test_secrets_not_in_repr(monkeypatch):
     _required(monkeypatch)
-    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:TESTTOKEN")
+    monkeypatch.setenv("VAPID_PRIVATE_KEY", "TESTVAPIDPRIV")
     s = get_settings()
     for text in (repr(s), str(s)):
         assert "sb_secret_TESTVALUE" not in text
-        assert "123:TESTTOKEN" not in text
+        assert "TESTVAPIDPRIV" not in text
 
 
 @pytest.mark.parametrize(
@@ -94,3 +92,21 @@ def test_supabase_url_validation(raw, expected):
             Settings(**kwargs)
     else:
         assert Settings(**kwargs).supabase_url == expected
+
+
+def test_no_telegram_fields():
+    assert [n for n in Settings.model_fields if n.lower().startswith("telegram")] == []
+
+
+def test_old_telegram_env_is_ignored(monkeypatch, tmp_path):
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "SUPABASE_URL=https://aaaa.supabase.co\nSUPABASE_SECRET_KEY=sb_secret_TESTVALUE\n"
+        "TELEGRAM_BOT_TOKEN=123:TESTTOKEN\nTELEGRAM_CHAT_ID=1\n"
+    )
+    monkeypatch.setattr(shakka.config, "ENV_FILE", env_file)
+    monkeypatch.setenv("TELEGRAM_BOT_TOKEN", "123:TESTTOKEN")
+    monkeypatch.setenv("TELEGRAM_CHAT_ID", "1")
+    s = get_settings()
+    assert s.supabase_url == "https://aaaa.supabase.co"
+    assert not hasattr(s, "telegram_bot_token")

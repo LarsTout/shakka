@@ -48,8 +48,6 @@ Wat `uv run shakka doctor` meldt:
 | `SUPABASE_URL` | `.env`, GitHub Secret | ingest | WP-00 |
 | `SUPABASE_PUBLISHABLE_KEY` | `.env` | ingest (`shakka doctor`) | WP-00 |
 | `SUPABASE_SECRET_KEY` | `.env`, GitHub Secret | ingest | WP-00 |
-| `TELEGRAM_BOT_TOKEN` | `.env`, GitHub Secret | ingest | WP-09 |
-| `TELEGRAM_CHAT_ID` | `.env`, GitHub Secret | ingest: operatormeldingen en testberichten | WP-09 |
 | `APP_BASE_URL` | `.env`, GitHub Actions variable | ingest: "ik ga"-links in berichten | WP-14 |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | `.env`, GitHub Secrets | ingest | WP-17 |
 | `PUBLIC_SUPABASE_URL`, `PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `web/.env`, Cloudflare Pages | web | WP-13 |

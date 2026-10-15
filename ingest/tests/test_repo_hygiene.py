@@ -11,8 +11,6 @@ ENV_KEYS = [
     "SUPABASE_URL",
     "SUPABASE_PUBLISHABLE_KEY",
     "SUPABASE_SECRET_KEY",
-    "TELEGRAM_BOT_TOKEN",
-    "TELEGRAM_CHAT_ID",
     "APP_BASE_URL",
     "VAPID_PUBLIC_KEY",
     "VAPID_PRIVATE_KEY",
@@ -28,6 +26,13 @@ def test_env_example_exact():
     assert [k for k, _ in pairs] == ENV_KEYS
     for key, value in pairs:
         assert value == ("mailto:" if key == "VAPID_SUBJECT" else ""), key
+
+
+def test_no_telegram_in_ingest_src_and_env_example():
+    paths = [*(REPO_ROOT / "ingest" / "src").rglob("*.py"), REPO_ROOT / ".env.example"]
+    assert paths
+    offenders = [str(p) for p in paths if "telegram" in p.read_text(encoding="utf-8").lower()]
+    assert offenders == []
 
 
 def test_no_keys_in_repo():

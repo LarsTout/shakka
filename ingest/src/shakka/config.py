@@ -31,8 +31,6 @@ class Settings(BaseSettings):
     supabase_url: str
     supabase_publishable_key: str | None = None
     supabase_secret_key: SecretStr
-    telegram_bot_token: SecretStr | None = None
-    telegram_chat_id: str | None = None
     app_base_url: str | None = None
     vapid_public_key: str | None = None
     vapid_private_key: SecretStr | None = None

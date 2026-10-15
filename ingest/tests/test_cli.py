@@ -83,14 +83,25 @@ def test_doctor_partial_env_does_not_leak_values(rec, monkeypatch):
         monkeypatch,
         url="https://leakcheckref.supabase.co",
         secret=None,
-        telegram_bot_token="123:TESTTOKEN",
+        vapid_private_key="TESTVAPIDPRIV",
         supabase_publishable_key="sb_publishable_TESTPUB",
     )
     code, out = doctor()
     assert code == 1
     assert "missing SUPABASE_SECRET_KEY" in out
-    for leaked in ("leakcheckref", "TESTTOKEN", "TESTPUB"):
+    for leaked in ("leakcheckref", "TESTVAPIDPRIV", "TESTPUB"):
         assert leaked not in out
+
+
+def test_doctor_never_mentions_telegram(rec, monkeypatch):
+    rec()
+    code, out = doctor()
+    assert code == 1
+    assert "telegram" not in out.lower()
+    env(monkeypatch)
+    code, out = doctor()
+    assert code == 0
+    assert "telegram" not in out.lower()
 
 
 def test_doctor_empty_string_counts_as_missing(rec, monkeypatch):
