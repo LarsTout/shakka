@@ -1,4 +1,6 @@
-"""Hourly orchestration: run all M1 steps in a fixed order and record the run.
+"""Hourly orchestration: run all steps in a fixed order and record the run.
+
+Steps: spots_sync, forecast, marine, tides, evaluate, alerts, sessions_cleanup (retention).
 
 Every run is a row in `ingest_runs`. A step that raises never stops the others. Stdout and
 logs carry counts and statuses only (the Actions logs are public); error texts and lists
@@ -30,6 +32,7 @@ from shakka.jobs.evaluate import run_evaluation
 from shakka.jobs.forecast import FetchForecast, run_forecast_ingest
 from shakka.jobs.inputs import db_error_summary, require_aware, short_error
 from shakka.jobs.marine import FetchMarine, run_marine_ingest
+from shakka.jobs.sessions import purge_expired_sessions
 from shakka.jobs.tides import TideFetcher, run_tide_ingest
 from shakka.logsetup import configure_logging, github_annotation, redact, secret_values
 from shakka.notify.base import Notifier
@@ -57,7 +60,15 @@ PUSH_DISABLED_WARNING: Final = (
     "push disabled: VAPID secrets not set; alerts are stored but not delivered"
 )
 MARINE_BUDGET_WARNING: Final = "Open-Meteo budget guard reached: marine request skipped"
-STEP_NAMES: Final = ("spots_sync", "forecast", "marine", "tides", "evaluate", "alerts")
+STEP_NAMES: Final = (
+    "spots_sync",
+    "forecast",
+    "marine",
+    "tides",
+    "evaluate",
+    "alerts",
+    "sessions_cleanup",
+)
 
 _monotonic: Callable[[], float] = time.monotonic  # looked up at call time; tests monkeypatch it
 
@@ -278,6 +289,11 @@ def step_alerts(ctx: PipelineContext) -> StepOutcome:
     )
 
 
+def step_sessions_cleanup(ctx: PipelineContext) -> StepOutcome:
+    deleted = purge_expired_sessions(ctx.db, now=ctx.now)
+    return StepOutcome("ok", {"deleted": deleted})
+
+
 STEPS: Final[tuple[Step, ...]] = (
     ("spots_sync", step_spots_sync),
     ("forecast", step_forecast),
@@ -285,6 +301,7 @@ STEPS: Final[tuple[Step, ...]] = (
     ("tides", step_tides),
     ("evaluate", step_evaluate),
     ("alerts", step_alerts),
+    ("sessions_cleanup", step_sessions_cleanup),
 )
 
 
