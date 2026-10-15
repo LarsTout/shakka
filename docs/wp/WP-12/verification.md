@@ -39,3 +39,11 @@ Gedraaid op HEAD `ec2ddeb` (branch `wp/WP-12`, diff t.o.v. merge-base met `origi
 ## Problemen
 Geen blokkerende problemen.
 N-1 (NEEDS_LARS, AC-5): live `uv run shakka marine fetch` tegen de lokale stack nog te draaien, na `supabase db push`/`db reset` (zie boven).
+
+## Live check tegen het remote project (15 oktober 2026, AC-5)
+Uitgevoerd door de orchestrator na de merge (`a8602df`) en `supabase db push` van `20261015180000_marine_hours.sql`, met een tijdelijke test-spot `test-strand` (52.47, 4.57).
+- `uv run shakka marine fetch`: `marine: spots=1 rows=168 calls=1.00 deleted=0 skipped_budget=no errors=0`, `marine: ok`, exit 0.
+- `marine_hours` voor de test-spot: 168 rijen (7 dagen), eerste rijen bijv. `2026-10-15T00:00Z 0.8 m / 4.2 s / 245°`.
+- Test-spot en bijbehorende rijen daarna verwijderd.
+
+**AC-5: PASS.** Resultaat WP-12: PASS.
