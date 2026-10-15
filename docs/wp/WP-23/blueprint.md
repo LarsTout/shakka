@@ -1,5 +1,5 @@
 # Blueprint WP-23: Privacy, toegankelijkheid en performance
-Status: DRAFT
+Status: APPROVED
 Revisie: 2
 
 ## Doel
