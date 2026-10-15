@@ -13,8 +13,10 @@
 		statusLabel,
 		tideText
 	} from '#lib/labels.js';
+	import { session } from '#lib/auth.js';
+	import { goHref, goRuns } from '#lib/go.js';
 	import { WAVES_NOTE_NL, marineByHour, waveText } from '#lib/marine.js';
-	import { localDateKey } from '#lib/time.js';
+	import { formatLocal, localDateKey } from '#lib/time.js';
 	import type { MarineHour } from '#lib/types.js';
 	import {
 		dayHeading,
@@ -110,12 +112,24 @@
 		{#each groups as g (g.dateKey)}
 			{@const dayTides = tidesForDay(data.tides, g.dateKey)}
 			{@const hours = visibleHours(g.hours, showDark)}
+			{@const runs = goRuns(g.hours)}
 			<section class="day" aria-labelledby="dag-{g.dateKey}">
 				<h2 id="dag-{g.dateKey}">{dayHeading(g.dateKey, todayKey)}</h2>
 				{#if station}
 					<p class="tides">
 						Getij: {dayTides.length ? dayTides.map(tideText).join(' · ') : 'geen gegevens'}
 					</p>
+				{/if}
+				{#if $session && runs.length}
+					<ul class="go-runs">
+						{#each runs as r (r.start.getTime())}
+							<li>
+								<a class="go-run" href={goHref(spot.id, r.start, r.end)}
+									>Ik ga {formatLocal(r.start, 'time')}–{formatLocal(r.end, 'time')}</a
+								>
+							</li>
+						{/each}
+					</ul>
 				{/if}
 				{#if hours.length}
 					<ol class="hours">
@@ -172,3 +186,25 @@
 		<Attribution />
 	</section>
 {/if}
+
+<style>
+	.go-runs {
+		list-style: none;
+		padding: 0;
+		margin: 0.25rem 0;
+		display: flex;
+		flex-wrap: wrap;
+		gap: 0.5rem;
+	}
+	.go-run {
+		display: inline-flex;
+		align-items: center;
+		min-height: 2.75rem;
+		padding: 0.4rem 0.75rem;
+		border-radius: 0.25rem;
+		background: #1b7f3b;
+		color: #fff;
+		font-weight: 600;
+		text-decoration: none;
+	}
+</style>
