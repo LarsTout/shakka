@@ -4,7 +4,7 @@ create extension if not exists pgtap with schema extensions;
 
 select plan(71);
 
-select tables_are('public'::name, array['spots', 'forecast_hours', 'tide_extremes', 'evaluations', 'profiles', 'favorites', 'alert_rules', 'alert_state', 'api_usage', 'ingest_runs']::name[], 'public has exactly the M1 tables');
+select tables_are('public'::name, array['spots', 'forecast_hours', 'tide_extremes', 'evaluations', 'profiles', 'favorites', 'alert_rules', 'alert_state', 'api_usage', 'ingest_runs', 'push_subscriptions']::name[], 'public has exactly the expected tables');
 
 select columns_are('public'::name, 'spots'::name, array['id', 'name', 'region', 'lat', 'lon', 'shore_normal_deg', 'ridable_dirs', 'hazards', 'tide_sensitive', 'tide_min_level_cm', 'rws_station', 'season', 'status', 'level', 'default_min_kn', 'notes', 'verified', 'updated_at']::name[], 'spots columns');
 select columns_are('public'::name, 'forecast_hours'::name, array['spot_id', 'model', 'valid_at', 'wind_kn', 'gust_kn', 'dir_deg', 'fetched_at']::name[], 'forecast_hours columns');
@@ -110,7 +110,14 @@ select set_eq(
     ('ingest_runs', 'finished_at', 'timestamp with time zone', true),
     ('ingest_runs', 'status', 'text', false),
     ('ingest_runs', 'steps', 'jsonb', false),
-    ('ingest_runs', 'error_summary', 'text', true)
+    ('ingest_runs', 'error_summary', 'text', true),
+    ('push_subscriptions', 'id', 'uuid', false),
+    ('push_subscriptions', 'user_id', 'uuid', false),
+    ('push_subscriptions', 'endpoint', 'text', false),
+    ('push_subscriptions', 'p256dh', 'text', false),
+    ('push_subscriptions', 'auth', 'text', false),
+    ('push_subscriptions', 'created_at', 'timestamp with time zone', false),
+    ('push_subscriptions', 'last_success_at', 'timestamp with time zone', true)
   $q$,
   'column types and nullability');
 
@@ -133,7 +140,8 @@ select set_eq(
     ('profiles', 'auth.users', 'c'),
     ('favorites', 'auth.users', 'c'), ('favorites', 'spots', 'c'),
     ('alert_rules', 'favorites', 'c'),
-    ('alert_state', 'auth.users', 'c'), ('alert_state', 'spots', 'c')
+    ('alert_state', 'auth.users', 'c'), ('alert_state', 'spots', 'c'),
+    ('push_subscriptions', 'auth.users', 'c')
   $q$,
   'foreign keys cascade on delete');
 

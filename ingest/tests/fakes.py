@@ -99,6 +99,7 @@ class FakeSupabase:
         self._tables: dict[str, list[dict[str, Any]]] = {t: [] for t in TABLE_KEYS}
         self._alert_state_seq = 0
         self._ingest_run_seq = 0
+        self._push_subscription_seq = 0
         self.writes: list[tuple[str, str]] = []
         self.upserts: list[tuple[str, str]] = []
         self.rpc_calls: list[tuple[str, dict[str, Any]]] = []
@@ -155,6 +156,12 @@ class FakeSupabase:
                 "id": f"00000000-0000-4000-8000-{self._alert_state_seq:012d}",
                 "created_at": now,
                 "updated_at": now,
+            }
+        elif table == "push_subscriptions":
+            self._push_subscription_seq += 1
+            defaults = {
+                "id": f"00000000-0000-4000-9000-{self._push_subscription_seq:012d}",
+                "created_at": now,
             }
         elif table == "api_usage":
             defaults = {"calls": 0, "requests": 0}
