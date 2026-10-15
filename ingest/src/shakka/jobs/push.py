@@ -6,17 +6,27 @@ the VAPID subject.
 
 import logging
 from collections import defaultdict
-from collections.abc import Collection, Sequence
+from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Final
 
+from pydantic import ValidationError
+
+from shakka.config import get_settings
 from shakka.db import DatabaseError, SupabaseRest, in_filter, iso_utc
 from shakka.domain.messages import AlertMessage
 from shakka.domain.push import PushPayload
+from shakka.jobs import runtime
 from shakka.jobs.inputs import db_error_summary, require_aware
-from shakka.notify.base import DeliveryResult, DeliveryTarget, Notifier, PushTarget
-from shakka.notify.webpush import WebPushNotifier
+from shakka.notify.base import (
+    WEBPUSH_CHANNEL,
+    DeliveryResult,
+    DeliveryTarget,
+    Notifier,
+    PushTarget,
+)
+from shakka.notify.webpush import WebPushNotifier, generate_vapid_keys, notifiers_from_settings
 
 logger = logging.getLogger(__name__)
 
@@ -177,3 +187,66 @@ def send_test_push(
         for _ in update.errors:
             logger.warning("test-push: updating push subscriptions failed (DatabaseError)")
     return results
+
+
+def run_test_push_cli(user_id: str, *, echo: Callable[[str], None]) -> int:
+    """`shakka alerts test-push`. Never prints an endpoint, key, user id or the subject."""
+    try:
+        settings = get_settings()
+    except ValidationError:
+        echo("test-push: configuration incomplete; run shakka doctor")
+        return 1
+    try:
+        notifiers = notifiers_from_settings(settings)
+    except ValueError as exc:  # a fixed text without values
+        echo(f"test-push: invalid VAPID configuration: {exc}")
+        return 1
+    notifier = notifiers.get(WEBPUSH_CHANNEL)
+    if not isinstance(notifier, WebPushNotifier):
+        echo(
+            "test-push: push is disabled; set VAPID_PUBLIC_KEY, VAPID_PRIVATE_KEY and "
+            "VAPID_SUBJECT (docs/RUNBOOK.md, section 14)"
+        )
+        return 1
+    db = runtime.open_db(settings)
+    try:
+        results = send_test_push(db, notifier, user_id, now=runtime.utcnow())
+    except DatabaseError as exc:
+        echo(f"test-push: database error: {exc}")
+        return 1
+    finally:
+        db.close()
+    if not results:
+        echo(
+            "test-push: no push subscriptions for this user; turn on notifications in the app first"
+        )
+        return 1
+    sent = failed = removed = 0
+    for item in results:
+        result = item.result
+        if result.ok:
+            sent += 1
+            echo(f"test-push: device {item.device}: ok")
+        elif result.permanent_failure:
+            failed += 1
+            removed += 1
+            echo(f"test-push: device {item.device}: gone ({result.detail}); subscription removed")
+        else:
+            failed += 1
+            echo(f"test-push: device {item.device}: failed ({result.detail})")
+    echo(f"test-push: sent={sent} failed={failed} removed={removed}")
+    echo("test-push: ok" if sent else "test-push: failed")
+    return 0 if sent else 1
+
+
+def run_vapid_keys_cli(*, echo: Callable[[str], None]) -> int:
+    """`shakka alerts vapid-keys`: prints a new key pair. Reads no settings, no database."""
+    keys = generate_vapid_keys()
+    echo(f"VAPID_PUBLIC_KEY={keys.public_key}")
+    echo(f"VAPID_PRIVATE_KEY={keys.private_key}")
+    echo(
+        "note: put both in .env and in the GitHub Secrets (docs/RUNBOOK.md, section 14). "
+        "The web app uses the same public key as PUBLIC_VAPID_PUBLIC_KEY. "
+        "Never commit or share the private key."
+    )
+    return 0

@@ -76,7 +76,7 @@ def evaluate() -> None:
 
 @cli.group()
 def alerts() -> None:
-    """Alerts: evaluate favorites and record the state (nothing is sent yet)."""
+    """Alerts: evaluate favorites, record the state and deliver Web Push."""
 
 
 @alerts.command("run")
@@ -86,6 +86,23 @@ def alerts_run(dry_run: bool) -> None:
     from shakka.jobs.alerts import run_alerts_cli
 
     raise SystemExit(run_alerts_cli(dry_run=dry_run, echo=click.echo))
+
+
+@alerts.command("test-push")
+@click.option("--user-id", type=click.UUID, required=True)
+def alerts_test_push(user_id) -> None:
+    """Send a test notification to every device of a user. Local use."""
+    from shakka.jobs.push import run_test_push_cli
+
+    raise SystemExit(run_test_push_cli(str(user_id), echo=click.echo))
+
+
+@alerts.command("vapid-keys")
+def alerts_vapid_keys() -> None:
+    """Generate a VAPID key pair. Prints the private key: do not share or log the output."""
+    from shakka.jobs.push import run_vapid_keys_cli
+
+    raise SystemExit(run_vapid_keys_cli(echo=click.echo))
 
 
 @cli.group()

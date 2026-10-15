@@ -71,6 +71,7 @@ from shakka.jobs.push import (
 )
 from shakka.jobs.push import load_targets as load_targets  # explicit re-export (contract)
 from shakka.notify.base import WEBPUSH_CHANNEL, DeliveryTarget, Notifier
+from shakka.notify.webpush import notifiers_from_settings
 
 logger = logging.getLogger(__name__)
 
@@ -579,9 +580,16 @@ def run_alerts_cli(*, dry_run: bool, echo: Callable[[str], None]) -> int:
     except ValueError:
         echo("alerts: invalid APP_BASE_URL")
         return 1
+    try:
+        notifiers = notifiers_from_settings(settings)
+    except ValueError as exc:  # a fixed text without values
+        echo(f"alerts: invalid VAPID configuration: {exc}")
+        return 1
     db = runtime.open_db(settings)
     try:
-        result = run_alerts(db, now=runtime.utcnow(), base_url=base, dry_run=dry_run)
+        result = run_alerts(
+            db, now=runtime.utcnow(), base_url=base, dry_run=dry_run, notifiers=notifiers
+        )
     except DatabaseError as exc:
         echo(f"alerts: database error: {exc}")
         return 1
@@ -604,8 +612,17 @@ def run_alerts_cli(*, dry_run: bool, echo: Callable[[str], None]) -> int:
     )
     if dry_run:
         echo("alerts: dry run, nothing stored")
+    if dry_run:
+        echo("push: nothing sent (dry run)")
+    elif not notifiers:
+        echo("push: disabled (no VAPID configuration)")
+    else:
+        echo(
+            f"push: sent={result.sent} failed={result.failed} no_target={result.no_target} "
+            f"deferred={result.deferred} removed={result.removed}"
+        )
     for line in result.errors:
         echo(f"error   {line}")
-    failed = result.skipped > 0 or result.write_errors > 0
+    failed = result.skipped > 0 or result.write_errors > 0 or result.deferred > 0
     echo("alerts: failed" if failed else "alerts: ok")
     return 1 if failed else 0
