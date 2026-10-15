@@ -27,7 +27,6 @@ from shakka.domain.defaults import (
     WIND_BORDERLINE_KN,
 )
 from shakka.domain.direction import (
-    RIDABLE_DIR_CLASSES,
     DirClass,
     classify_direction,
     in_ranges,
@@ -262,7 +261,6 @@ def _direction(spot: SpotProfile, c: Consensus | None) -> tuple[DirClass | None,
     elif dir_class == DirClass.SIDE_OFFSHORE:
         out.add(ReasonCode.SIDE_OFFSHORE)
     elif spot.ridable_dirs is not None and not in_ranges(c.dir_mean_deg, spot.ridable_dirs):
-        assert dir_class in RIDABLE_DIR_CLASSES
         out.add(ReasonCode.DIRECTION_NOT_RIDABLE)
     return dir_class, out
 
