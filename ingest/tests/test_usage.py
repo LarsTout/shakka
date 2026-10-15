@@ -63,16 +63,19 @@ STATS_WARN = dataclasses.replace(
     open_meteo_max_day=7100.0,
 )
 
-GOLDEN = """\
-Shakka gebruiksrapport tot 2026-07-20 08:17 (Europe/Amsterdam)
-Waarschuwingen: geen
-Open-Meteo: vandaag 1.400 calls, hoogste dag (7 dagen) 1.421, limiet 10.000 per dag; deze maand 26.000, limiet 300.000
-Database: 42 MB van 500 MB
-Rijen: alert_rules 3, alert_state 2, api_usage 40, evaluations 4.800, favorites 3, forecast_hours 14.500, ingest_runs 1.000, marine_hours 4.000, profiles 2, push_subscriptions 2, rsvps 0, sessions 0, spots 25, tide_extremes 300
-Runs (7 dagen): 168, waarvan 160 ok, 7 partial, 1 failed (95% ok)
-Stappen niet ok (7 dagen): marine 5, tides 3
-Push (7 dagen): 12 verstuurd, 1 mislukt
-Gebruikers: 2, push-abonnementen: 2"""
+GOLDEN = "\n".join(
+    [
+        "Shakka gebruiksrapport tot 2026-07-20 08:17 (Europe/Amsterdam)",
+        "Waarschuwingen: geen",
+        "Open-Meteo: vandaag 1.400 calls, hoogste dag (7 dagen) 1.421, limiet 10.000 per dag; deze maand 26.000, limiet 300.000",  # noqa: E501
+        "Database: 42 MB van 500 MB",
+        "Rijen: alert_rules 3, alert_state 2, api_usage 40, evaluations 4.800, favorites 3, forecast_hours 14.500, ingest_runs 1.000, marine_hours 4.000, profiles 2, push_subscriptions 2, rsvps 0, sessions 0, spots 25, tide_extremes 300",  # noqa: E501
+        "Runs (7 dagen): 168, waarvan 160 ok, 7 partial, 1 failed (95% ok)",
+        "Stappen niet ok (7 dagen): marine 5, tides 3",
+        "Push (7 dagen): 12 verstuurd, 1 mislukt",
+        "Gebruikers: 2, push-abonnementen: 2",
+    ]
+)
 
 
 def test_build_usage_report_golden():
@@ -229,7 +232,7 @@ def test_time_helpers():
 @pytest.mark.parametrize(
     "kwargs",
     [
-        {"now": datetime(2026, 7, 20, 6, 17)},
+        {"now": datetime(2026, 7, 20, 6, 17)},  # noqa: DTZ001
         {"open_meteo_today": -1.0},
         {"open_meteo_today": float("nan")},
         {"database_bytes": True},
