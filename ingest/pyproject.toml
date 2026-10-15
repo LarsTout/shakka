@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "Shakka ingest, evaluation and alerting"
 requires-python = ">=3.12,<3.13"
 dependencies = [
+    "astral>=3.2,<4",
     "click>=8.2,<9",
     "httpx>=0.28,<0.29",
     "pydantic>=2.11,<3",

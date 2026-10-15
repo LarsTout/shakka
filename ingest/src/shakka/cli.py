@@ -138,5 +138,19 @@ def tides_stations(search: str | None) -> None:
     click.echo(f"{len(stations)} stations")
 
 
+@cli.group()
+def contracts() -> None:
+    """Generated contract files in data/contracts/."""
+
+
+@contracts.command("export")
+@click.option("--check", is_flag=True, help="Only check that the files are up to date.")
+def contracts_export(check: bool) -> None:
+    """Write reason codes, direction classes and confidence labels as JSON."""
+    from shakka.contracts import run_contracts_export
+
+    raise SystemExit(run_contracts_export(check=check, echo=click.echo))
+
+
 def main() -> None:
     cli()

@@ -9,7 +9,7 @@ Opdeling: goedgekeurd.
 | WP-02 | Spotprofielen: schema, validatie, sync en startset | done | |
 | WP-03 | Forecast-ingest wind (Open-Meteo multi-model) met call-budget | done | |
 | WP-04 | Getij-ingest (Rijkswaterstaat) | done | |
-| WP-05 | Evaluatie-engine (puur) | todo | |
+| WP-05 | Evaluatie-engine (puur) | done | drempelwaarden toetsen in M1-testweek (blueprint 'Drempelwaarden', open punt O1) |
 | WP-06 | Kite-advies (puur) | done | AC-2 open: Lars toetst kite_examples.yaml en zet checked_by_lars: true |
 | WP-07 | Alertregels en windows (puur) | todo | |
 | WP-08 | Alert-deduplicatie en berichtopbouw (puur) | todo | |

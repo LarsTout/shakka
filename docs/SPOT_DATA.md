@@ -54,7 +54,19 @@ Dit is de richting loodrecht op de kust, van land naar water. Ga op het strand s
 - Rekenvoorbeeld 1: een kust die op het westen ligt (je kijkt naar het westen) geeft **270**.
 - Rekenvoorbeeld 2: een kustlijn die loopt van 20° naar 200° (NNO-ZZW), met het water aan de westkant. De twee loodlijnen zijn 20 + 90 = 110 en 20 - 90 = -70, dus 290. Het water ligt aan de westkant, dus 290.
 
-Verband met de wind (meteorologisch: de richting waar de wind vandaan komt): wind uit `shore_normal_deg` is onshore. Indicatief, voor 270: 270 is onshore, 225 en 315 side-onshore, 180 en 0 sideshore, 135 en 45 side-offshore, 90 offshore. De exacte grenzen liggen vast in WP-05. Offshore en side-offshore zijn altijd `no_go`.
+Verband met de wind (meteorologisch: de richting waar de wind vandaan komt): de klasse volgt uit de hoekafwijking `d` tussen de windrichting en `shore_normal_deg` (de kleinste hoek, 0 tot 180 graden). Bovengrenzen zijn inclusief.
+
+| Hoekafwijking `d` | Klasse |
+|---|---|
+| 0 t/m 22,5 | `onshore` |
+| meer dan 22,5 t/m 67,5 | `side_onshore` |
+| meer dan 67,5 t/m 90 | `sideshore` |
+| meer dan 90 t/m 157,5 | `side_offshore` |
+| meer dan 157,5 t/m 180 | `offshore` |
+
+Elke wind met een aflandige component (hoekafwijking groter dan 90° van `shore_normal_deg`) is side-offshore of offshore en dus altijd `no_go`. Dat is niet instelbaar. Wind precies evenwijdig aan de kust (90°) is sideshore.
+
+Rekenvoorbeeld voor 270: 270 is onshore, 225 en 315 zijn side-onshore, 180 en 0 zijn sideshore, 135 en 45 zijn side-offshore, 90 is offshore.
 
 ## 5. `ridable_dirs`
 Optionele override voor meren, dijken en dergelijke waar de kustrichting niet genoeg zegt.
@@ -94,11 +106,11 @@ season:
 ## 7. Getij
 `tide_sensitive`:
 - `none`: getij speelt geen rol.
-- `prefer_low`: laag water is beter.
-- `prefer_high`: hoog water is beter.
-- `avoid_low`: laag water vermijden.
+- `prefer_low`: laag water is beter. Ongunstig buiten ongeveer 2 uur vóór tot 2 uur na laagwater.
+- `prefer_high`: hoog water is beter. Ongunstig buiten ongeveer 2 uur vóór tot 2 uur na hoogwater.
+- `avoid_low`: laag water vermijden. Zonder `tide_min_level_cm` is rond laagwater (ongeveer 2 uur ervoor tot 2 uur erna) ongunstig; met `tide_min_level_cm` telt alleen die minimale waterstand.
 
-`tide_min_level_cm` is de minimale waterstand in cm ten opzichte van NAP en mag alleen bij `tide_sensitive` anders dan `none`. Voor `rws_station` kies je de code met `shakka tides stations` (beschikbaar na WP-04).
+`tide_min_level_cm` is de minimale waterstand in cm ten opzichte van NAP en mag alleen bij `tide_sensitive` anders dan `none` en geldt bij elke variant: een geschatte waterstand eronder is altijd `no_go`. Voor `rws_station` kies je de code met `shakka tides stations` (beschikbaar na WP-04).
 
 ## 8. Eisen voor `verified: true`
 Verplicht ingevuld: `lat`, `lon`, `shore_normal_deg`, `status` en `level`, en `rws_station` als `tide_sensitive` niet `none` is. Daarnaast de inhoudelijke controle door Lars: de NKV-spotkaart, de gemeentelijke en lokale regels en de seizoenssluitingen. Alleen Lars zet `verified: true`. Alerts gelden alleen voor geverifieerde spots.
