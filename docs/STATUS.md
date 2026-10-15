@@ -28,7 +28,7 @@ Opdeling: goedgekeurd.
 | WP-19 | Sessies: datamodel, RLS en RPC's | done | bewaartermijn 7 dagen bevestigen (A1) |
 | WP-20 | Sessie aanmaken en delen | done | AC-6 open: telefoontest (push → ik ga → WhatsApp) door Lars |
 | WP-21 | Publieke sessiepagina en RSVP zonder account | done | AC-7 open: RSVP-test op telefoon zonder account + noindex in preview (RUNBOOK §16.9) |
-| WP-22 | Hardening backend en kostenbewaking | building | |
+| WP-22 | Hardening backend en kostenbewaking | verifying | |
 | WP-23 | Privacy, toegankelijkheid en performance | done | AC-6 + privacytekst + Supabase-instellingen (audit logs uit, EU) open voor Lars (RUNBOOK §17) |
 | WP-24 | E-mail als tweede meldingskanaal | todo | M5; scopewijziging, akkoord Lars nodig; niet parallel met WP-30 |
 | WP-25 | Moderatie voor organisatoren | todo | M5 |
