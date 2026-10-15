@@ -2,7 +2,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(71);
+select plan(70);
 
 select tables_are('public'::name, array['spots', 'forecast_hours', 'marine_hours', 'tide_extremes', 'evaluations', 'profiles', 'favorites', 'alert_rules', 'alert_state', 'api_usage', 'ingest_runs', 'push_subscriptions', 'sessions', 'rsvps']::name[], 'public has exactly the expected tables');
 
@@ -10,7 +10,7 @@ select columns_are('public'::name, 'spots'::name, array['id', 'name', 'region', 
 select columns_are('public'::name, 'forecast_hours'::name, array['spot_id', 'model', 'valid_at', 'wind_kn', 'gust_kn', 'dir_deg', 'fetched_at']::name[], 'forecast_hours columns');
 select columns_are('public'::name, 'tide_extremes'::name, array['station', 'at', 'kind', 'level_cm', 'fetched_at']::name[], 'tide_extremes columns');
 select columns_are('public'::name, 'evaluations'::name, array['spot_id', 'valid_at', 'verdict', 'reasons', 'wind_kn', 'gust_kn', 'dir_deg', 'dir_class', 'confidence', 'tide_level_cm', 'evaluated_at']::name[], 'evaluations columns');
-select columns_are('public'::name, 'profiles'::name, array['user_id', 'weight_kg', 'level', 'quiver_m2', 'default_min_kn', 'default_max_kn', 'telegram_chat_id', 'created_at', 'updated_at']::name[], 'profiles columns');
+select columns_are('public'::name, 'profiles'::name, array['user_id', 'weight_kg', 'level', 'quiver_m2', 'default_min_kn', 'default_max_kn', 'created_at', 'updated_at']::name[], 'profiles columns');
 select columns_are('public'::name, 'favorites'::name, array['user_id', 'spot_id', 'created_at']::name[], 'favorites columns');
 select columns_are('public'::name, 'alert_rules'::name, array['user_id', 'spot_id', 'enabled', 'min_kn', 'max_kn', 'dir_classes', 'weekdays', 'earliest_local', 'latest_local', 'min_go_hours', 'days_ahead', 'updated_at']::name[], 'alert_rules columns');
 select columns_are('public'::name, 'alert_state'::name, array['id', 'user_id', 'spot_id', 'window_start', 'window_end', 'status', 'snapshot', 'last_event', 'last_notified_at', 'created_at', 'updated_at']::name[], 'alert_state columns');
@@ -78,7 +78,6 @@ select set_eq(
     ('profiles', 'quiver_m2', 'real[]', false),
     ('profiles', 'default_min_kn', 'smallint', true),
     ('profiles', 'default_max_kn', 'smallint', true),
-    ('profiles', 'telegram_chat_id', 'text', true),
     ('profiles', 'created_at', 'timestamp with time zone', false),
     ('profiles', 'updated_at', 'timestamp with time zone', false),
     ('favorites', 'user_id', 'uuid', false),
@@ -219,7 +218,6 @@ select throws_ok($$update public.profiles set weight_kg = 201 where user_id = '1
 select throws_ok($$update public.profiles set level = 'pro' where user_id = '11111111-1111-1111-1111-111111111111'$$, '23514', null, 'profiles: level enum');
 select throws_ok($$update public.profiles set quiver_m2 = '{2.5}' where user_id = '11111111-1111-1111-1111-111111111111'$$, '23514', null, 'profiles: quiver_m2 >= 3');
 select throws_ok($$update public.profiles set quiver_m2 = '{3,4,5,6,7,8,9,10,11,12,13}' where user_id = '11111111-1111-1111-1111-111111111111'$$, '23514', null, 'profiles: quiver_m2 has at most 10 kites');
-select throws_ok($$update public.profiles set telegram_chat_id = 'abc' where user_id = '11111111-1111-1111-1111-111111111111'$$, '23514', null, 'profiles: telegram_chat_id is numeric');
 select throws_ok($$update public.profiles set default_min_kn = 20, default_max_kn = 15 where user_id = '11111111-1111-1111-1111-111111111111'$$, '23514', null, 'profiles: min < max');
 
 select throws_ok($$insert into public.alert_rules (user_id, spot_id, weekdays) values ('11111111-1111-1111-1111-111111111111', 'pgtap-spot', '{0}')$$, '23514', null, 'alert_rules: weekday 0');
