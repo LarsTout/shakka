@@ -13,7 +13,7 @@ from typing import Any, Final
 import httpx
 
 from shakka.domain.tide import MAX_ABS_LEVEL_CM, TideExtreme, TideKind
-from shakka.http import make_client
+from shakka.http import TransientError, make_client, with_retries
 
 RWS_BASE_URL: Final = "https://ddapi20-waterwebservices.rijkswaterstaat.nl"
 OBSERVATIONS_URL: Final = f"{RWS_BASE_URL}/ONLINEWAARNEMINGENSERVICES/OphalenWaarnemingen"
@@ -36,6 +36,8 @@ EXTREME_TYPE_KIND: Final[Mapping[str, TideKind | None]] = {
 OBSERVATIONS_TIMEOUT_S: Final = 30.0
 CATALOGUE_TIMEOUT_S: Final = 60.0
 MAX_ERROR_TEXT: Final = 200
+RWS_ATTEMPTS: Final = 3
+RWS_BACKOFF_S: Final = 1.0
 STATION_CODE_RE: Final = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
 
@@ -272,26 +274,41 @@ def _coordinate(value: Any) -> float | None:
 
 
 def _post_json(client: httpx.Client, url: str, body: dict[str, Any], *, label: str) -> Any:
-    try:
-        response = client.post(url, json=body)
-    except httpx.HTTPError as exc:
-        raise TideFetchError(f"{label}: {type(exc).__name__}") from None
-    status = response.status_code
-    if status == 204:
-        raise TideFetchError(f"{label}: no data (HTTP 204)")
-    if not 200 <= status < 300:
-        text = f"{label}: HTTP {status}"
+    """POST (idempotent) with retries on transport errors, 429 and 5xx. Nothing is logged."""
+
+    def attempt() -> Any:
         try:
-            data = response.json()
+            response = client.post(url, json=body)
+        except httpx.HTTPError as exc:
+            raise TransientError(f"{label}: {type(exc).__name__}") from None
+        status = response.status_code
+        if status == 204:
+            raise TideFetchError(f"{label}: no data (HTTP 204)")
+        if not 200 <= status < 300:
+            text = f"{label}: HTTP {status}"
+            try:
+                data = response.json()
+            except ValueError:
+                data = None
+            if isinstance(data, dict) and data.get("Foutmelding") is not None:
+                text += f": {str(data['Foutmelding'])[:MAX_ERROR_TEXT]}"
+            if status == 429 or status >= 500:
+                raise TransientError(text)
+            raise TideFetchError(text)
+        try:
+            return response.json()
         except ValueError:
-            data = None
-        if isinstance(data, dict) and data.get("Foutmelding") is not None:
-            text += f": {str(data['Foutmelding'])[:MAX_ERROR_TEXT]}"
-        raise TideFetchError(text)
+            raise TideFetchError(f"{label}: invalid JSON") from None
+
     try:
-        return response.json()
-    except ValueError:
-        raise TideFetchError(f"{label}: invalid JSON") from None
+        return with_retries(
+            attempt,
+            attempts=RWS_ATTEMPTS,
+            backoff=RWS_BACKOFF_S,
+            retry_if=lambda e: isinstance(e, TransientError),
+        )
+    except TransientError as exc:
+        raise TideFetchError(f"{exc} (after {RWS_ATTEMPTS} attempts)") from None
 
 
 def fetch_tide_extremes(

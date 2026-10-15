@@ -432,6 +432,62 @@ def test_fetch_500_message_contains_foutmelding():
     assert len(str(info.value)) < 260
 
 
+def _ok_handler():
+    raw = (FIXTURES / "waarnemingen_hoekvanholland.json").read_bytes()
+    return httpx.Response(200, content=raw, headers={"content-type": "application/json"})
+
+
+def test_fetch_retries_then_ok():
+    answers = [httpx.Response(500), httpx.Response(500)]
+
+    def handler(request):
+        return answers.pop(0) if answers else _ok_handler()
+
+    client, requests = mock_client(handler)
+    assert fetch_tide_extremes("hoekvanholland", START, END, http=client)
+    assert len(requests) == 3
+
+
+def test_fetch_500_three_times():
+    client, requests = mock_client(lambda r: httpx.Response(500, json={"Foutmelding": "x" * 500}))
+    with pytest.raises(TideFetchError) as info:
+        fetch_tide_extremes("hoekvanholland", START, END, http=client)
+    assert str(info.value).startswith("hoekvanholland: HTTP 500")
+    assert str(info.value).endswith("(after 3 attempts)")
+    assert len(str(info.value)) < 260
+    assert len(requests) == 3
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(204),
+        httpx.Response(302),
+        httpx.Response(400, json={"Foutmelding": "bad"}),
+        httpx.Response(200, text="not json"),
+    ],
+)
+def test_fetch_no_retry_on_permanent(response):
+    client, requests = mock_client(lambda r: response)
+    with pytest.raises(TideFetchError):
+        fetch_tide_extremes("hoekvanholland", START, END, http=client)
+    assert len(requests) == 1
+
+
+def test_fetch_transport_error_retried():
+    state = {"n": 0}
+
+    def handler(request):
+        state["n"] += 1
+        if state["n"] == 1:
+            raise httpx.ConnectError("boom")
+        return _ok_handler()
+
+    client, requests = mock_client(handler)
+    assert fetch_tide_extremes("hoekvanholland", START, END, http=client)
+    assert len(requests) == 2
+
+
 @pytest.mark.parametrize("code", ["", "a b", "a/b", "x" * 65, "../x", "-x"])
 def test_fetch_invalid_station(code):
     client, requests = mock_client(lambda r: httpx.Response(200, json={}))
