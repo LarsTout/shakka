@@ -1,5 +1,5 @@
 # Blueprint WP-15: Kaart
-Status: DRAFT
+Status: APPROVED
 Revisie: 2
 
 ## Doel
