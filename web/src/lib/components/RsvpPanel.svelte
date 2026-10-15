@@ -1,11 +1,7 @@
 <script lang="ts">
 	import { createRsvp, deleteRsvp, getPublicSession, updateRsvp } from '#lib/rsvp.js';
-	import {
-		browserStorage,
-		clearStoredRsvp,
-		readStoredRsvp,
-		writeStoredRsvp
-	} from '#lib/rsvp-storage.js';
+	import { browserStorage } from '#lib/browser-storage.js';
+	import { clearStoredRsvp, readStoredRsvp, writeStoredRsvp } from '#lib/rsvp-storage.js';
 	import {
 		SESSION_RETENTION_DAYS,
 		type PublicRsvp,

@@ -1,12 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
-	browserStorage,
 	clearStoredRsvp,
 	readStoredRsvp,
 	resetRsvpMemory,
-	writeStoredRsvp,
-	type StorageLike
+	writeStoredRsvp
 } from '../src/lib/rsvp-storage.js';
+import type { StorageLike } from '../src/lib/browser-storage.js';
 import { NEW_ID, SLUG, TOKEN } from './fixtures/public-session.js';
 
 const KEY = 'shakka:rsvp:' + SLUG;
@@ -57,8 +56,8 @@ describe('storage (AC-3)', () => {
 		});
 	}
 
-	it('null storage does not throw', () => {
-		expect(readStoredRsvp(null, SLUG)).toBeNull();
+	it('undefined storage does not throw', () => {
+		expect(readStoredRsvp(undefined, SLUG)).toBeNull();
 	});
 	it('throwing getItem and removeItem are survived', () => {
 		const bad: StorageLike = {
@@ -82,30 +81,15 @@ describe('storage (AC-3)', () => {
 		expect(s.setItem).not.toHaveBeenCalled();
 		expect(s.removeItem).not.toHaveBeenCalled();
 	});
-	it('browserStorage returns localStorage, or null when access throws', () => {
-		expect(browserStorage()).toBe(localStorage);
-		const d = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
-		try {
-			Object.defineProperty(globalThis, 'localStorage', {
-				configurable: true,
-				get: () => {
-					throw new Error('SecurityError');
-				}
-			});
-			expect(browserStorage()).toBeNull();
-		} finally {
-			if (d) Object.defineProperty(globalThis, 'localStorage', d);
-		}
-	});
 });
 
 describe('memory fallback (E26)', () => {
-	it('(a) null storage keeps the value in memory', () => {
-		expect(writeStoredRsvp(null, SLUG, V)).toBe(false);
-		expect(readStoredRsvp(null, SLUG)).toEqual(V);
+	it('(a) undefined storage keeps the value in memory', () => {
+		expect(writeStoredRsvp(undefined, SLUG, V)).toBe(false);
+		expect(readStoredRsvp(undefined, SLUG)).toEqual(V);
 		expect(readStoredRsvp(localStorage, SLUG)).toEqual(V);
-		clearStoredRsvp(null, SLUG);
-		expect(readStoredRsvp(null, SLUG)).toBeNull();
+		clearStoredRsvp(undefined, SLUG);
+		expect(readStoredRsvp(undefined, SLUG)).toBeNull();
 		expect(readStoredRsvp(localStorage, SLUG)).toBeNull();
 	});
 	it('(b) a throwing setItem falls back to memory', () => {
@@ -118,18 +102,18 @@ describe('memory fallback (E26)', () => {
 		expect(readStoredRsvp(localStorage, SLUG)).toEqual(V);
 	});
 	it('(c) a later successful write clears the memory value', () => {
-		writeStoredRsvp(null, SLUG, V);
+		writeStoredRsvp(undefined, SLUG, V);
 		expect(writeStoredRsvp(localStorage, SLUG, V)).toBe(true);
 		localStorage.removeItem(KEY);
 		expect(readStoredRsvp(localStorage, SLUG)).toBeNull();
 	});
 	it('(d) resetRsvpMemory wipes it', () => {
-		writeStoredRsvp(null, SLUG, V);
+		writeStoredRsvp(undefined, SLUG, V);
 		resetRsvpMemory();
-		expect(readStoredRsvp(null, SLUG)).toBeNull();
+		expect(readStoredRsvp(undefined, SLUG)).toBeNull();
 	});
 	it('(e) is per slug', () => {
-		writeStoredRsvp(null, SLUG, V);
-		expect(readStoredRsvp(null, 'andere-slug-1234')).toBeNull();
+		writeStoredRsvp(undefined, SLUG, V);
+		expect(readStoredRsvp(undefined, 'andere-slug-1234')).toBeNull();
 	});
 });
