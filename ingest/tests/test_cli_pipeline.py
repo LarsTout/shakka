@@ -121,7 +121,7 @@ def test_no_user_ids_or_message_texts_in_output(
     monkeypatch.setattr(om_forecast, "fetch_forecast", fake_forecast_fetch)
     caplog.set_level(logging.DEBUG)
     assert run_hourly_cli(echo=print) == 0
-    alerts = db.rows("ingest_runs")[0]["steps"][-1]
+    alerts = next(s for s in db.rows("ingest_runs")[0]["steps"] if s["name"] == "alerts")
     assert alerts["status"] == "ok" and alerts["counts"]["events"] == 1
     captured = capsys.readouterr()
     out = caplog.text + captured.out + captured.err

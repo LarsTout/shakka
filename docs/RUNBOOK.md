@@ -80,7 +80,7 @@ Laatste run bekijken: `gh run list --workflow ci.yml --limit 1`.
 
 ## 8. Database en migraties
 1. Migraties staan in `supabase/migrations/` en worden nooit achteraf gewijzigd. Een wijziging is altijd een nieuw bestand.
-2. Elke nieuwe tabel krijgt in dezelfde migratie `enable row level security`, `revoke all ... from public, anon, authenticated, service_role`, expliciete grants (ook aan `service_role`, anders kan de ingest er niet bij) en policies. De tabel komt ook in `TABLE_KEYS` in `ingest/src/shakka/db.py`; `test_table_keys_match_migrations` bewaakt dat.
+2. Elke nieuwe tabel krijgt in dezelfde migratie `enable row level security`, `revoke all ... from public, anon, authenticated, service_role`, expliciete grants (ook aan `service_role`, anders kan de ingest er niet bij) en policies. Uitzondering: heeft de ingest de tabel niet nodig, dan krijgt `service_role` geen grants. Voorbeeld: `sessions` en `rsvps` (WP-19), waar de ingest alleen de RPC `purge_expired_sessions` uitvoert; zie §16. De tabel komt ook in `TABLE_KEYS` in `ingest/src/shakka/db.py`; `test_table_keys_match_migrations` bewaakt dat.
 3. Naar het remote project, na de merge naar `develop` (Lars):
    - `supabase link --project-ref <ref>` (eenmalig);
    - `supabase db push --dry-run` om te zien welke migraties meegaan;
@@ -88,6 +88,7 @@ Laatste run bekijken: `gh run list --workflow ci.yml --limit 1`.
    - `supabase migration list --linked`: alle migraties staan als toegepast.
 4. Laat "Max rows" van de Data API op 1000. `SupabaseRest` vraagt pagina's van 1000; bij een lagere waarde blijft het resultaat compleet, maar kost het meer requests.
 5. `auto_expose_new_tables = false` in `config.toml` spiegelt de instelling van het remote project. Weigert een nieuwere CLI die sleutel, haal de regel dan weg. De migraties werken ook zonder, omdat ze zelf revoken en granten.
+6. Elke nieuwe functie in `public` krijgt `revoke all on function … from public, anon, authenticated, service_role` en daarna een expliciete `grant execute` aan precies de rollen die hem nodig hebben. `security definer` alleen met `set search_path = ''` en volledig gekwalificeerde namen. `supabase/tests/07_sessions.test.sql` legt per rol vast welke functies uitvoerbaar zijn; pas die test aan bij een nieuwe RPC.
 
 ## 9. Forecast-ingest (vanaf WP-03)
 Elk uur haalt de ingest per spot met coördinaten de windverwachting op bij Open-Meteo (server-side, nooit vanuit de browser) en bewaart die in `forecast_hours`. Rijen ouder dan 48 uur worden opgeruimd. Ontwerp: `docs/wp/WP-03/blueprint.md`.
@@ -171,7 +172,7 @@ In M1 worden er nog geen meldingen verstuurd. De alertjob berekent per favoriet 
 10. **Oude `TELEGRAM_*`-variabelen.** Die mag je uit je lokale `.env` halen. Ze worden genegeerd en zijn niet meer nodig.
 
 ## 13. Uurlijkse run (vanaf WP-11)
-1. **Wat draait er.** Elk uur om :17 UTC (geen garantie: GitHub kan vertragen of een run overslaan) draait `shakka run-hourly`: `spots_sync`, `forecast`, `marine`, `tides`, `evaluate`, `alerts`, met foutisolatie per stap. De schedule draait de code van `main`, met het workflowbestand van `develop` (de default branch). Alleen als de variable `HOURLY_ENABLED` op `true` staat. Er draait één run tegelijk.
+1. **Wat draait er.** Elk uur om :17 UTC (geen garantie: GitHub kan vertragen of een run overslaan) draait `shakka run-hourly`: `spots_sync`, `forecast`, `marine`, `tides`, `evaluate`, `alerts`, `sessions_cleanup`, met foutisolatie per stap. De schedule draait de code van `main`, met het workflowbestand van `develop` (de default branch). Alleen als de variable `HOURLY_ENABLED` op `true` staat. Er draait één run tegelijk.
 2. **Eenmalige setup.**
    - Repo Settings, Secrets and variables, Actions: secrets `SUPABASE_URL` en `SUPABASE_SECRET_KEY`; vanaf WP-17 ook `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` en `VAPID_SUBJECT` (zonder deze secrets geen pushmeldingen, zie §14); de variable `APP_BASE_URL` op de productie-URL zonder pad of slash aan het eind (bijv. `https://<project>.pages.dev`), vanaf WP-14. Daarmee bevat elk alertbericht een werkende "ik ga"-link (`/go`).
    - Settings, Actions, General: Actions aan.
@@ -235,3 +236,12 @@ Laatste activiteitscommit: 2026-10-15
 
    Pas daarna `CAPTURE_URL` en `CAPTURE_DATE` in `ingest/tests/test_openmeteo_marine.py` en de opnamedatum in `ingest/tests/fixtures/openmeteo/README.md` aan. Verandert de dekking (bijvoorbeeld ECMWF krijgt IJsselmeer-data), dan faalt `test_fixture_lake_uses_ewam_only`; pas die test dan aan.
 8. **Na de merge.** `supabase db push` (§8): de migratie `20261015180000_marine_hours.sql` maakt `marine_hours`.
+
+## 16. Sessies en RSVP (vanaf WP-19)
+1. De bewaartermijn is 7 dagen na het einde van een sessie (`ends_at`). De uurlijkse stap `sessions_cleanup` verwijdert oudere sessies met hun RSVP's. In `ingest_runs.steps` staat `counts.deleted`. De termijn staat op twee plekken: `interval '7 days'` in `purge_expired_sessions` en `SESSION_RETENTION` in `shakka.jobs.sessions`; `test_session_retention_matches_migration` bewaakt dat ze gelijk blijven.
+2. Na de merge: `supabase db push` (§8.3), en wel vóór de promotie naar `main`, want de schedule draait de code van `main` (§13.1) en de stap `sessions_cleanup` faalt zolang de RPC ontbreekt (`PGRST202`, elk uur een `::error::`-annotatie, geen mail). Controleer eerst in de SQL-editor dat pgcrypto in het schema `extensions` staat: `select extnamespace::regnamespace from pg_extension where extname = 'pgcrypto';` moet `extensions` geven. De migratie zelf stopt met een fout als dat niet zo is; push dan niet verder en meld het, want `rsvp_create` gebruikt `extensions.gen_random_bytes`.
+3. Geeft een RPC direct na de push `PGRST202` (functie niet gevonden), voer dan in de SQL-editor `notify pgrst, 'reload schema';` uit.
+4. Limieten: hoogstens 30 RSVP's per sessie, hoogstens 10 nieuwe RSVP's per sessie per 10 minuten, hoogstens 10 nieuwe sessies per organisator per 24 uur. Er wordt geen IP-adres opgeslagen.
+5. Een sessie handmatig verwijderen (bijv. bij misbruik): in de SQL-editor `delete from public.sessions where slug = '<slug>';`. De RSVP's gaan mee. Eén RSVP verwijderen: `delete from public.rsvps where id = '<id>';`.
+6. Geen enkele API-rol mag `rsvps` direct lezen, ook de ingest niet. Ook `sessions` is niet leesbaar voor `service_role` (bewust, zie §8.2). Kijken kan alleen via de SQL-editor (rol `postgres`).
+7. De edit-token van een RSVP gaat alleen in de body van een POST-verzoek (de standaard van supabase-js voor `rpc()`), nooit in een URL, querystring of link: URL's komen in logs van de gateway terecht. In de database staat alleen de sha256-hash. Log de token ook nergens anders.

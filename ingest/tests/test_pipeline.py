@@ -26,7 +26,7 @@ from pipeline_fixtures import (
 )
 from push_fixtures import DOWN, KEYS, SUBJECT, FakeNotifier, seed_subs
 from shakka.config import Settings
-from shakka.db import DatabaseError
+from shakka.db import DatabaseError, iso_utc
 from shakka.pipeline import (
     ABANDONED_SUMMARY,
     MAX_ANNOTATIONS,
@@ -303,7 +303,7 @@ def step(report: RunReport, name: str) -> StepReport:
 
 def test_steps_contract_order():
     assert [n for n, _ in pipeline.STEPS] == [
-        "spots_sync", "forecast", "marine", "tides", "evaluate", "alerts",
+        "spots_sync", "forecast", "marine", "tides", "evaluate", "alerts", "sessions_cleanup",
     ]  # fmt: skip
     assert [n for n, _ in pipeline.STEPS] == list(pipeline.STEP_NAMES)
 
@@ -322,8 +322,51 @@ def test_all_steps_ok_records_run(tmp_path):
     first_insert = next(i for i, (kind, _) in enumerate(db.writes) if kind == "insert")
     assert db.writes[first_insert] == ("insert", "ingest_runs")
     assert db.writes[:first_insert] == [("update", "ingest_runs")]
-    alerts = row["steps"][-1]
+    alerts = next(s for s in row["steps"] if s["name"] == "alerts")
     assert alerts["counts"]["events"] == 1 and alerts["counts"]["new"] == 1
+    last = row["steps"][-1]
+    assert last["name"] == "sessions_cleanup" and last["status"] == "ok"
+    assert last["counts"] == {"deleted": 0}
+
+
+def test_sessions_cleanup_deletes_expired(tmp_path):
+    db = FakeSupabase()
+    seed_user(db)
+    db.seed("sessions", [{"id": "s-old", "ends_at": iso_utc(NOW - timedelta(days=8))}])
+    db.seed("rsvps", [{"id": "r-old", "session_id": "s-old"}])
+    report = run_real(tmp_path, db)
+    cleanup = step(report, "sessions_cleanup")
+    assert cleanup.status == "ok" and cleanup.counts == {"deleted": 1}
+    assert db.rows("sessions") == [] and db.rows("rsvps") == []
+    assert ("purge_expired_sessions", {"p_now": iso_utc(NOW)}) in db.rpc_calls
+
+
+def _boom(args):
+    raise DatabaseError("boom", status=503)
+
+
+def test_sessions_cleanup_failure_is_partial(tmp_path):
+    db = FakeSupabase()
+    seed_user(db)
+    db.register_rpc("purge_expired_sessions", _boom)
+    report = run_real(tmp_path, db)
+    cleanup = step(report, "sessions_cleanup")
+    assert cleanup.status == "failed" and (cleanup.error_type or "").startswith("DatabaseError")
+    assert all(s.status == "ok" for s in report.steps if s.name != "sessions_cleanup")
+    assert report.status == "partial" and report.exit_code == 0
+    assert db.rows("ingest_runs")[0]["status"] == "partial"
+    prefix = "::error::step sessions_cleanup failed (DatabaseError"
+    assert any(a.startswith(prefix) for a in report.annotations)
+
+
+def test_sessions_cleanup_value_error_is_failed(tmp_path):
+    db = FakeSupabase()
+    seed_user(db)
+    db.register_rpc("purge_expired_sessions", lambda args: None)
+    report = run_real(tmp_path, db)
+    cleanup = step(report, "sessions_cleanup")
+    assert cleanup.status == "failed" and cleanup.error_type == "ValueError"
+    assert report.status == "partial"
 
 
 def _stale_db(hours: float) -> FakeSupabase:
@@ -516,7 +559,8 @@ def test_spots_sync_failure_continues(tmp_path):
     report = run_real(tmp_path, db, settings=settings)
     sync = step(report, "spots_sync")
     assert sync.status == "failed" and sync.error_type == "SpotValidationError"
-    assert [s.status for s in report.steps[1:]] == ["ok"] * 5
+    assert len(report.steps) == 7
+    assert all(s.status == "ok" for s in report.steps[1:])
     assert report.status == "partial" and report.exit_code == 0
 
 

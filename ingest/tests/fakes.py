@@ -32,6 +32,7 @@ from shakka.db import (
     to_json,
     validate_table,
 )
+from shakka.jobs.sessions import PURGE_RPC, SESSION_RETENTION
 
 _TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T")
 _UPDATED_AT_TABLES = frozenset({"spots", "profiles", "alert_rules", "alert_state"})
@@ -348,6 +349,11 @@ class FakeSupabase:
                 self._tables[child] = [
                     row for row in self._tables[child] if row.get("spot_id") not in spot_ids
                 ]
+        elif table == "sessions":
+            session_ids = {row["id"] for row in matched}
+            self._tables["rsvps"] = [
+                row for row in self._tables["rsvps"] if row.get("session_id") not in session_ids
+            ]
         elif table == "favorites":
             gone = {(row["user_id"], row["spot_id"]) for row in matched}
             self._tables["alert_rules"] = [
@@ -361,12 +367,28 @@ class FakeSupabase:
         validate_table(function)
         payload = json.loads(to_json(dict(args or {})))
         self.rpc_calls.append((function, payload))
-        handler = self._rpcs.get(function)
+        handler = self._rpcs.get(function) or self._builtin_rpcs().get(function)
         if handler is None:
             raise DatabaseError(
                 f"Could not find the function {function}", status=404, code="PGRST202"
             )
         return handler(payload)
+
+    def _builtin_rpcs(self) -> dict[str, Callable[[dict[str, Any]], Any]]:
+        return {PURGE_RPC: self._purge_expired_sessions}
+
+    def _purge_expired_sessions(self, args: dict[str, Any]) -> int:
+        """Same rule as the SQL function: ends_at < p_now - 7 days, RSVPs go with the session."""
+        p_now = args.get("p_now")
+        if p_now is None:
+            raise DatabaseError("invalid_input", status=400, code="PT400")
+        cutoff = _parse_ts(p_now) - SESSION_RETENTION
+        gone = {row["id"] for row in self._tables["sessions"] if _parse_ts(row["ends_at"]) < cutoff}
+        self._tables["sessions"] = [r for r in self._tables["sessions"] if r["id"] not in gone]
+        self._tables["rsvps"] = [
+            r for r in self._tables["rsvps"] if r.get("session_id") not in gone
+        ]
+        return len(gone)
 
     def close(self) -> None:
         return None

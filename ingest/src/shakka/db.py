@@ -37,6 +37,8 @@ TABLE_KEYS: Final[Mapping[str, tuple[str, ...]]] = {
     "alert_rules": ("user_id", "spot_id"),
     "alert_state": ("id",),
     "push_subscriptions": ("id",),
+    "sessions": ("id",),
+    "rsvps": ("id",),
     "api_usage": ("day", "source"),
     "ingest_runs": ("id",),
 }

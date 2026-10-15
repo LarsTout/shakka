@@ -4,7 +4,7 @@ create extension if not exists pgtap with schema extensions;
 
 select plan(71);
 
-select tables_are('public'::name, array['spots', 'forecast_hours', 'marine_hours', 'tide_extremes', 'evaluations', 'profiles', 'favorites', 'alert_rules', 'alert_state', 'api_usage', 'ingest_runs', 'push_subscriptions']::name[], 'public has exactly the expected tables');
+select tables_are('public'::name, array['spots', 'forecast_hours', 'marine_hours', 'tide_extremes', 'evaluations', 'profiles', 'favorites', 'alert_rules', 'alert_state', 'api_usage', 'ingest_runs', 'push_subscriptions', 'sessions', 'rsvps']::name[], 'public has exactly the expected tables');
 
 select columns_are('public'::name, 'spots'::name, array['id', 'name', 'region', 'lat', 'lon', 'shore_normal_deg', 'ridable_dirs', 'hazards', 'tide_sensitive', 'tide_min_level_cm', 'rws_station', 'season', 'status', 'level', 'default_min_kn', 'notes', 'verified', 'updated_at']::name[], 'spots columns');
 select columns_are('public'::name, 'forecast_hours'::name, array['spot_id', 'model', 'valid_at', 'wind_kn', 'gust_kn', 'dir_deg', 'fetched_at']::name[], 'forecast_hours columns');
@@ -123,7 +123,31 @@ select set_eq(
     ('push_subscriptions', 'p256dh', 'text', false),
     ('push_subscriptions', 'auth', 'text', false),
     ('push_subscriptions', 'created_at', 'timestamp with time zone', false),
-    ('push_subscriptions', 'last_success_at', 'timestamp with time zone', true)
+    ('push_subscriptions', 'last_success_at', 'timestamp with time zone', true),
+    ('sessions', 'id', 'uuid', false),
+    ('sessions', 'slug', 'text', false),
+    ('sessions', 'spot_id', 'text', false),
+    ('sessions', 'organizer_id', 'uuid', false),
+    ('sessions', 'organizer_name', 'text', false),
+    ('sessions', 'starts_at', 'timestamp with time zone', false),
+    ('sessions', 'ends_at', 'timestamp with time zone', false),
+    ('sessions', 'note', 'text', true),
+    ('sessions', 'seats_free', 'smallint', true),
+    ('sessions', 'departure_point', 'text', true),
+    ('sessions', 'tikkie_url', 'text', true),
+    ('sessions', 'cancelled_at', 'timestamp with time zone', true),
+    ('sessions', 'recent_rsvp_creates', 'timestamp with time zone[]', false),
+    ('sessions', 'created_at', 'timestamp with time zone', false),
+    ('sessions', 'updated_at', 'timestamp with time zone', false),
+    ('rsvps', 'id', 'uuid', false),
+    ('rsvps', 'session_id', 'uuid', false),
+    ('rsvps', 'first_name', 'text', false),
+    ('rsvps', 'ride', 'text', false),
+    ('rsvps', 'seats_offered', 'smallint', true),
+    ('rsvps', 'rides_with', 'uuid', true),
+    ('rsvps', 'edit_token_hash', 'text', false),
+    ('rsvps', 'created_at', 'timestamp with time zone', false),
+    ('rsvps', 'updated_at', 'timestamp with time zone', false)
   $q$,
   'column types and nullability');
 
@@ -147,9 +171,11 @@ select set_eq(
     ('favorites', 'auth.users', 'c'), ('favorites', 'spots', 'c'),
     ('alert_rules', 'favorites', 'c'),
     ('alert_state', 'auth.users', 'c'), ('alert_state', 'spots', 'c'),
-    ('push_subscriptions', 'auth.users', 'c')
+    ('push_subscriptions', 'auth.users', 'c'),
+    ('sessions', 'spots', 'r'), ('sessions', 'auth.users', 'c'),
+    ('rsvps', 'sessions', 'c'), ('rsvps', 'rsvps', 'n')
   $q$,
-  'foreign keys cascade on delete');
+  'foreign keys and delete actions');
 
 select is_empty(
   $q$select c.relname from pg_class c join pg_namespace n on n.oid = c.relnamespace
