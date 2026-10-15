@@ -24,7 +24,7 @@ Opdeling: goedgekeurd.
 | WP-17 | Web Push: backend (enige meldingskanaal) | done | supabase db push (push_subscriptions) door Lars; echte test-push na WP-18 |
 | WP-18 | Web Push: PWA | done | AC-5 open: echte push-test op iPhone/Android, meten 50/150 (RUNBOOK §14.12-15) |
 | WP-19 | Sessies: datamodel, RLS en RPC's | done | bewaartermijn 7 dagen bevestigen (A1) |
-| WP-20 | Sessie aanmaken en delen | todo | |
+| WP-20 | Sessie aanmaken en delen | blueprint | |
 | WP-21 | Publieke sessiepagina en RSVP zonder account | todo | |
 | WP-22 | Hardening backend en kostenbewaking | todo | |
 | WP-23 | Privacy, toegankelijkheid en performance | todo | |
