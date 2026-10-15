@@ -13,6 +13,7 @@ vi.mock('#lib/supabase.js', () => {
 });
 
 vi.mock('#lib/favorites.js', async () => (await import('./helpers/fake-favorites.js')).favoritesModule);
+vi.mock('$app/env/public', () => ({ PUBLIC_MAPTILER_KEY: '' }));
 
 import Page from '../src/routes/+page.svelte';
 import { summarizeSpots } from '../src/lib/view.js';

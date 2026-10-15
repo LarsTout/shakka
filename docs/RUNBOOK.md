@@ -52,6 +52,7 @@ Wat `uv run shakka doctor` meldt:
 | `HOURLY_ENABLED` | GitHub Actions variable | workflow hourly.yml: schedule aan (true) of uit | WP-11 |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | `.env`, GitHub Secrets | ingest | WP-17 |
 | `PUBLIC_SUPABASE_URL`, `PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `web/.env`, Cloudflare Pages | web | WP-13 |
+| `PUBLIC_MAPTILER_KEY` | `web/.env` (lokale key), Cloudflare Pages (productiekey) | web: kaart (optioneel, publiek) | WP-15 |
 | `NODE_VERSION` | Cloudflare Pages | build | WP-13 |
 
 De Supabase access token en het database-wachtwoord blijven bij Lars en komen nergens in de repo. De `PUBLIC_*`-variabelen voor de web-app staan in `web/.env.example`. Gebruik daar nooit de secret key; de build weigert een sleutel die met `sb_secret_` begint.
@@ -141,6 +142,15 @@ Pas daarna `CAPTURE_URL` en `CAPTURE_DATE` in `ingest/tests/test_openmeteo_forec
 6. **App-icoon vervangen.** Vervang de PNG's in `web/static/icons/` door bestanden met dezelfde naam en afmeting. `npm run icons` maakt de placeholders opnieuw.
 7. **Spotlijst, spotpagina en `/go` (vanaf WP-14).** De app leest alleen `spots`, `evaluations`, `tide_extremes` en (vanaf WP-12) `marine_hours`. Het oordeel gebruikt de standaardgrenzen van de spot, niet de persoonlijke instellingen. "Ouder dan 3 uur" kijkt naar `evaluated_at`; die is ook vers als alleen de forecast-ingest faalt, dus controleer bij twijfel `ingest_runs` (§13.5). Donkere uren (reden `dark`) zijn op de spotpagina standaard verborgen. `/go?spot=...&start=...&end=...` stuurt in M2 door naar `/spot/<spot>`; ongeldige parameters gaan naar `/`. De app pagineert per 1000 rijen; zet de Supabase-instelling "Max rows" (API settings) niet lager dan 1000.
 8. **Profiel, favorieten en alerts in de app (vanaf WP-16).** Ingelogd zie je een ster bij elke spot (favoriet) en de pagina's Profiel en Alerts. Ze schrijven naar dezelfde tabellen als `shakka admin` (§12). Een favoriet zonder eigen instellingen gebruikt de standaard; "Standaardinstellingen" verwijdert de eigen regel. Een spot uit de favorieten halen verwijdert ook de regel. Ontbreekt een profiel ("Je profiel is niet gevonden"), voer dan in de SQL Editor de backfill uit de migratie uit: `insert into public.profiles (user_id) select id from auth.users on conflict (user_id) do nothing;`. Controle (WP-16 AC-7): zie §12 punt 6 (`admin alerts preview`).
+9. **Kaart (vanaf WP-15).**
+   - Maak een gratis MapTiler Cloud-account. Maak onder Account, API keys **twee** keys: één voor productie en één voor lokaal.
+   - **Productiekey:** onder "Allowed HTTP origins" alleen `<project>.pages.dev` en `*.<project>.pages.dev` (previews), één per regel. **Nooit `localhost` of `127.0.0.1` op deze key.** De key staat publiek in de app, en volgens MapTiler matcht localhost elke machine, dus iedereen zou dan je quotum kunnen opmaken.
+   - **Lokale key (optioneel):** onder "Allowed HTTP origins" `localhost` en `127.0.0.1` (zonder poort en protocol). Zet hem alleen in `web/.env`, nooit in Cloudflare Pages en nooit in de repo. Zonder lokale key werkt de lijst gewoon.
+   - Alle keys delen het quotum van het account.
+   - Zet `PUBLIC_MAPTILER_KEY` = de productiekey in Cloudflare Pages (Production en Preview). Het is een publieke key, geen secret. De waarde komt bij de build in de app, dus na een wijziging is een nieuwe deploy nodig.
+   - Zonder key werkt de app gewoon, en geeft "Kaart" een melding. De kaart laadt alleen na een klik op "Kaart".
+   - MapTiler rekent bij MapLibre in API-requests: 100.000 per maand gratis, en alleen tiles tellen. Bij overschrijding is het gepauzeerd tot de volgende maand (geen kosten; de app valt terug op de lijst). Het verbruik staat in MapTiler Cloud, Analytics.
+   - **Key vervangen** (bijvoorbeeld bij misbruik): maak een nieuwe productiekey met dezelfde origins, zet hem in Cloudflare Pages, deploy opnieuw en verwijder daarna de oude key in MapTiler Cloud.
 
 ## 12. Alerts in M1 (vanaf WP-10)
 Vanaf WP-16 kan dit ook in de app (Profiel, Alerts, ster bij een spot); de CLI blijft werken.
