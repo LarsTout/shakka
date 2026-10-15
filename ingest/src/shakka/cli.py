@@ -146,7 +146,7 @@ def contracts() -> None:
 @contracts.command("export")
 @click.option("--check", is_flag=True, help="Only check that the files are up to date.")
 def contracts_export(check: bool) -> None:
-    """Write reason codes, direction classes and confidence labels as JSON."""
+    """Write reason codes, direction classes, confidence labels and alert defaults as JSON."""
     from shakka.contracts import run_contracts_export
 
     raise SystemExit(run_contracts_export(check=check, echo=click.echo))
