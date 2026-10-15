@@ -111,4 +111,3 @@ def test_invalid_spot_reported(caplog):
 def test_naive_now():
     with pytest.raises(ValueError):
         run_evaluation(FakeSupabase(), now=datetime(2026, 7, 15, 6, 17))  # noqa: DTZ001
-
