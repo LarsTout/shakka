@@ -1,6 +1,7 @@
 import adapter from '@sveltejs/adapter-static';
 import { sveltekit } from '@sveltejs/kit/vite';
 import { svelteTesting } from '@testing-library/svelte/vite';
+import { searchForWorkspaceRoot } from 'vite';
 import { defineConfig } from 'vitest/config';
 
 // Placeholders so tests never need web/.env. Tests mock #lib/supabase.js; nothing talks to this URL.
@@ -35,6 +36,12 @@ export default defineConfig(({ mode }) => {
 			}),
 			svelteTesting()
 		],
+		server: {
+			fs: {
+				// contracts.ts imports ../data/contracts/*.json (outside web/); keep Vite's default root allowed.
+				allow: [searchForWorkspaceRoot(process.cwd()), '../data/contracts']
+			}
+		},
 		test: {
 			environment: 'jsdom',
 			include: ['test/**/*.test.ts'],
