@@ -1,5 +1,5 @@
 # Blueprint WP-18: Web Push: PWA
-Status: DRAFT
+Status: APPROVED
 Revisie: 2
 
 ## Verwerking review
