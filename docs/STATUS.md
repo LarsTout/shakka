@@ -14,7 +14,7 @@ Opdeling: goedgekeurd.
 | WP-07 | Alertregels en windows (puur) | done | defaults min_go_hours=2, days_ahead=3 toetsen in M1-testweek |
 | WP-08 | Alert-deduplicatie en berichtopbouw (puur) | done | drempels 2 uur / 4 kn toetsen in M1-testweek |
 | WP-09 | Telegram-kanaal | dropped | Telegram vervallen, zie WP-17 (besluit Lars, 15 oktober 2026) |
-| WP-10 | Evaluatie- en alertjobs plus beheer-CLI | building | |
+| WP-10 | Evaluatie- en alertjobs plus beheer-CLI | verifying | |
 | WP-11 | Orkestratie: uurlijkse workflow, logging, foutmeldingen | todo | |
 | WP-12 | Marine-ingest (golven) en golven op de spotpagina | todo | weergave verhuisd uit WP-14 (A-17) |
 | WP-13 | PWA-basis | done | AC-7 open: Cloudflare Pages + Supabase Auth-URLs door Lars (RUNBOOK §11) |
