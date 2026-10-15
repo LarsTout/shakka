@@ -1,6 +1,6 @@
 # Blueprint WP-05: Evaluatie-engine (puur)
 Status: DRAFT
-Revisie: 1
+Revisie: 2
 
 ## Doel
 Een deterministische, pure engine die per spot per uur een oordeel geeft (`go`, `marginal` of `no_go`) met alle redenen, volgens sectie 4 van het plan. Offshore en side-offshore zijn altijd `no_go`; geen enkele parameter kan dat uitzetten.
@@ -18,7 +18,9 @@ Deze WP levert:
 Er gaat niets naar de database (WP-10) en er zijn geen alertregels (WP-07).
 
 ## Aannames
-- **A1. Drempelwaarden zijn een voorstel.** Alle waarden staan in de sectie "Drempelwaarden" met onderbouwing en zijn constanten in `shakka.domain.defaults`. Lars toetst ze in de M1-testweek. Een andere waarde is één regel in `defaults.py` plus de tests die precies op de grens liggen. Geen andere code verandert.
+- **A1. Drempelwaarden zijn een voorstel, met één uitzondering.** Alle waarden staan in de sectie "Drempelwaarden" met onderbouwing en zijn constanten in `shakka.domain.defaults`. Lars toetst ze in de M1-testweek. Een andere waarde is één regel in `defaults.py` plus de tests die precies op de grens liggen. Geen andere code verandert. De uitzondering is `SIDESHORE_MAX_DEG` (A14): die is geen voorstel en geen testweekparameter.
+- **A14. `SIDESHORE_MAX_DEG = 90` volgt uit de harde regel en is niet configureerbaar.** CLAUDE.md en PROJECT_PLAN §4: "offshore en side-offshore zijn altijd `no_go`, niet configureerbaar". De aanlandige component van de wind is `cos(d)`, met `d` de hoekafwijking tot `shore_normal_deg`. Bij `d = 90` is die precies 0 (wind exact evenwijdig aan de kust). Bij elke `d > 90` komt een deel van de wind van het land, en dat is per definitie (schuin) aflandig. De grens is dus 90, bovengrens inclusief: `d <= 90` kan `sideshore` zijn, `d > 90` is altijd `side_offshore` of `offshore`. Er is geen parameter, profielveld of regel die dit verandert. Een test pint de waarde vast (`test_sideshore_bound_is_hard_rule`). Besluit van de orchestrator in reviewronde 1 (B-1).
+- **A15. De klasse wordt bepaald op de onafgeronde consensusrichting (besluit van de orchestrator).** `classify_direction` en de `ridable_dirs`-controle krijgen `Consensus.dir_mean_deg`: het circulaire gemiddelde als float, alleen afgerond op `DIR_MEAN_DECIMALS` (6) decimalen om floatruis uit de sinus/cosinus-rekensom te halen (zie Ontwerp, Consensus). Een gemiddelde van 90,4° vanaf de normaal is dus `side_offshore` en `no_go`; afronden mag een aflandig uur nooit rijdbaar maken. Precies 90,0° blijft `sideshore`. De klasse is leidend; de opgeslagen `dir_deg` (hele graden, `int(round(dir_mean_deg)) % 360`) is informatief. Daardoor kan de opgeslagen klasse op de exacte grens afwijken van wat je uit de afgeronde `dir_deg` zou afleiden, bijv. `dir_deg = 90` bij normaal 0 met `dir_class = side_offshore`. Dat is bewust: de afwijking valt altijd naar de veilige kant, omdat de klasse op de nauwkeurigere waarde berust. Het contract van de model-validator (offshore-klasse ⇔ reden, offshore-klasse ⇒ `no_go`) blijft onverminderd gelden; er is geen invariant tussen `dir_deg` en `dir_class`. Latere WP's leiden de klasse nooit opnieuw af uit `dir_deg` (zie "Gevolgen voor latere WP's"). Onenigheid tussen modellen over de richting vangt de betrouwbaarheid op (`dir_spread_deg`), zie ook open punt O1.
 - **A2. Vlaag ontbreekt = onbekend (bevestigd door Lars, 15-10-2026).** Een `gust_kn = None` wordt nooit als 0 gebruikt. De consensusvlaag is de mediaan van de modellen die wél een vlaag hebben. Hebben alle modellen `None`, dan is `Consensus.gust_kn = None`. Dan wordt de vlagerigheid niet beoordeeld (geen `gusty` of `too_gusty`), en de betrouwbaarheid kan dan hooguit `medium` zijn (zie Ontwerp). `HourEvaluation.gust_kn` blijft `None`.
 - **A3. Tijdsemantiek van WP-03 is bindend.** Een `ForecastHour` met `valid_at = T` beschrijft het uur [T, T+1h). `wind_kn` en `dir_deg` gelden op T, `gust_kn` is het maximum binnen [T, T+1h). De evaluatie vergelijkt `gust_kn` en `wind_kn` zonder iets te verschuiven.
 - **A4. Getijvoorkeur op het geschatte niveau (bevestigd door Lars, 15-10-2026).** De voorkeur wordt bepaald met `estimate_tide_level` en een relatieve positie tussen het dichtstbijzijnde laagwater en het dichtstbijzijnde hoogwater. Er is geen aanname dat hoog en laag strikt afwisselen; een dubbel laagwater (agger, twee keer `low` achter elkaar) werkt correct (zie Ontwerp, Getij).
@@ -29,8 +31,10 @@ Er gaat niets naar de database (WP-10) en er zijn geen alertregels (WP-07).
 - **A9. `tide_min_level_cm` geldt bij elke getijgevoeligheid.** WP-02 staat het veld toe bij `prefer_low`, `prefer_high` en `avoid_low`. Een geschatte stand onder het minimum geeft dus altijd `tide_too_low`, ongeacht de variant.
 - **A10. Additieve uitbreidingen van het contract.** Bestaande signatures uit WORK_PACKAGES blijven exact zo. Erbij komen:
   - `Consensus.speed_spread_kn` en `Consensus.dir_spread_deg` (met default `None`), zodat de betrouwbaarheid uitlegbaar en testbaar is;
+  - `Consensus.dir_mean_deg` (met default `None`): de onafgeronde consensusrichting waarop de klasse wordt bepaald (A15);
   - `circular_mean_deg`, `angular_distance`, `sun_times`, de module `shakka.domain.season`, `relative_tide_position`, `worst_verdict`, `VERDICT_SEVERITY`, `REASON_LABEL_NL`, `DIR_CLASS_LABEL_NL`, `CONFIDENCE_LABEL_NL`, `COMPASS_POINTS_NL`;
-  - `HourEvaluation.to_row(*, evaluated_at)` (pure mapping naar de kolommen van `evaluations`, voor WP-10).
+  - `HourEvaluation.to_row(*, evaluated_at)` (pure mapping naar de kolommen van `evaluations`, voor WP-10);
+  - `HourEvaluation.model_copy` overschreven, zodat een kopie opnieuw gevalideerd wordt (zie Ontwerp, Invarianten).
 - **A11. Eén nieuwe dependency: `astral>=3.2,<4`.** Het plan noemt astral al in de stack, en de puurheidstest staat het al toe.
 - **A12. Geen extra testdependencies.** Eigenschapstests zijn deterministische rasters in pytest, geen `hypothesis`.
 - **A13. Testcoördinaten 52,47 N / 4,57 O zijn testdata**, geen spotdata (zelfde punt als WP-03 A11). Ze komen niet in `data/spots.yaml`.
@@ -59,9 +63,11 @@ defaults  (geen domeinimports)
 |---|---|
 | 0 t/m 22,5 | `onshore` |
 | > 22,5 t/m 67,5 | `side_onshore` |
-| > 67,5 t/m 100 | `sideshore` |
-| > 100 t/m 157,5 | `side_offshore` |
+| > 67,5 t/m 90 | `sideshore` |
+| > 90 t/m 157,5 | `side_offshore` |
 | > 157,5 t/m 180 | `offshore` |
+
+De grens 90 is de harde regel (A14): `cos(d)` is de aanlandige component, en die is negatief (aflandig) voor elke `d > 90`. Met `shore_normal_deg = 270` zijn 180 en 0 dus precies `sideshore` (`d = 90`), en 179 en 1 zijn `side_offshore` (`d = 91`).
 
 Omdat de klasse alleen van `d` afhangt, is ze per constructie symmetrisch (+x en -x geven dezelfde `d`) en monotoon in `d`. Rond 0/360 gaat het goed: `angular_distance(350, 10) = 20`.
 
@@ -77,17 +83,18 @@ Omdat de klasse alleen van `d` afhangt, is ze per constructie symmetrisch (+x en
 - `None` als `hours` leeg is, of als geen enkel model een `wind_kn`, `gust_kn` of `dir_deg` heeft.
 - `wind_kn` = `round(statistics.median(winds), 1)` over de modellen met `wind_kn is not None`. Bij 4 modellen is dat het gemiddelde van de middelste twee: robuust tegen één uitschieter (vaak GFS).
 - `gust_kn` = `round(median(gusts), 1)` over de modellen met een vlaag (A2).
-- `dir_deg` = circulair gemiddelde (eenheidsvectoren, ongewogen) van de beschikbare richtingen, `int(round(mean)) % 360`. Is de lengte van de gemiddelde vector kleiner dan `DIR_MIN_RESULTANT` (bijv. 0 en 180), dan is de richting niet te bepalen en wordt `dir_deg = None`.
+- `dir_mean_deg` = circulair gemiddelde (eenheidsvectoren, ongewogen) van de beschikbare richtingen, als `round(mean, DIR_MEAN_DECIMALS) % 360` (een float in [0, 360)). `circular_mean_deg` past die afronding zelf toe, dus `circular_mean_deg([180, 180]) == 180.0` exact, en 359,9999999 wordt 0,0. Zonder die afronding kan vier keer 180 door floatruis 180,00000000000003 opleveren, en dan zou wind exact evenwijdig aan de kust `side_offshore` worden. Is de lengte van de gemiddelde vector kleiner dan `DIR_MIN_RESULTANT` (bijv. 0 en 180), dan is de richting niet te bepalen en worden `dir_mean_deg` en `dir_deg` `None`.
+- `dir_deg` = `int(round(dir_mean_deg)) % 360` (hele graden, voor opslag en weergave). Informatief; de klasse volgt uit `dir_mean_deg` (A15).
 - `speed_spread_kn` = `round(max(winds) - min(winds), 1)`, of `None` zonder windsnelheid. Afronden vóór de vergelijking voorkomt floatfouten (12,3 − 8,3 = 4,000000000000002).
-- `dir_spread_deg` = `round(max(angular_distance(d, mean)), 1)` over de beschikbare richtingen, met het onafgeronde gemiddelde. `None` als `dir_deg` `None` is.
+- `dir_spread_deg` = `round(max(angular_distance(d, mean)), 1)` over de beschikbare richtingen, met `mean = dir_mean_deg`. `None` als `dir_deg` `None` is.
 - `models_used`: de modellen met minstens één waarde die niet `None` is, in de volgorde van `ModelKey` (`knmi`, `icon`, `ecmwf`, `gfs`).
 
 **Betrouwbaarheid** (eerste regel die past):
 1. `n_wind` (aantal modellen met `wind_kn`) ≤ 1 → `low`. **Eén model is dus altijd `low`**: zonder tweede model is er geen spreiding te meten. In de praktijk komt dit alleen bij een datafout voor; ICON, ECMWF en GFS dekken alle 7 dagen.
 2. `dir_deg is None` → `low`.
 3. `speed_spread_kn > CONFIDENCE_LOW_SPEED_SPREAD_KN` of `dir_spread_deg > CONFIDENCE_LOW_DIR_SPREAD_DEG` → `low`.
-4. `n_wind >= CONFIDENCE_HIGH_MIN_MODELS` en `speed_spread_kn <= CONFIDENCE_HIGH_SPEED_SPREAD_KN` en `dir_spread_deg <= CONFIDENCE_HIGH_DIR_SPREAD_DEG` en `gust_kn is not None` → `high`.
-5. Anders → `medium`. Twee modellen of een onbekende vlaag geven dus hooguit `medium`.
+4. `n_wind >= CONFIDENCE_HIGH_MIN_MODELS` en `n_dir >= CONFIDENCE_HIGH_MIN_MODELS` en `speed_spread_kn <= CONFIDENCE_HIGH_SPEED_SPREAD_KN` en `dir_spread_deg <= CONFIDENCE_HIGH_DIR_SPREAD_DEG` en `gust_kn is not None` → `high`. Hierbij is `n_dir` het aantal modellen met `dir_deg is not None`.
+5. Anders → `medium`. Twee modellen (met wind of met richting) of een onbekende vlaag geven dus hooguit `medium`.
 
 ### Daglicht
 `sun_times(lat, lon, day)` geeft `(sunrise, sunset)` in UTC via `astral.sun.sunrise` en `astral.sun.sunset` met `Observer(latitude=lat, longitude=lon)`, `date=day` en `tzinfo=UTC`. `date` wordt **altijd** meegegeven, want zonder `date` leest astral de klok ("today"). De functie heeft een `functools.lru_cache(maxsize=4096)`; ze is puur, dus cachen is veilig. `dawn` en `dusk` worden niet gebruikt.
@@ -147,8 +154,8 @@ Regels als `spot.tide_sensitive != none` (`pos = relative_tide_position(ext, sam
    - anders: `delta >= GUST_MIN_DELTA_KN` en `g >= GUSTY_RATIO * w` → `gusty`.
 5. **Richting:**
    - Is `spot.shore_normal_deg` `None`, of `c` `None`, of `c.dir_deg` `None`, dan volgt `direction_unknown` en `dir_class = None`.
-   - Anders `dir_class = classify_direction(c.dir_deg, spot.shore_normal_deg)`. Bij `offshore` volgt `offshore`, bij `side_offshore` volgt `side_offshore`.
-   - Is de klasse rijdbaar, `spot.ridable_dirs` gezet en `not in_ranges(c.dir_deg, spot.ridable_dirs)`, dan volgt `direction_not_ridable`.
+   - Anders `dir_class = classify_direction(c.dir_mean_deg, spot.shore_normal_deg)` (de onafgeronde richting, A15; `dir_mean_deg` is gezet zodra `dir_deg` gezet is). Bij `offshore` volgt `offshore`, bij `side_offshore` volgt `side_offshore`.
+   - Is de klasse rijdbaar, `spot.ridable_dirs` gezet en `not in_ranges(c.dir_mean_deg, spot.ridable_dirs)`, dan volgt `direction_not_ridable`. Ook hier de onafgeronde richting: 340,4 valt buiten `{200, 340}`.
 6. **Daglicht:** `not is_daylight(spot.lat, spot.lon, valid_at)` → `dark`.
 7. **Seizoen:** `is_season_closed(spot.season, valid_at)` → `season_closed`.
 8. **Status:** `forbidden` geeft `spot_forbidden`, `limited` geeft `spot_limited`, `None` geeft `status_unknown`. `allowed` geeft niets.
@@ -159,12 +166,30 @@ De redenen worden ontdubbeld en gesorteerd in de volgorde van `ReasonCode` (de v
 
 `HourEvaluation` vult `wind_kn`, `gust_kn`, `dir_deg` en `confidence` uit `c` (of `None`), `dir_class` uit stap 5 en `tide_level_cm = level`.
 
-**Invarianten in het model.** Een `model_validator` van `HourEvaluation` eist:
-- `reasons` is uniek en gesorteerd volgens `ReasonCode`;
-- `verdict == worst_verdict(reasons)`;
-- `dir_class` in {`offshore`, `side_offshore`} impliceert `verdict == no_go` (spiegel van de DB-CHECK `evaluations_offshore_is_no_go`).
+**Invarianten in het model.** Een `model_validator(mode="after")` van `HourEvaluation` eist, in deze volgorde:
+1. `reasons` is uniek en gesorteerd volgens `ReasonCode`;
+2. `verdict == worst_verdict(reasons)`;
+3. `(dir_class == DirClass.OFFSHORE) == (ReasonCode.OFFSHORE in reasons)`;
+4. `(dir_class == DirClass.SIDE_OFFSHORE) == (ReasonCode.SIDE_OFFSHORE in reasons)`;
+5. `dir_class` in {`offshore`, `side_offshore`} impliceert `verdict == no_go` (spiegel van de DB-CHECK `evaluations_offshore_is_no_go`). Volgt al uit 2 tot en met 4, maar staat er expliciet in als vangnet.
 
-Een inconsistente evaluatie is dus niet te maken, ook niet in tests van WP-07 en WP-08.
+Punt 3 en 4 zorgen dat een offshore-klasse altijd de expliciete waarschuwing (de reden) meekrijgt, en dat een offshore-reden nooit zonder bijbehorende klasse voorkomt. Bij een schending geeft de validator een `ValueError` met een Engelse melding die de geschonden regel noemt; pydantic maakt daar een `ValidationError` van.
+
+**Kopiëren valideert opnieuw.** Pydantic valideert niet bij `model_copy(update=...)` en `model_construct()`. `HourEvaluation` overschrijft daarom `model_copy`:
+
+```python
+def model_copy(self, *, update: Mapping[str, Any] | None = None, deep: bool = False) -> Self:
+    """Re-validated copy, so the invariants cannot be bypassed. `deep` is accepted for API
+    compatibility; the result is always a freshly validated instance."""
+    data = self.model_dump()
+    if update:
+        data.update(update)
+    return type(self).model_validate(data)
+```
+
+`model_dump()` (Python-modus) houdt enums, tuples en datetimes intact, dus `model_validate` accepteert de dict zonder conversie. Een onbekende sleutel in `update` geeft door `extra="forbid"` een `ValidationError`. `model_construct()` wordt niet overschreven (het is de bewuste uitweg van pydantic voor vertrouwde data). In plaats daarvan eist een test dat `model_construct` nergens in `ingest/src/shakka` voorkomt (`test_no_model_construct_in_src`).
+
+Via de constructor, `model_validate` en `model_copy` is een inconsistente evaluatie dus niet te maken, ook niet in de tests en de geheugenlogica van WP-07, WP-08 en WP-10. Alleen `model_construct` omzeilt de controle, en dat is in de productiecode verboden en getest.
 
 ### Evaluatie van een spot
 `evaluate_spot(spot, forecasts, tides, limits)`:
@@ -195,8 +220,8 @@ Voorstel van de planner. Lars toetst dit in de M1-testweek (WORK_PACKAGES, "Besl
 | `GUST_MIN_DELTA_KN` | `8.0` | Vlaag moet ook minstens zoveel kn boven de wind liggen | Bij weinig wind is de ratio snel hoog zonder praktisch effect (10 → 16 kn). Beide voorwaarden moeten gelden. |
 | `ONSHORE_MAX_DEG` | `22.5` | Hoekafwijking t.o.v. `shore_normal_deg` voor `onshore` (inclusief) | Halve sector van 45°, centraal rond recht aanlandig (twee streken van de windroos). |
 | `SIDE_ONSHORE_MAX_DEG` | `67.5` | Grens `side_onshore` | Sector van 45° rond 45°. |
-| `SIDESHORE_MAX_DEG` | `100.0` | Grens `sideshore`, **veiligheidskritisch** | Symmetrische sectoren zouden 112,5 geven. Daarmee zou wind met 22,5° van het land af nog "sideshore" en rijdbaar zijn. 100 laat maximaal 10° aflandige component toe. Dat is ongeveer de onnauwkeurigheid van de modelrichting en van een handmatig bepaalde kustrichting. Daarboven is het `side_offshore` en dus altijd `no_go`. Strenger alternatief: 90 (elke aflandige component is `no_go`); dat kost veel uren bij wind evenwijdig aan de kust. |
-| `SIDE_OFFSHORE_MAX_DEG` | `157.5` | Grens `side_offshore`, daarboven `offshore` | Sector van 45° rond 135° (met de verruimde ondergrens). Voor de veiligheid maakt deze grens niets uit: beide klassen zijn `no_go`. Hij bepaalt alleen het label. |
+| `SIDESHORE_MAX_DEG` | `90.0` | Grens `sideshore` (inclusief), **harde regel, geen voorstel, niet configureerbaar** | Zie A14. De aanlandige component is `cos(d)`: 0 bij `d = 90`, aflandig bij elke `d > 90`. Offshore en side-offshore zijn volgens CLAUDE.md altijd `no_go`, dus elke `d > 90` is `side_offshore` of `offshore`. Onzekerheid in modelrichting en kustrichting (ca. ±10°) is geen reden om ruimer te zijn; een marge hoort aan de veilige kant. Dit is de enige drempel die niet in de testweek ter discussie staat. |
+| `SIDE_OFFSHORE_MAX_DEG` | `157.5` | Grens `side_offshore`, daarboven `offshore` | Label-grens, geen veiligheidsgrens: `side_offshore` beslaat > 90 t/m 157,5 en `offshore` > 157,5 t/m 180. 157,5 is 180 − 22,5, dus `offshore` is een sector van 45° rond recht aflandig, gespiegeld aan `onshore`. Beide klassen zijn `no_go`; deze grens bepaalt alleen welk label en welke reden de gebruiker ziet. |
 | `DAYLIGHT_MARGIN_BEFORE_SUNRISE` | `15 min` | Uur mag 15 min vóór zonsopkomst beginnen | Civiele schemering duurt in Nederland 35–50 min; 15 min vóór zonsopkomst is er ruim zicht. Bewust krap: AC-5 eist dat 21 juni 03:00Z donker is (zonsopkomst bij de testcoördinaten is ca. 03:19Z), dus de marge moet kleiner zijn dan 19 min. |
 | `DAYLIGHT_MARGIN_AFTER_SUNSET` | `15 min` | Uur mag tot 15 min na zonsondergang lopen | Symmetrisch. Aparte constante, zodat Lars de avond ruimer kan zetten zonder de ochtend te raken. |
 | `CONFIDENCE_HIGH_SPEED_SPREAD_KN` | `4.0` | Max. spreiding (max − min) in wind voor `high` | 4 kn is het verschil tussen twee opeenvolgende kitematen. In de fixture van WP-03 (14-10-2026) lag de spreiding op dag 1 tussen 1,5 en 5 kn. |
@@ -205,12 +230,22 @@ Voorstel van de planner. Lars toetst dit in de M1-testweek (WORK_PACKAGES, "Besl
 | `CONFIDENCE_LOW_DIR_SPREAD_DEG` | `45.0` | Afwijking **boven** deze waarde geeft `low` | Een afwijking van meer dan 45° kan een andere richtingsklasse betekenen, ook richting aflandig. |
 | `CONFIDENCE_HIGH_MIN_MODELS` | `3` | Minimaal aantal modellen met wind voor `high` | Met twee modellen is "eens zijn" zwak bewijs. |
 | `DIR_MIN_RESULTANT` | `0.1` | Minimale lengte van de gemiddelde eenheidsvector | Daaronder heffen de richtingen elkaar op (bijv. 0 en 180) en is er geen zinvolle richting. |
+| `DIR_MEAN_DECIMALS` | `6` | Afronding van het circulaire gemiddelde (`dir_mean_deg`) | Geen drempel maar een technische constante: haalt alleen floatruis weg (orde 1e-14°), zodat gelijke richtingen exact hun eigen waarde opleveren. 1e-6° heeft geen invloed op de veiligheidsgrens (A15). |
 | `TIDE_SAMPLE_OFFSET` | `30 min` | Meetmoment van het getij binnen het uur | A5. |
 | `TIDE_NEIGHBOUR_WINDOW` | `9 h` | Zoekvenster voor het dichtstbijzijnde hoog- en laagwater | Gelijk aan `MAX_EXTREME_GAP` uit WP-04. Binnen 9 uur van elk moment ligt bij een halfdaags getij altijd een hoog- en een laagwater, ook met een agger. |
 | `TIDE_LOW_BAND` | `0.3` | Positie ≤ 0,3 = "rond laagwater" | Met de cosinusinterpolatie komt 0,3 overeen met ca. 37% van een halve getijperiode aan weerszijden van laagwater, dus ongeveer ±2,3 uur. Dat sluit aan bij de vuistregel "2 uur voor tot 2 uur na laagwater". |
 | `TIDE_HIGH_BAND` | `0.7` | Positie ≥ 0,7 = "rond hoogwater" | Symmetrisch: ±2,3 uur rond hoogwater. |
 
-**Toelichting vlagerigheid.** De ratio (vlaag gedeeld door wind) is de meteorologische vlaagfactor. Hij past bij de krachtschommeling in de kite (∝ v²), en die bepaalt voor een kiter of het vlagerig voelt. De drempels liggen hoger dan je voor zee zou verwachten (ca. 1,3). De reden staat in de vastgelegde respons uit WP-03 (`forecast_2loc_4models.json`, 14-10-2026, rond 12–15 kn): ECMWF en ICON gaven een vlaagfactor van ca. 1,3, KNMI Harmonie en GFS van ca. 1,8–2,0. De mediaan over de modellen komt op een gewone dag dus rond 1,5–1,6 uit. Met `GUSTY_RATIO = 1,4` zou bijna elk uur `marginal` worden. Bij 1,6 en 1,9 slaat de regel pas aan als ook ECMWF en ICON duidelijk meer vlagen geven (buien, onstabiele lucht). Dit is de drempel met de grootste onzekerheid; zie R2.
+**Toelichting vlagerigheid.** De ratio (vlaag gedeeld door wind) is de meteorologische vlaagfactor. Hij past bij de krachtschommeling in de kite (∝ v²), en die bepaalt voor een kiter of het vlagerig voelt. De drempels liggen hoger dan je voor zee zou verwachten (ca. 1,3). De reden staat in de vastgelegde respons uit WP-03 (`forecast_2loc_4models.json`, 14-10-2026, rond 12–15 kn): ECMWF en ICON gaven een vlaagfactor van ca. 1,3, KNMI Harmonie en GFS van ca. 1,8–2,0. De mediaan over de modellen komt op een gewone dag dus rond 1,5–1,6 uit. Met `GUSTY_RATIO = 1,4` zou bijna elk uur `marginal` worden. Bij 1,6 en 1,9 slaat de regel pas aan als ook ECMWF en ICON duidelijk meer vlagen geven (buien, onstabiele lucht). Dit is de drempel met de grootste onzekerheid; zie R2 en open punt O3.
+
+Omdat beide voorwaarden (ratio én `GUST_MIN_DELTA_KN`) moeten gelden, wordt de ratio-eis bij hogere wind de beperkende factor en snel ruim: bij 25 kn is het pas `gusty` vanaf 40 kn vlaag en `too_gusty` vanaf 47,5 kn. Dat is bewust zo voorgesteld (een gevorderde kiter met een kleine kite op 25 kn heeft minder last van dezelfde ratio dan iemand op 12 kn), maar het is niet getoetst. Lars toetst dit expliciet in de testweek (O3).
+
+### Open punten voor de M1-testweek
+Deze punten veranderen in deze WP niets aan het gedrag. Ze staan hier zodat Lars ze bewust toetst; elke wijziging is na de testweek een eigen besluit.
+
+- **O1. Eén model aflandig terwijl de consensus rijdbaar is.** Het consensusgemiddelde kan `sideshore` zijn terwijl één model `side_offshore` aangeeft (bijv. 80, 80, 85, 100 bij normaal 0: gemiddelde ca. 86°, spreiding ca. 14°, dus `sideshore` en mogelijk `high`). Optie: `low_confidence` toevoegen als een model met richting een offshore-klasse heeft terwijl de consensusklasse rijdbaar is. Dat vraagt geen nieuwe redencode, maar verandert de betekenis van `confidence` (nu puur spreiding) en kost uren bij wind evenwijdig aan de kust. Daarom een besluit van Lars, geen default.
+- **O2. Vlagen ten opzichte van `max_kn`.** Bij wind 28 en vlaag 44 (ratio 1,57, onder `GUSTY_RATIO`) volgt alleen `wind_borderline`, terwijl de vlagen ver boven `max_kn` liggen. Optie: `gusty` of `too_gusty` als `gust_kn` een vaste marge boven `limits.max_kn` ligt. Kandidaat voor de testweek; zie R1.
+- **O3. Vlaagratio bij hogere wind.** Zie de toelichting hierboven: bij 25 kn pas `gusty` vanaf 40 kn. De vastgelegde respons van WP-03 laat rond 15 kn een factor van ca. 1,2–1,4 zien voor ICON en ECMWF en ca. 1,6–2,0 voor KNMI en GFS; de drempels kloppen daar in grote lijnen mee, maar voor hogere windsnelheden is er geen onderbouwing. Zie R2.
 
 ## Bestanden
 
@@ -237,10 +272,10 @@ Voorstel van de planner. Lars toetst dit in de M1-testweek (WORK_PACKAGES, "Besl
 | `ingest/tests/test_season.py` | aanmaken | AC-6 (eenheid). |
 | `ingest/tests/test_tide_position.py` | aanmaken | `relative_tide_position`, inclusief agger. |
 | `ingest/tests/test_evaluation.py` | aanmaken | AC-3, AC-4, AC-6 (status en seizoen via `evaluate_hour`), AC-7, AC-8 (integratie). |
-| `ingest/tests/test_evaluation_safety.py` | aanmaken | AC-2, plus de signaturecontrole. |
+| `ingest/tests/test_evaluation_safety.py` | aanmaken | AC-2, plus de signaturecontrole, de vaste grens van 90°, de invarianten van `HourEvaluation` (inclusief `model_copy`) en de `model_construct`-scan. |
 | `ingest/tests/test_evaluation_properties.py` | aanmaken | AC-9. |
 | `ingest/tests/test_contracts.py` | aanmaken | AC-10, plus de controle tegen de CHECK-lijsten in de migratie. |
-| `docs/SPOT_DATA.md` | wijzigen | §4: de indicatieve zin vervangen door de exacte grenstabel uit "Ontwerp/Richting" (tekst in het Nederlands, getallen gelijk aan `defaults.py`). §7: per variant één zin over de betekenis (bijv. "`prefer_low`: ongunstig buiten ongeveer 2 uur vóór tot 2 uur na laagwater") en dat `tide_min_level_cm` bij elke variant geldt. De bestaande strings die `test_spot_docs.py` zoekt blijven staan. |
+| `docs/SPOT_DATA.md` | wijzigen | §4: de indicatieve zin vervangen door de exacte grenstabel uit "Ontwerp/Richting" (tekst in het Nederlands, getallen gelijk aan `defaults.py`: 22,5 / 67,5 / 90 / 157,5), met daaronder letterlijk: "Elke wind met een aflandige component (hoekafwijking groter dan 90° van `shore_normal_deg`) is side-offshore of offshore en dus altijd `no_go`. Dat is niet instelbaar. Wind precies evenwijdig aan de kust (90°) is sideshore." Het rekenvoorbeeld voor 270 blijft: 180 en 0 zijn sideshore, 135 en 45 side-offshore, 90 offshore. §7: per variant één zin over de betekenis (bijv. "`prefer_low`: ongunstig buiten ongeveer 2 uur vóór tot 2 uur na laagwater") en dat `tide_min_level_cm` bij elke variant geldt. De bestaande strings die `test_spot_docs.py` zoekt blijven staan. |
 
 Geen migraties, geen wijziging aan `shakka.db`, `FakeSupabase`, `ForecastHour`, `TideExtreme` of `SpotProfile`. `docs/STATUS.md` werkt de orchestrator bij.
 
@@ -258,7 +293,7 @@ TOO_GUSTY_RATIO: Final = 1.9
 GUST_MIN_DELTA_KN: Final = 8.0
 ONSHORE_MAX_DEG: Final = 22.5
 SIDE_ONSHORE_MAX_DEG: Final = 67.5
-SIDESHORE_MAX_DEG: Final = 100.0
+SIDESHORE_MAX_DEG: Final = 90.0   # hard rule (CLAUDE.md): any offshore component is no_go
 SIDE_OFFSHORE_MAX_DEG: Final = 157.5
 DAYLIGHT_MARGIN_BEFORE_SUNRISE: Final = timedelta(minutes=15)
 DAYLIGHT_MARGIN_AFTER_SUNSET: Final = timedelta(minutes=15)
@@ -268,6 +303,7 @@ CONFIDENCE_HIGH_DIR_SPREAD_DEG: Final = 20.0
 CONFIDENCE_LOW_DIR_SPREAD_DEG: Final = 45.0
 CONFIDENCE_HIGH_MIN_MODELS: Final = 3
 DIR_MIN_RESULTANT: Final = 0.1
+DIR_MEAN_DECIMALS: Final = 6   # rounding of the circular mean, only to remove float noise
 TIDE_SAMPLE_OFFSET: Final = timedelta(minutes=30)
 TIDE_NEIGHBOUR_WINDOW: Final = timedelta(hours=9)
 TIDE_LOW_BAND: Final = 0.3
@@ -327,10 +363,12 @@ class Consensus(BaseModel):
     models_used: tuple[ModelKey, ...]
     speed_spread_kn: float | None = None
     dir_spread_deg: float | None = None
+    dir_mean_deg: float | None = None  # [0, 360), unrounded mean (DIR_MEAN_DECIMALS); class basis
 
 def circular_mean_deg(degrees: Sequence[float]) -> float | None:
-    """Unweighted circular mean in [0, 360); None if empty or the mean resultant length
-    is below DIR_MIN_RESULTANT."""
+    """Unweighted circular mean in [0, 360), rounded to DIR_MEAN_DECIMALS decimals and taken
+    modulo 360 (float noise only); None if empty or the mean resultant length is below
+    DIR_MIN_RESULTANT."""
 def compute_consensus(hours: Sequence[ForecastHour]) -> Consensus | None:
     """Consensus over the models of one spot and one valid_at (see Ontwerp).
     None if no model has any value. ValueError on mixed spot_id/valid_at or a duplicate model."""
@@ -442,8 +480,15 @@ class HourEvaluation(BaseModel):
     dir_class: DirClass | None
     confidence: Confidence | None
     tide_level_cm: int | None
-    # model_validator: reasons unique and in ReasonCode order; verdict == worst_verdict(reasons);
+    # model_validator(mode="after"): reasons unique and in ReasonCode order;
+    # verdict == worst_verdict(reasons);
+    # (dir_class == offshore) == (OFFSHORE in reasons);
+    # (dir_class == side_offshore) == (SIDE_OFFSHORE in reasons);
     # dir_class in {offshore, side_offshore} -> verdict == no_go.
+
+    def model_copy(self, *, update: Mapping[str, Any] | None = None,
+                   deep: bool = False) -> Self:
+        """Re-validated copy (see Ontwerp); invalid updates raise ValidationError."""
 
     def to_row(self, *, evaluated_at: datetime) -> dict[str, Any]:
         """Row for public.evaluations. Keys exactly: spot_id, valid_at, verdict, reasons
@@ -505,7 +550,8 @@ Het pad in de uitvoer is altijd `data/contracts/<naam>`, ook als `directory` in 
 - `HourEvaluation.to_row` geeft exact de kolommen van `evaluations` uit WP-01 en respecteert `evaluations_offshore_is_no_go`.
 
 ### Gevolgen voor latere WP's
-- **WP-07:** gebruikt `RiderLimits` (min < max is gevalideerd), `RIDABLE_DIR_CLASSES` en `HourEvaluation`. `dir_class` kan `None` zijn (richting onbekend); zo'n uur is altijd `no_go` en telt nooit mee. `HourEvaluation` is alleen consistent te construeren (invarianten); testfixtures van WP-07 moeten `verdict` en `reasons` dus kloppend invullen (bijv. `go` met `()`).
+- **WP-07:** gebruikt `RiderLimits` (min < max is gevalideerd), `RIDABLE_DIR_CLASSES` en `HourEvaluation`. `dir_class` kan `None` zijn (richting onbekend); zo'n uur is altijd `no_go` en telt nooit mee. `HourEvaluation` is alleen consistent te construeren (invarianten, ook via `model_copy`); testfixtures van WP-07 moeten `verdict` en `reasons` dus kloppend invullen (bijv. `go` met `()`, en een `side_offshore`-klasse altijd met de reden `side_offshore` en `no_go`). Gebruik geen `model_construct`.
+- **WP-07 en WP-08, onbekende vlaag.** Een `go`-uur kan `gust_kn = None` hebben: een onbekende vlaag geeft betrouwbaarheid hooguit `medium`, en `medium` laat `go` toe (A2, E3). Een window kan dus uren zonder vlaagwaarde bevatten, of alleen zulke uren. Het contract van WP-08 heeft nu `WindowSnapshot.gust_max_kn: float`, en het bericht moet "de maximale vlagen in kn" noemen. Advies voor de planners van WP-07 en WP-08: maak het veld `gust_max_kn: float | None`, met als waarde het maximum over de uren met een bekende vlaag en `None` als geen enkel uur in het window een vlaag heeft. Het bericht toont dan "vlagen onbekend" in plaats van een getal. Een onbekende vlaag mag nooit stil als 0 in een snapshot, een vergelijking (beter/slechter) of een bericht belanden. Dit vraagt een aanpassing van het WP-08-contract in `docs/WORK_PACKAGES.md`; dat doet de orchestrator of de planner van WP-08, niet deze WP.
 - **WP-08:** labels uit `REASON_LABEL_NL`, `DIR_CLASS_LABEL_NL`, `CONFIDENCE_LABEL_NL`; windroos via `compass_label`.
 - **WP-10:**
   - `evaluate_spot(spot, forecasts, tides, default_limits(spot))` alleen voor spots met coördinaten (A7);
@@ -513,6 +559,7 @@ Het pad in de uitvoer is altijd `data/contracts/<naam>`, ook als `directory` in 
   - laad de getij-extremen van het station voor ten minste [eerste `valid_at` − 10 uur, laatste `valid_at` + 11 uur]. Dat is de interpolatie plus `TIDE_SAMPLE_OFFSET` plus `TIDE_NEIGHBOUR_WINDOW`;
   - het oordeel is `marginal` of slechter zolang `status` leeg is (`status_unknown`), dus pas na het invullen door Lars kunnen er `go`-uren en alerts zijn.
 - **WP-14:** `data/contracts/*.json` heeft de vorm `{"_generated": str, "items": [...]}`.
+- **WP-07, WP-08, WP-10 en WP-14, richtingsklasse:** gebruik altijd de opgeslagen of berekende `dir_class`; leid de klasse nooit opnieuw af uit `dir_deg` (hele graden). Op de exacte grens kan `dir_deg = 90` (bij normaal 0) samengaan met `dir_class = side_offshore`; dat is bewust (A15). Toon `dir_deg` alleen als informatie (windroos via `compass_label`).
 
 ## Edge cases
 
@@ -532,7 +579,7 @@ Het pad in de uitvoer is altijd `data/contracts/<naam>`, ook als `directory` in 
 | E12 | `shore_normal_deg` `None` | `direction_unknown`, `dir_class = None`, `no_go`. |
 | E13 | Offshore-richting binnen `ridable_dirs` | `offshore` of `side_offshore`; geen `direction_not_ridable` (de klasse gaat voor). |
 | E14 | `ridable_dirs` over het noorden (`{from: 300, to: 20}`) | Wind uit 350 en 10 erbinnen, 21 en 299 erbuiten. |
-| E15 | `d` precies op een klassegrens (bijv. 100 bij hele graden) | Hoort bij de lagere klasse (bovengrens inclusief): 100 is `sideshore`, 101 is `side_offshore`. |
+| E15 | `d` precies op een klassegrens (bijv. 90 bij hele graden) | Hoort bij de lagere klasse (bovengrens inclusief): `d = 90` (wind exact evenwijdig aan de kust, aflandige component 0) is `sideshore`; `d = 91` heeft een aflandige component en is `side_offshore`, dus `no_go` (A14). |
 | E16 | Wind precies `min_kn` of `max_kn` | Niet te licht of te sterk, wel `wind_borderline`. |
 | E17 | `min_kn + 2 > max_kn - 2` (smalle limieten) | Beide borderline-voorwaarden kunnen gelden; de code komt één keer voor. |
 | E18 | Uur gedeeltelijk binnen een seizoensvenster (venster 10:30–18:00, uur 10:00) | Gesloten (overlap). |
@@ -553,7 +600,10 @@ Het pad in de uitvoer is altijd `data/contracts/<naam>`, ook als `directory` in 
 | E33 | Dubbel model in één uur | `ValueError` uit `compute_consensus`. |
 | E34 | Forecasts in willekeurige volgorde | `evaluate_spot` sorteert op `valid_at`; elke `valid_at` één keer. |
 | E35 | `status` `None` (alle huidige spots) | `status_unknown`, hooguit `marginal`. |
-| E36 | `HourEvaluation` handmatig gemaakt met `go` en redenen, of offshore met `go` | `ValidationError` (subklasse van `ValueError`). |
+| E36 | `HourEvaluation` handmatig gemaakt met `go` en redenen, of offshore met `go`, of `dir_class = offshore` zonder de reden `offshore` (bijv. `no_go` met alleen `dark`), of de reden `side_offshore` bij een andere of lege `dir_class` | `ValidationError` (subklasse van `ValueError`). |
+| E40 | `ev.model_copy(update={"verdict": "go", "reasons": ()})` op een offshore-evaluatie | `ValidationError`: `model_copy` valideert opnieuw. Een geldige update (bijv. `tide_level_cm`) geeft een nieuw, gevalideerd object. |
+| E41 | Consensusgemiddelde vlak boven 90° van de normaal, bijv. 90,4° | `side_offshore` en `no_go`, ook al is de opgeslagen `dir_deg` 90 (A15). Precies 90,0° is `sideshore`. De klasse volgt uit `dir_mean_deg`, niet uit `dir_deg`. |
+| E42 | Drie of vier modellen met wind, maar minder dan drie met richting | Hooguit `medium` (regel 4, `n_dir`). |
 | E37 | `data/contracts/` bestaat niet | `export` maakt de map aan; `--check` meldt drie keer `missing`. |
 | E38 | Extra bestand in `data/contracts/` | Genegeerd door export en check. |
 | E39 | Astral zonder `date` | Komt niet voor: `date` wordt altijd meegegeven (code review en de puurheidsregel; astral leest anders de klok). |
@@ -592,7 +642,7 @@ De basis (`make_spot()`, `model_hours(NOON)`, geen getij, `LIMITS`) geeft `go` m
 - `test_exhaustive_symmetry_and_monotonic`: voor normaal ∈ {0, 45, 270, 359} en elke gehele wind 0..359:
   - `classify(normal + d) == classify(normal - d)` voor d = 0..180;
   - de rang (onshore = 0 … offshore = 4) is niet-dalend in `angular_distance` (sorteer op afstand en controleer).
-- `test_class_boundaries`: d = 22 en 23, 67 en 68, 100 en 101, 157 en 158 (normaal 0) geven de verwachte klassen.
+- `test_class_boundaries`: bij normaal 0 geven d = 22 en 23, 67 en 68, 90 en 91, 157 en 158 de verwachte klassen, beide kanten op (wind `d` en `360 - d`). Expliciet: 90 en 270 zijn `sideshore`, 91 en 269 zijn `side_offshore`. Bij normaal 270: 180 en 0 zijn `sideshore`, 179 en 1 zijn `side_offshore`.
 - `test_thresholds_ordered` (zie Interfaces).
 - `test_in_ranges`: `{200, 340}` met 200, 340 (in), 199, 341 (uit); wrap `{300, 20}` met 350, 0, 20 (in), 21, 299 (uit); `from == to`; lege lijst geeft `False`; meerdere bereiken.
 - `test_compass_label`: 0 → N, 11.24 → N, 11.25 → NNO, 90 → O, 180 → Z, 225 → ZW, 270 → W, 348.75 → N, 359.9 → N, -10 → N; alle 16 labels komen voor bij 0, 22.5, …, 337.5.
@@ -621,7 +671,26 @@ De basis (`make_spot()`, `model_hours(NOON)`, geen getij, `LIMITS`) geeft `go` m
   - `default_limits`: (`spot`).
 
   Daarnaast: geen enkele publieke functie in `shakka.domain.evaluation` en `shakka.domain.direction` heeft een parameter waarvan de naam `offshore`, `allow`, `override`, `force` of `unsafe` bevat.
+- `test_sideshore_bound_is_hard_rule`: `SIDESHORE_MAX_DEG == 90.0`, en voor normaal in `range(0, 360, 15)` en elke gehele wind geldt: `angular_distance(wind, normal) > 90` ⇔ `classify_direction(wind, normal)` in {`side_offshore`, `offshore`}.
+- `test_rounding_never_makes_offshore_ridable` (E41, A15):
+  - `classify_direction(90.4, 0)` en `classify_direction(269.6, 0)` zijn `side_offshore`; `classify_direction(90.0, 0)` en `classify_direction(270.0, 0)` zijn `sideshore`;
+  - normaal 0, vier modellen met wind 20, vlaag 24 en richtingen (90, 90, 90, 91): `dir_mean_deg` is 90,25 (± 0,01), `dir_deg == 90`, `dir_class == side_offshore`, `verdict == no_go` en `side_offshore` in `reasons`;
+  - normaal 0, vier modellen met richting 90: `dir_mean_deg == 90.0` exact, `dir_class == sideshore`, geen richtingsreden;
+  - normaal 270, vier modellen met richting 180 en met richting 0: `dir_mean_deg` exact 180,0 en 0,0, beide `sideshore` (geen floatruis over de grens).
 - `test_model_rejects_offshore_go`: `HourEvaluation(..., dir_class=offshore, verdict=go, reasons=())` geeft `ValidationError`.
+- `test_model_requires_offshore_reason` (geparametriseerd, elk geval `ValidationError`):
+  - `dir_class=offshore`, `verdict=no_go`, `reasons=(dark,)`;
+  - `dir_class=side_offshore`, `verdict=no_go`, `reasons=(offshore,)`;
+  - `dir_class=sideshore`, `verdict=no_go`, `reasons=(side_offshore,)`;
+  - `dir_class=None`, `verdict=no_go`, `reasons=(offshore, direction_unknown)`.
+
+  Als tegenproef zijn `dir_class=offshore`, `verdict=no_go`, `reasons=(offshore, dark)` en `dir_class=side_offshore`, `verdict=no_go`, `reasons=(side_offshore,)` wel geldig.
+- `test_model_copy_revalidates`:
+  - een offshore-evaluatie uit `evaluate_hour` (normaal 270, wind 90) met `ev.model_copy(update={"verdict": Verdict.GO, "reasons": ()})` geeft `ValidationError`;
+  - idem met `update={"dir_class": DirClass.SIDESHORE}` (reden `offshore` zonder klasse) geeft `ValidationError`;
+  - `ev.model_copy(update={"unknown_field": 1})` geeft `ValidationError`;
+  - op de basis-`go` geeft `model_copy(update={"tide_level_cm": 5})` een `HourEvaluation` met `tide_level_cm == 5` en verder gelijke velden; `model_copy()` zonder update en `model_copy(deep=True)` zijn `==` aan het origineel.
+- `test_no_model_construct_in_src`: geen enkel `.py`-bestand onder `ingest/src/shakka` bevat de tekst `model_construct`.
 
 **AC-3 (onbekende richting en `ridable_dirs`), `test_evaluation.py`:**
 - `test_no_shore_normal_every_hour`: `make_spot(shore_normal_deg=None)` en `evaluate_spot` over 24 uur → elk uur `no_go` met `direction_unknown` en `dir_class is None`.
@@ -697,8 +766,12 @@ Verder `test_default_limits`: spot zonder default geeft (12, 30); `default_min_k
 
 **AC-8 (consensus), `test_consensus.py` en `test_evaluation.py`:**
 - Vier modellen (20.0, 20.5, 19.8, 20.2 kn; richtingen 268–272; vlagen gezet) geven `high`, met `wind_kn == 20.1` (mediaan) en `dir_deg == 270`.
-- Snelheidsspreiding: (10, 12, 18.1, 14) heeft spreiding 8.1 en geeft `low`; (10, 12, 18, 14) heeft spreiding 8.0 en is niet `low` (grens). Richtingsspreiding: (270, 270, 270, 320) heeft een afwijking > 45 en geeft `low`.
-- Integratie: hetzelfde uur dat met gelijke modellen `go` is, wordt met de `low`-modellen `marginal` met `low_confidence`. Een uur dat `no_go` is (wind 5) blijft `no_go` en bevat ook `low_confidence`.
+- Snelheidsspreiding: (10, 12, 18.1, 14) heeft spreiding 8.1 en geeft `low`; (10, 12, 18, 14) heeft spreiding 8.0 en is niet `low` (grens).
+- Richtingsspreiding, telkens vier modellen met wind 20, vlaag 24 (gelijke snelheden, vlagen gezet):
+  - (270, 270, 270, 0): circulair gemiddelde ca. 288,4°, dus `dir_deg == 288` en `dir_spread_deg == 71.6`. Groter dan 45, dus `low`.
+  - (270, 270, 270, 320): gemiddelde ca. 281,9°, dus `dir_deg == 282` en `dir_spread_deg == 38.1`. Groter dan 20 en niet groter dan 45, dus `medium` (geval vlak onder de `low`-grens).
+- `n_dir` (E42): `knmi`, `icon` en `ecmwf` met wind 20 en vlaag 24, alleen `knmi` met richting 270, geeft `dir_spread_deg == 0.0` en toch `medium`, niet `high`. Vier modellen met wind en vlaag, drie met richting 270 en één zonder, geeft `high`.
+- Integratie: hetzelfde uur dat met gelijke modellen `go` is, wordt met de `low`-modellen (snelheidsspreiding 8.1, richting 270 bij alle modellen) `marginal` met `low_confidence`. Een uur dat `no_go` is (wind 5) blijft `no_go` en bevat ook `low_confidence`.
 - Eén model geeft `low`, gedocumenteerd in de docstring. Twee gelijke modellen geven `medium`.
 - Alle modellen `None` (rijen met drie keer `None`) geeft `compute_consensus is None`; `evaluate_hour` geeft `no_data` en `no_go`. `hours == []` doet hetzelfde.
 - Richtingen 350 en 10 geven `dir_deg == 0` (± 1, rekening houdend met de wrap: `angular_distance(dir_deg, 0) <= 1`), niet 180.
@@ -714,7 +787,7 @@ Verder `test_default_limits`: spot zonder default geeft (12, 30); `default_min_k
   - modelsets: eens, oneens, één model, `None`;
   - richtingen 0, 90, 180, 270.
 
-  Per evaluatie gelden `verdict == worst_verdict(reasons)`, `(verdict == go) == (reasons == ())`, `reasons` zonder dubbelen en in `ReasonCode`-volgorde, en offshore-klassen zijn `no_go`.
+  Per evaluatie gelden `verdict == worst_verdict(reasons)`, `(verdict == go) == (reasons == ())`, `reasons` zonder dubbelen en in `ReasonCode`-volgorde, offshore-klassen zijn `no_go`, en `dir_class` offshore of side-offshore komt precies samen voor met de reden `offshore` of `side_offshore`.
 - `evaluate_spot` met dezelfde invoer twee keer geeft gelijke lijsten (`==`). De invoer wordt gehusseld met een vaste permutatie (omgekeerd plus om-en-om), zonder `random`. Het resultaat is gesorteerd op `valid_at` en elke `valid_at` komt één keer voor.
 - `REASON_EFFECT` en `REASON_LABEL_NL` dekken elke `ReasonCode`; `REASON_EFFECT` is exact de tabel uit WORK_PACKAGES (expliciete dict in de test).
 - `HourEvaluation.to_row` heeft exact de kolommen van `evaluations`, en `reasons` is een `list[str]`.
@@ -749,9 +822,9 @@ Verder `test_default_limits`: spot zonder default geeft (12, 30); `default_min_k
 - Geen API-endpoints, geen netwerk, geen kosten.
 
 ## Risico's
-- **R1. Drempels zijn niet gekalibreerd op echte sessies.** Mitigatie: alles in `defaults.py`, onderbouwd in "Drempelwaarden". Lars toetst in de M1-testweek; een wijziging is één constante plus de grenstests.
-- **R2. Vlaagbias verschilt per model.** KNMI Harmonie en GFS geven veel hogere vlagen dan ECMWF en ICON (zie de toelichting bij de vlagerigheid). De mediaan dempt dit, maar een dag met alleen GFS-vlagen (bijv. als andere vlagen `None` zijn) kan vals `gusty` geven. Mitigatie: drempels hoog gezet; per-modelnormalisatie is een mogelijke vervolgstap na de testweek (scopebesluit van Lars).
-- **R3. `SIDESHORE_MAX_DEG = 100` laat 10° aflandige component toe als "sideshore".** Dit is de veiligheidskritische grens. Mitigatie: expliciet benoemd voor Lars, met het strengere alternatief 90; de kustrichting per spot verifieert Lars zelf.
+- **R1. Drempels zijn niet gekalibreerd op echte sessies.** Mitigatie: alles in `defaults.py`, onderbouwd in "Drempelwaarden". Lars toetst in de M1-testweek; een wijziging is één constante plus de grenstests. Uitzondering: `SIDESHORE_MAX_DEG` (A14). Bekend open punt: vlagen ver boven `max_kn` worden niet apart beoordeeld (O2).
+- **R2. Vlaagbias verschilt per model.** KNMI Harmonie en GFS geven veel hogere vlagen dan ECMWF en ICON (zie de toelichting bij de vlagerigheid). De mediaan dempt dit, maar een dag met alleen GFS-vlagen (bijv. als andere vlagen `None` zijn) kan vals `gusty` geven. Bij hogere wind is de ratio-eis juist ruim (O3). Mitigatie: drempels hoog gezet en O2/O3 expliciet in de testweek; per-modelnormalisatie is een mogelijke vervolgstap na de testweek (scopebesluit van Lars).
+- **R3. Grens sideshore/side-offshore ligt op 90°, de harde regel.** Elke aflandige component is `no_go` (A14). Gevolg: uren met wind net over evenwijdig aan de kust (`d` van 91 tot ongeveer 100) zijn `no_go`, ook als ervaren kiters daar soms nog varen. Dat is de bedoelde, veilige uitkomst van de regel en niet configureerbaar. Restrisico zit in de invoer: een verkeerd bepaalde `shore_normal_deg` verschuift de grens. Mitigatie: Lars verifieert de kustrichting per spot zelf (`verified`), en een spot zonder kustrichting is altijd `no_go` (`direction_unknown`). Onenigheid tussen modellen rond de grens is open punt O1.
 - **R4. Alle 25 startspots hebben nog geen `status` of `shore_normal_deg`.** Elk uur is daardoor `no_go` (`direction_unknown`) of hooguit `marginal`, en alerts komen pas als Lars de profielen invult. Dat is bewust (geen verzonnen data) en staat onder "Gevolgen voor latere WP's".
 - **R5. Daglichtgrens van AC-5 ligt 4 minuten van de marge** (03:00Z tegen 03:19Z − 15 min). De uitkomst van astral is deterministisch, dus de test is stabiel. Maar een marge van 20 min of meer zou AC-5 breken. Dat staat in de onderbouwing.
 - **R6. Winterse middag.** Door de regel "het hele uur binnen daglicht met marge" valt in december het laatste deeluur (lokaal 16:00–16:30) weg. Dat is conservatief en verstelbaar via `DAYLIGHT_MARGIN_AFTER_SUNSET`.
@@ -800,7 +873,7 @@ Werk op branch `wp/WP-05` in de worktree `/Users/larst/Dev/Shakka/.claude/worktr
 7. **Evaluatie, eerst de tests.**
    - Maak `tests/evaluation_fixtures.py` af (`make_spot`, `extremes`, `NOON`, `LIMITS`).
    - Schrijf `tests/test_evaluation.py`, `tests/test_evaluation_safety.py` en `tests/test_evaluation_properties.py`. Rood.
-   - Implementeer `domain/evaluation.py` volgens Ontwerp (stappen 0–10, invarianten in `HourEvaluation`). Groen.
+   - Implementeer `domain/evaluation.py` volgens Ontwerp (stappen 0–10, de vijf invarianten in `HourEvaluation` en de overschreven `model_copy`; imports `Mapping` uit `collections.abc` en `Self` uit `typing`). Groen, inclusief `test_model_copy_revalidates` en `test_no_model_construct_in_src`.
 
    Commit: `feat(domain): add hourly spot evaluation with reasons`.
 8. **Contracten en CLI, eerst de tests.**
@@ -812,3 +885,20 @@ Werk op branch `wp/WP-05` in de worktree `/Users/larst/Dev/Shakka/.claude/worktr
 9. **Documentatie.** Werk `docs/SPOT_DATA.md` §4 en §7 bij (zie Bestanden). `test_spot_docs.py` blijft groen.
    Commit: `docs: document direction class bounds and tide preference`.
 10. **Eindcontrole.** Volledige suite, ruff, `uv run shakka contracts export --check` en `uv run shakka --help` (toont `contracts`). Controleer met `git status` dat er geen bestanden buiten de lijst in "Bestanden" zijn gewijzigd.
+
+## Verwerking review
+Ronde 1 (`docs/wp/WP-05/review.md`, CHANGES_REQUIRED).
+
+| Punt | Verwerking |
+|---|---|
+| **B-1** (blokkerend) `SIDESHORE_MAX_DEG = 100` laat aflandige wind als rijdbaar door | Aangepast volgens het besluit van de orchestrator: `SIDESHORE_MAX_DEG = 90.0`, bovengrens inclusief. Nieuwe aanname A14 (90 volgt uit de harde regel in CLAUDE.md en is niet configureerbaar; ook uitgezonderd in A1). Bijgewerkt: klassentabel en uitleg in Ontwerp/Richting, rij in Drempelwaarden (onderbouwing herschreven, geen "strenger alternatief" meer), `defaults` in Interfaces, E15 (90 is `sideshore`, 91 is `side_offshore`), `test_class_boundaries` (90/91 en 270/269 bij normaal 0; 180/0 tegen 179/1 bij normaal 270), R3 (herschreven als gevolg van de regel, niet als keuze) en de letterlijke tekst voor `docs/SPOT_DATA.md` §4. Nieuwe test `test_sideshore_bound_is_hard_rule` pint de waarde en de equivalentie `d > 90` ⇔ offshore-klasse vast. AC-1 blijft kloppen (180 en 0 hebben `d = 90`). |
+| **B-2** (blokkerend) verkeerde verwachting in het richtingsspreidingsgeval | Aangepast: (270, 270, 270, 0) is het `low`-geval (`dir_deg == 288`, `dir_spread_deg == 71.6`) en (270, 270, 270, 320) is het `medium`-geval (`dir_deg == 282`, `dir_spread_deg == 38.1`), beide met gelijke snelheden en gezette vlagen. Waarden nagerekend. |
+| N-1 `model_copy` en `model_construct` omzeilen de validatie | Overgenomen. `HourEvaluation.model_copy` is overschreven en valideert opnieuw via `model_validate` (code in Ontwerp, signature in Interfaces). Test `test_model_copy_revalidates` (offshore naar `go`, klasse los van reden, onbekend veld, geldige update, `deep=True`). `model_construct` wordt niet overschreven, maar `test_no_model_construct_in_src` verbiedt het in de productiecode. De zin "niet te maken" is aangepast. Signature gecontroleerd in de pydantic-documentatie (pydantic 2.14.1 staat in `uv.lock`). Nieuwe edge case E40. |
+| N-2 offshore-klasse vereist de bijbehorende reden | Overgenomen als invariant 3 en 4 (beide richtingen: klasse ⇔ reden). Test `test_model_requires_offshore_reason` met vier foute gevallen en twee geldige tegenproeven; E36 uitgebreid. |
+| N-3 `go`-uur zonder vlaagwaarde tegen `WindowSnapshot.gust_max_kn: float` | Opgenomen onder "Gevolgen voor latere WP's" (WP-07 en WP-08): advies `float | None`, maximum over uren met bekende vlaag, nooit stil 0; contractwijziging in WORK_PACKAGES ligt bij de orchestrator of de planner van WP-08. |
+| N-4 `high` zonder controle op aantal richtingen | Overgenomen: regel 4 eist ook `n_dir >= CONFIDENCE_HIGH_MIN_MODELS`. Test in AC-8 (drie modellen met wind en één met richting geeft `medium`; drie met richting geeft `high`) en E42. Geen nieuwe constante. |
+| N-5 één model aflandig terwijl de consensus rijdbaar is | Niet als default ingebouwd: het verandert de betekenis van `confidence` en is een beleidskeuze. Vastgelegd als open punt O1 voor de testweek, met verwijzing vanuit R3 en A15. |
+| N-6 vlagen ten opzichte van `max_kn` | Vastgelegd als open punt O2 en genoemd bij R1. Geen gedragswijziging. |
+| N-7 ratio-eis wordt ruim bij hogere wind | Toelichting vlagerigheid uitgebreid (25 kn: `gusty` vanaf 40, `too_gusty` vanaf 47,5) en open punt O3 voor Lars; genoemd bij R2. |
+| N-8 tekst bij `SIDE_OFFSHORE_MAX_DEG` | De zin "100 laat maximaal 10° aflandige component toe" is weg (B-1). De beschrijving van `SIDE_OFFSHORE_MAX_DEG` is herschreven: label-grens, `side_offshore` beslaat > 90 t/m 157,5, `offshore` is de sector van 45° rond recht aflandig. |
+| A15 (geen reviewpunt, gevolg van B-1; besluit van de orchestrator) classificatie op afgeronde of onafgeronde richting | Een eerdere versie van deze revisie classificeerde op de afgeronde `dir_deg`, waardoor 90,4° als `sideshore` kon uitkomen. Op besluit van de orchestrator aangepast: `classify_direction` en de `ridable_dirs`-controle werken op de onafgeronde consensusrichting `Consensus.dir_mean_deg` (float, alleen tegen floatruis afgerond op `DIR_MEAN_DECIMALS = 6`). De klasse is leidend en `dir_deg` (hele graden) is informatief. A15 legt vast dat de opgeslagen klasse op de exacte grens bewust kan afwijken van wat uit `dir_deg` volgt (bijv. `dir_deg = 90` met `side_offshore`), en dat het validatorcontract (offshore-klasse ⇔ reden, ⇒ `no_go`) blijft gelden. Bijgewerkt: A10 (nieuw veld `dir_mean_deg`), Ontwerp/Consensus en stap 5 van de evaluatie, Interfaces (`Consensus`, `circular_mean_deg`, `DIR_MEAN_DECIMALS`), Drempelwaarden, E41 (90,4° is `side_offshore`, 90,0° is `sideshore`), nieuwe test `test_rounding_never_makes_offshore_ridable` en een regel onder "Gevolgen voor latere WP's" (leid de klasse nooit af uit `dir_deg`). |
