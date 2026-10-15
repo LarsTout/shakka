@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { readdirSync, readFileSync } from 'node:fs';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
 	MAX_FIRST_NAME,
 	MAX_RSVPS,
@@ -10,6 +10,18 @@ import {
 	SESSION_RETENTION_DAYS
 } from '../src/lib/rsvp-types.js';
 import { EDIT_TOKEN_RE, RPC_ERROR_CODES, SESSION_SLUG_RE } from '../src/lib/session-view.js';
+
+const h = vi.hoisted(() => ({ fake: null as unknown }));
+vi.mock('#lib/supabase.js', async () => {
+	const { createFakeRpc } = await import('./helpers/fake-rpc.js');
+	const fake = createFakeRpc();
+	h.fake = fake;
+	return { supabase: { rpc: fake.rpc }, initialUrlHash: '' };
+});
+
+import { createRsvp, deleteRsvp, getPublicSession, updateRsvp } from '../src/lib/rsvp.js';
+import type { createFakeRpc } from './helpers/fake-rpc.js';
+import { NEW_ID, SLUG, TOKEN } from './fixtures/public-session.js';
 
 const MIGRATIONS = new URL('../../supabase/migrations/', import.meta.url);
 const SESSIONS_FILE = '20261015200000_sessions.sql';
@@ -60,6 +72,23 @@ describe('RPC contract (WP-19 migration)', () => {
 			'p_rides_with'
 		]);
 		expect(params('rsvp_delete')).toEqual(['p_edit_token']);
+	});
+	it('(1b) the keys rsvp.ts sends equal the migration parameters', async () => {
+		const fake = h.fake as ReturnType<typeof createFakeRpc>;
+		const ok = (data: unknown) => ({ data, error: null, status: 200 });
+		const rsvp = { id: NEW_ID, first_name: 'A', ride: 'own', seats_offered: null, rides_with: null, created_at: 'x' };
+		fake.respond('get_public_session', ok(null));
+		fake.respond('rsvp_create', ok({ rsvp_id: NEW_ID, edit_token: TOKEN }));
+		fake.respond('rsvp_update', ok(rsvp));
+		fake.respond('rsvp_delete', ok(true));
+		await getPublicSession(SLUG);
+		await createRsvp(SLUG, { first_name: 'A', ride: 'own', seats_offered: null });
+		await updateRsvp(TOKEN, { first_name: 'A', ride: 'own', seats_offered: null, rides_with: null });
+		await deleteRsvp(TOKEN);
+		const sent = Object.fromEntries(fake.calls.map((c) => [c.fn, Object.keys(c.args ?? {})]));
+		for (const fn of ['get_public_session', 'rsvp_create', 'rsvp_update', 'rsvp_delete']) {
+			expect(sent[fn], fn).toEqual(params(fn));
+		}
 	});
 	it('(2) get_public_session keys', () => {
 		const b = fnBlock('get_public_session');
