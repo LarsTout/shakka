@@ -1,5 +1,5 @@
 # Blueprint WP-05: Evaluatie-engine (puur)
-Status: DRAFT
+Status: APPROVED
 Revisie: 2
 
 ## Doel
