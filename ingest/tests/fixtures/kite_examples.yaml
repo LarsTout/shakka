@@ -1,0 +1,36 @@
+# Kite advice examples for shakka.domain.kite (WP-06).
+# Proposed by the planner. Lars checks every case and then sets checked_by_lars to true.
+# Formula: ideal = LEVEL_SIZE_FACTOR[level] * weight_kg / wind_kn, rounded half-up to 0.1 m2.
+#   Factors: beginner 1.8, intermediate 2.2, advanced 2.2.
+# Choice: nearest quiver size by ratio; the boundary between two neighbours is their
+#   geometric mean, and an exact tie picks the smaller kite.
+# Fit: ideal when ideal / 1.25 <= size <= ideal * 1.25, else underpowered or overpowered.
+# Rationale and sources: docs/wp/WP-06/blueprint.md.
+checked_by_lars: false
+cases:
+  - {id: k01, weight_kg: 75, level: intermediate, quiver_m2: [7, 9, 12], wind_kn: 15, expected: {size_m2: 12, ideal_size_m2: 11.0, fit: ideal}}
+  - {id: k02, weight_kg: 75, level: intermediate, quiver_m2: [7, 9, 12], wind_kn: 18, expected: {size_m2: 9, ideal_size_m2: 9.2, fit: ideal}}
+  - {id: k03, weight_kg: 75, level: intermediate, quiver_m2: [7, 9, 12], wind_kn: 22, expected: {size_m2: 7, ideal_size_m2: 7.5, fit: ideal}}
+  - {id: k04, weight_kg: 75, level: intermediate, quiver_m2: [7, 9, 12], wind_kn: 30, expected: {size_m2: 7, ideal_size_m2: 5.5, fit: overpowered}}
+  - {id: k05, weight_kg: 75, level: intermediate, quiver_m2: [7, 9, 12], wind_kn: 10, expected: {size_m2: 12, ideal_size_m2: 16.5, fit: underpowered}}
+  - {id: k06, weight_kg: 75, level: beginner, quiver_m2: [7, 9, 12], wind_kn: 15, expected: {size_m2: 9, ideal_size_m2: 9.0, fit: ideal}}
+  - {id: k07, weight_kg: 75, level: advanced, quiver_m2: [7, 9, 12], wind_kn: 25, expected: {size_m2: 7, ideal_size_m2: 6.6, fit: ideal}}
+  - {id: k08, weight_kg: 60, level: beginner, quiver_m2: [6, 8, 10], wind_kn: 18, expected: {size_m2: 6, ideal_size_m2: 6.0, fit: ideal}}
+  - {id: k09, weight_kg: 60, level: intermediate, quiver_m2: [6, 8, 10], wind_kn: 14, expected: {size_m2: 10, ideal_size_m2: 9.4, fit: ideal}}
+  - {id: k10, weight_kg: 60, level: intermediate, quiver_m2: [6, 8, 10], wind_kn: 24, expected: {size_m2: 6, ideal_size_m2: 5.5, fit: ideal}}
+  - {id: k11, weight_kg: 90, level: intermediate, quiver_m2: [9, 12, 15, 17], wind_kn: 16, expected: {size_m2: 12, ideal_size_m2: 12.4, fit: ideal}}
+  - {id: k12, weight_kg: 90, level: intermediate, quiver_m2: [9, 12, 15, 17], wind_kn: 12, expected: {size_m2: 17, ideal_size_m2: 16.5, fit: ideal}}
+  - {id: k13, weight_kg: 90, level: intermediate, quiver_m2: [9, 12, 15, 17], wind_kn: 9, expected: {size_m2: 17, ideal_size_m2: 22.0, fit: underpowered}}
+  - {id: k14, weight_kg: 90, level: advanced, quiver_m2: [9, 12, 15, 17], wind_kn: 22, expected: {size_m2: 9, ideal_size_m2: 9.0, fit: ideal}}
+  - {id: k15, weight_kg: 100, level: intermediate, quiver_m2: [9, 12, 15, 17], wind_kn: 35, expected: {size_m2: 9, ideal_size_m2: 6.3, fit: overpowered}}
+  - {id: k16, weight_kg: 80, level: beginner, quiver_m2: [10], wind_kn: 25, expected: {size_m2: 10, ideal_size_m2: 5.8, fit: overpowered}}
+  - {id: k17, weight_kg: 80, level: intermediate, quiver_m2: [10], wind_kn: 12, expected: {size_m2: 10, ideal_size_m2: 14.7, fit: underpowered}}
+  - {id: k18, weight_kg: 70, level: intermediate, quiver_m2: [5, 7, 9, 12, 14], wind_kn: 28, expected: {size_m2: 5, ideal_size_m2: 5.5, fit: ideal}}
+  - {id: k19, weight_kg: 70, level: intermediate, quiver_m2: [5, 7, 9, 12, 14], wind_kn: 17, expected: {size_m2: 9, ideal_size_m2: 9.1, fit: ideal}}
+  - {id: k20, weight_kg: 70, level: beginner, quiver_m2: [5, 7, 9, 12, 14], wind_kn: 13, expected: {size_m2: 9, ideal_size_m2: 9.7, fit: ideal}}
+  - {id: k21, weight_kg: 70, level: intermediate, quiver_m2: [5, 7, 9, 12, 14], wind_kn: 13, expected: {size_m2: 12, ideal_size_m2: 11.8, fit: ideal}}
+  - {id: k22, weight_kg: 85, level: intermediate, quiver_m2: [7.5, 10.5, 13.5], wind_kn: 19, expected: {size_m2: 10.5, ideal_size_m2: 9.8, fit: ideal}}
+  - {id: k23, weight_kg: 75, level: intermediate, quiver_m2: [12, 7, 9, 9], wind_kn: 15, expected: {size_m2: 12, ideal_size_m2: 11.0, fit: ideal}}
+  - {id: k24, weight_kg: 110, level: intermediate, quiver_m2: [9, 12, 15, 17], wind_kn: 14, expected: {size_m2: 17, ideal_size_m2: 17.3, fit: ideal}}
+  - {id: k25, weight_kg: 50, level: beginner, quiver_m2: [5, 7, 9], wind_kn: 20, expected: {size_m2: 5, ideal_size_m2: 4.5, fit: ideal}}
+  - {id: k26, weight_kg: 65, level: intermediate, quiver_m2: [7, 9, 12], wind_kn: 40, expected: {size_m2: 7, ideal_size_m2: 3.6, fit: overpowered}}
