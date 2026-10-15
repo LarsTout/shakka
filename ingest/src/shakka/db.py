@@ -1,6 +1,7 @@
 """Thin client for the Supabase REST API (PostgREST). The only module that talks to the database."""
 
 import json
+import logging
 import re
 from collections.abc import Iterable, Mapping, Sequence
 from datetime import UTC, date, datetime, time
@@ -10,10 +11,20 @@ from typing import TYPE_CHECKING, Any, Final, NamedTuple
 
 import httpx
 
-from shakka.http import make_client
+from shakka.http import make_client, with_retries
 
 if TYPE_CHECKING:
     from shakka.config import Settings
+
+logger = logging.getLogger("shakka.db")
+
+DB_ATTEMPTS: Final = 3
+DB_BACKOFF_S: Final = 0.5
+DB_RETRY_STATUSES: Final = frozenset(
+    {429, 502, 503, 504, 520, 521, 522, 523, 524}
+)  # 52x: Cloudflare
+# Only idempotent operations are retried: a repeated insert could end up in the table twice.
+RETRYING_OPS: Final = frozenset({"select", "upsert", "update", "delete"})
 
 PAGE_SIZE: Final = 1000  # equals PostgREST max_rows (config.toml, hosted default)
 BATCH_SIZE: Final = 500  # rows per upsert/insert request
@@ -44,6 +55,14 @@ TABLE_KEYS: Final[Mapping[str, tuple[str, ...]]] = {
 }
 
 Filters = Mapping[str, str | Sequence[str]]
+
+
+def is_retryable_db_error(exc: BaseException) -> bool:
+    """A DatabaseError from a transport failure (status None) or with a status worth a retry."""
+    return isinstance(exc, DatabaseError) and (
+        exc.status is None or exc.status in DB_RETRY_STATUSES
+    )
+
 
 _IDENT = re.compile(r"[a-z_][a-z0-9_]*")
 _ORDER_TERM = re.compile(
@@ -254,7 +273,18 @@ def parse_on_conflict(on_conflict: str) -> list[str]:
 class SupabaseRest:
     """PostgREST client. Sends the secret key only in the `apikey` header."""
 
-    def __init__(self, url: str, secret_key: str, *, client: httpx.Client | None = None) -> None:
+    def __init__(
+        self,
+        url: str,
+        secret_key: str,
+        *,
+        client: httpx.Client | None = None,
+        attempts: int = DB_ATTEMPTS,
+    ) -> None:
+        if attempts < 1:
+            raise ValueError("attempts must be at least 1")
+        self._attempts = attempts
+        self._retries_disabled = False
         self._base = url.rstrip("/")
         self._secret = secret_key
         self._owns_client = client is None
@@ -263,6 +293,11 @@ class SupabaseRest:
     @classmethod
     def from_settings(cls, settings: "Settings") -> "SupabaseRest":
         return cls(settings.supabase_url, settings.supabase_secret_key.get_secret_value())
+
+    @property
+    def retries_disabled(self) -> bool:
+        """True once one call used up its attempts on a retryable error (circuit breaker)."""
+        return self._retries_disabled
 
     def close(self) -> None:
         """Close the client, but only when this instance created it."""
@@ -304,19 +339,51 @@ class SupabaseRest:
             headers["Content-Type"] = "application/json"
         if prefer is not None:
             headers["Prefer"] = prefer
-        try:
-            response = self._client.request(
-                method,
-                f"{self._base}/rest/v1/{path}",
-                params=list(params),
-                content=body,
-                headers=headers,
+
+        def attempt() -> httpx.Response:
+            try:
+                response = self._client.request(
+                    method,
+                    f"{self._base}/rest/v1/{path}",
+                    params=list(params),
+                    content=body,
+                    headers=headers,
+                )
+            except httpx.HTTPError as exc:
+                raise DatabaseError(f"{op} {label}: {type(exc).__name__}") from None
+            if not 200 <= response.status_code < 300:
+                raise self._http_error(op, label, response)
+            return response
+
+        if op not in RETRYING_OPS or self._retries_disabled or self._attempts == 1:
+            return attempt()
+
+        def log(attempt_no: int, exc: BaseException, delay: float) -> None:
+            status = getattr(exc, "status", None)
+            reason = f"HTTP {status}" if status is not None else "transport error"
+            logger.warning(
+                "db: %s %s attempt %d/%d failed (%s); retrying in %.1fs",
+                op,
+                label,
+                attempt_no,
+                self._attempts,
+                reason,
+                delay,
             )
-        except httpx.HTTPError as exc:
-            raise DatabaseError(f"{op} {label}: {type(exc).__name__}") from None
-        if not 200 <= response.status_code < 300:
-            raise self._http_error(op, label, response)
-        return response
+
+        try:
+            return with_retries(
+                attempt,
+                attempts=self._attempts,
+                backoff=DB_BACKOFF_S,
+                retry_if=is_retryable_db_error,
+                on_retry=log,
+            )
+        except DatabaseError as exc:
+            if is_retryable_db_error(exc):
+                self._retries_disabled = True
+                logger.warning("db: retries disabled for the rest of this run")
+            raise
 
     def _http_error(self, op: str, label: str, response: httpx.Response) -> DatabaseError:
         code: str | None = None
