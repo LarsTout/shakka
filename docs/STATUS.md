@@ -12,7 +12,7 @@ Opdeling: goedgekeurd.
 | WP-05 | Evaluatie-engine (puur) | done | drempelwaarden toetsen in M1-testweek (blueprint 'Drempelwaarden', open punt O1) |
 | WP-06 | Kite-advies (puur) | done | AC-2 open: Lars toetst kite_examples.yaml en zet checked_by_lars: true |
 | WP-07 | Alertregels en windows (puur) | done | defaults min_go_hours=2, days_ahead=3 toetsen in M1-testweek |
-| WP-08 | Alert-deduplicatie en berichtopbouw (puur) | building | |
+| WP-08 | Alert-deduplicatie en berichtopbouw (puur) | verifying | |
 | WP-09 | Telegram-kanaal | dropped | Telegram vervallen, zie WP-17 (besluit Lars, 15 oktober 2026) |
 | WP-10 | Evaluatie- en alertjobs plus beheer-CLI | todo | |
 | WP-11 | Orkestratie: uurlijkse workflow, logging, foutmeldingen | todo | |
