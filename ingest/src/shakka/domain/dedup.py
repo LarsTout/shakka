@@ -268,3 +268,215 @@ class AlertEvent(_RevalidatingModel):
 class DiffResult(_RevalidatingModel):
     events: list[AlertEvent]
     new_state: list[AlertStateEntry]
+
+
+def _now_utc(now: datetime) -> datetime:
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("now must be timezone-aware")
+    return now.astimezone(UTC)
+
+
+def classify_change(
+    previous: WindowSnapshot, current: WindowSnapshot, *, now: datetime
+) -> AlertEventKind | None:
+    """IMPROVED, WORSENED or None by the thresholds (A3). `previous` is the baseline: what the
+    user was last told. ValueError on a naive now; an aware now is converted to UTC before
+    flooring. Gusts, confidence and direction are never a criterion."""
+    now = _now_utc(now)
+    first_hour = _floor_hour(now) + _HOUR
+    p_start = max(previous.start, first_hour)
+    d_start = current.start - p_start
+    d_end = current.end - previous.end
+    worse = d_start >= EDGE_SHIFT_THRESHOLD or d_end <= -EDGE_SHIFT_THRESHOLD
+    better = d_start <= -EDGE_SHIFT_THRESHOLD or d_end >= EDGE_SHIFT_THRESHOLD
+    if previous.start >= first_hour:  # no baseline hour has passed: wind is comparable
+        d_min = round(current.wind_min_kn - previous.wind_min_kn, 1)
+        d_max = round(current.wind_max_kn - previous.wind_max_kn, 1)
+        limit = WIND_CHANGE_THRESHOLD_KN
+        worse = worse or d_min <= -limit or d_max <= -limit
+        better = better or d_min >= limit or d_max >= limit
+    if worse:
+        return AlertEventKind.WORSENED
+    if better:
+        return AlertEventKind.IMPROVED
+    return None
+
+
+def _repair_overlaps(state: list[AlertStateEntry]) -> list[int]:
+    """Indices of live active entries that stay active (A15). The others (earliest
+    window_start wins, then lowest id, then input order) are set to expired in `state`,
+    without event. A repeated or duplicate notification for that case is accepted (R7: any
+    duplicate message, not only `new`)."""
+    live = sorted(
+        (i for i, e in enumerate(state) if e.status == "active"),
+        key=lambda i: (state[i].window_start, state[i].id or "", i),
+    )
+    kept: list[int] = []
+    for i in live:
+        e = state[i]
+        if any(
+            _overlap(e.window_start, e.window_end, state[k].window_start, state[k].window_end)
+            > _ZERO
+            for k in kept
+        ):
+            state[i] = e.model_copy(update={"status": "expired"})
+        else:
+            kept.append(i)
+    return kept
+
+
+def diff_windows(
+    previous: Sequence[AlertStateEntry], current: Sequence[Window], *, now: datetime
+) -> DiffResult:
+    """Match state entries of one user and one spot to the current windows and decide the
+    events (blueprint steps 0-13). Inputs are not modified. Overlapping live active entries
+    are repaired (earliest window_start, then lowest id, stays active; the others become
+    expired without an event). ValueError on a naive now, mixed spot_ids, duplicate ids,
+    overlapping windows or a window starting before floor_hour(now) + 1 h."""
+    now = _now_utc(now)
+    first_hour = _floor_hour(now) + _HOUR
+
+    spot_ids = {e.spot_id for e in previous} | {w.spot_id for w in current}
+    if len(spot_ids) > 1:
+        raise ValueError("entries and windows belong to more than one spot")
+    ids = [e.id for e in previous if e.id is not None]
+    if len(set(ids)) != len(ids):
+        raise ValueError("duplicate entry id")
+    windows = sorted(current, key=lambda w: w.start)
+    if any(a.end > b.start for a, b in zip(windows, windows[1:], strict=False)):
+        raise ValueError("current windows overlap")
+    if any(w.start < first_hour for w in windows):
+        raise ValueError("a window starts before the next whole hour")
+
+    snaps = [snapshot_window(w) for w in windows]
+    state = list(previous)
+    was_cancelled = {i for i, e in enumerate(previous) if e.status == "cancelled"}
+
+    for i, e in enumerate(state):  # step 3: expire
+        if e.status == "active" and e.window_end <= now:
+            state[i] = e.model_copy(update={"status": "expired"})
+    kept = _repair_overlaps(state)  # step 4
+
+    begun = sorted(
+        (i for i in kept if state[i].window_start <= now), key=lambda i: (state[i].window_start, i)
+    )
+    future = [i for i in kept if state[i].window_start > now]
+
+    match: dict[int, int] = {}  # entry index -> window index
+    taken: set[int] = set()
+    reactivated: set[int] = set()
+
+    for i in begun:  # phase 1
+        lo = max(state[i].window_start, first_hour)
+        for j, w in enumerate(windows):
+            if j not in taken and _overlap(lo, state[i].window_end, w.start, w.end) > _ZERO:
+                match[i] = j
+                taken.add(j)
+                break
+
+    def greedy(candidates: Sequence[int], reactivate: bool) -> None:
+        pairs = []
+        for i in candidates:
+            e = state[i]
+            for j, w in enumerate(windows):
+                if j in taken:
+                    continue
+                ov = _overlap(e.window_start, e.window_end, w.start, w.end)
+                if ov > _ZERO:
+                    pairs.append((-ov, w.start, e.window_start, e.window_end, e.id or "", i, j))
+        for *_, i, j in sorted(pairs):
+            if i in match or j in taken:
+                continue
+            match[i] = j
+            taken.add(j)
+            if reactivate:
+                reactivated.add(i)
+
+    greedy(future, False)  # phase 2
+    greedy(sorted(was_cancelled), True)  # phase 3
+
+    events: list[AlertEvent] = []
+    spot_id = next(iter(spot_ids), "")
+
+    for i, j in match.items():
+        e, w, c = state[i], windows[j], snaps[j]
+        if i in reactivated:
+            state[i] = e.model_copy(
+                update={
+                    "status": "active",
+                    "window_start": w.start,
+                    "window_end": w.end,
+                    "snapshot": c,
+                    "last_event": AlertEventKind.NEW,
+                }
+            )
+            events.append(
+                AlertEvent(
+                    kind=AlertEventKind.NEW,
+                    spot_id=spot_id,
+                    current=c,
+                    previous=None,
+                    state_index=i,
+                )
+            )
+            continue
+        kind = classify_change(e.snapshot, c, now=now)
+        start = e.window_start if e.window_start <= now else w.start
+        update: dict[str, Any] = {"window_start": start, "window_end": w.end}
+        if kind is not None:
+            update.update(snapshot=c, last_event=kind)
+            events.append(
+                AlertEvent(
+                    kind=kind, spot_id=spot_id, current=c, previous=e.snapshot, state_index=i
+                )
+            )
+        state[i] = e.model_copy(update=update)
+
+    for i in future:  # step 10: unmatched future entries
+        if i in match:
+            continue
+        e = state[i]
+        if any(_overlap(e.window_start, e.window_end, w.start, w.end) > _ZERO for w in windows):
+            state[i] = e.model_copy(update={"status": "expired"})
+        else:
+            state[i] = e.model_copy(
+                update={"status": "cancelled", "last_event": AlertEventKind.CANCELLED}
+            )
+            events.append(
+                AlertEvent(
+                    kind=AlertEventKind.CANCELLED,
+                    spot_id=spot_id,
+                    current=None,
+                    previous=e.snapshot,
+                    state_index=i,
+                )
+            )
+
+    for j, w in enumerate(windows):  # step 12: new windows
+        if j in taken:
+            continue
+        c = snaps[j]
+        state.append(
+            AlertStateEntry(
+                id=None,
+                spot_id=w.spot_id,
+                window_start=w.start,
+                window_end=w.end,
+                status="active",
+                snapshot=c,
+                last_event=AlertEventKind.NEW,
+                last_notified_at=None,
+            )
+        )
+        events.append(
+            AlertEvent(
+                kind=AlertEventKind.NEW,
+                spot_id=w.spot_id,
+                current=c,
+                previous=None,
+                state_index=len(state) - 1,
+            )
+        )
+
+    events.sort(key=lambda ev: ev.state_index)
+    return DiffResult(events=events, new_state=state)

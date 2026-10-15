@@ -3,8 +3,8 @@
 from collections.abc import Sequence
 from datetime import datetime, timedelta
 
-from alert_fixtures import SPOT_ID, H, utc
-from shakka.domain.alerts import Window
+from alert_fixtures import SPOT_ID, H, hour, rule, utc
+from shakka.domain.alerts import Window, find_windows
 from shakka.domain.consensus import Confidence
 from shakka.domain.dedup import (
     AlertEventKind,
@@ -25,6 +25,7 @@ __all__ = [
     "make_window",
     "persist",
     "utc",
+    "windows_from_pattern",
 ]
 
 NOW = utc(2026, 7, 15, 6)
@@ -117,3 +118,15 @@ def persist(state: list[AlertStateEntry], prefix: str = "id") -> list[AlertState
         e if e.id is not None else e.model_copy(update={"id": f"{prefix}-{i}"})
         for i, e in enumerate(state)
     ]
+
+
+def windows_from_pattern(
+    day_start: datetime, pattern: str, *, now: datetime, min_go_hours: int = 1
+) -> list[Window]:
+    """pattern like 'GG.GGG' (G = go hour, . = marginal) from day_start; uses
+    alert_fixtures.hour and find_windows(..., rule(min_go_hours=...), now=now)."""
+    evaluations = [
+        hour(day_start + i * H, verdict="go" if ch == "G" else "marginal")
+        for i, ch in enumerate(pattern)
+    ]
+    return find_windows(evaluations, rule(min_go_hours=min_go_hours), now=now)
