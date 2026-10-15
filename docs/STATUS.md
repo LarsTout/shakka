@@ -21,7 +21,7 @@ Opdeling: goedgekeurd.
 | WP-14 | Spotlijst en spotpagina | done | AC-7 open: Cloudflare Pages, APP_BASE_URL, terugknop-test (RUNBOOK §11.3, §13.2) |
 | WP-15 | Kaart | todo | |
 | WP-16 | Profiel, favorieten en alertinstellingen | todo | |
-| WP-17 | Web Push: backend (enige meldingskanaal) | approved | |
+| WP-17 | Web Push: backend (enige meldingskanaal) | building | |
 | WP-18 | Web Push: PWA | todo | |
 | WP-19 | Sessies: datamodel, RLS en RPC's | todo | |
 | WP-20 | Sessie aanmaken en delen | todo | |
