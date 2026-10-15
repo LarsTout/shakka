@@ -139,7 +139,7 @@ Pas daarna `CAPTURE_URL` en `CAPTURE_DATE` in `ingest/tests/test_openmeteo_forec
    - Redirect URLs: `https://<project>.pages.dev`, `https://<project>.pages.dev/**`, `https://*.<project>.pages.dev`, `https://*.<project>.pages.dev/**`, `http://localhost:5173` en `http://localhost:5173/**`.
 5. **Beperkingen.** De standaard-SMTP mailt alleen naar teamleden van het project, max. 2 per uur. Een inloglink is één keer bruikbaar en verloopt na 1 uur. Op iOS heeft een app op het beginscherm eigen opslag, los van Safari. Een magic link uit de mail logt je in Safari in, niet in de geïnstalleerde app (zie WP-18).
 6. **App-icoon vervangen.** Vervang de PNG's in `web/static/icons/` door bestanden met dezelfde naam en afmeting. `npm run icons` maakt de placeholders opnieuw.
-7. **Spotlijst, spotpagina en `/go` (vanaf WP-14).** De app leest alleen `spots`, `evaluations` en `tide_extremes`. Het oordeel gebruikt de standaardgrenzen van de spot, niet de persoonlijke instellingen. "Ouder dan 3 uur" kijkt naar `evaluated_at`; die is ook vers als alleen de forecast-ingest faalt, dus controleer bij twijfel `ingest_runs` (§13.5). Donkere uren (reden `dark`) zijn op de spotpagina standaard verborgen. `/go?spot=...&start=...&end=...` stuurt in M2 door naar `/spot/<spot>`; ongeldige parameters gaan naar `/`. De app pagineert per 1000 rijen; zet de Supabase-instelling "Max rows" (API settings) niet lager dan 1000.
+7. **Spotlijst, spotpagina en `/go` (vanaf WP-14).** De app leest alleen `spots`, `evaluations`, `tide_extremes` en (vanaf WP-12) `marine_hours`. Het oordeel gebruikt de standaardgrenzen van de spot, niet de persoonlijke instellingen. "Ouder dan 3 uur" kijkt naar `evaluated_at`; die is ook vers als alleen de forecast-ingest faalt, dus controleer bij twijfel `ingest_runs` (§13.5). Donkere uren (reden `dark`) zijn op de spotpagina standaard verborgen. `/go?spot=...&start=...&end=...` stuurt in M2 door naar `/spot/<spot>`; ongeldige parameters gaan naar `/`. De app pagineert per 1000 rijen; zet de Supabase-instelling "Max rows" (API settings) niet lager dan 1000.
 8. **Profiel, favorieten en alerts in de app (vanaf WP-16).** Ingelogd zie je een ster bij elke spot (favoriet) en de pagina's Profiel en Alerts. Ze schrijven naar dezelfde tabellen als `shakka admin` (§12). Een favoriet zonder eigen instellingen gebruikt de standaard; "Standaardinstellingen" verwijdert de eigen regel. Een spot uit de favorieten halen verwijdert ook de regel. Ontbreekt een profiel ("Je profiel is niet gevonden"), voer dan in de SQL Editor de backfill uit de migratie uit: `insert into public.profiles (user_id) select id from auth.users on conflict (user_id) do nothing;`. Controle (WP-16 AC-7): zie §12 punt 6 (`admin alerts preview`).
 
 ## 12. Alerts in M1 (vanaf WP-10)
@@ -160,7 +160,7 @@ In M1 worden er nog geen meldingen verstuurd. De alertjob berekent per favoriet 
 10. **Oude `TELEGRAM_*`-variabelen.** Die mag je uit je lokale `.env` halen. Ze worden genegeerd en zijn niet meer nodig.
 
 ## 13. Uurlijkse run (vanaf WP-11)
-1. **Wat draait er.** Elk uur om :17 UTC (geen garantie: GitHub kan vertragen of een run overslaan) draait `shakka run-hourly`: `spots_sync`, `forecast`, `tides`, `evaluate`, `alerts`, met foutisolatie per stap. De schedule draait de code van `main`, met het workflowbestand van `develop` (de default branch). Alleen als de variable `HOURLY_ENABLED` op `true` staat. Er draait één run tegelijk.
+1. **Wat draait er.** Elk uur om :17 UTC (geen garantie: GitHub kan vertragen of een run overslaan) draait `shakka run-hourly`: `spots_sync`, `forecast`, `marine`, `tides`, `evaluate`, `alerts`, met foutisolatie per stap. De schedule draait de code van `main`, met het workflowbestand van `develop` (de default branch). Alleen als de variable `HOURLY_ENABLED` op `true` staat. Er draait één run tegelijk.
 2. **Eenmalige setup.**
    - Repo Settings, Secrets and variables, Actions: secrets `SUPABASE_URL` en `SUPABASE_SECRET_KEY`; vanaf WP-17 ook `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` en `VAPID_SUBJECT` (zonder deze secrets geen pushmeldingen, zie §14); de variable `APP_BASE_URL` op de productie-URL zonder pad of slash aan het eind (bijv. `https://<project>.pages.dev`), vanaf WP-14. Daarmee bevat elk alertbericht een werkende "ik ga"-link (`/go`).
    - Settings, Actions, General: Actions aan.
@@ -198,3 +198,25 @@ Laatste activiteitscommit: 2026-10-15
 9. **Overgang naar push (optioneel).** Wie push aanzet nadat hij al favorieten had (Lars bij de overgang uit M1, maar ook elke latere gebruiker), krijgt de lopende windows niet als melding. Wil je dat voor één gebruiker toch: na het aanzetten van push in de app de SQL `delete from public.alert_state where user_id = '<id>' and status = 'active';` in de SQL Editor; de volgende run pusht de lopende windows als nieuw.
 10. **Sleutels vervangen.** Zet de nieuwe sleutels overal, draai daarna `delete from public.push_subscriptions;` (oude abonnementen werken niet met een nieuwe sleutel) en zet push in de app opnieuw aan.
 11. **Privacy.** Endpoints, sleutels en het subject komen nooit in logs of uitvoer. `shakka alerts run` levert lokaal ook echt af; gebruik `--dry-run` om niets te sturen.
+
+## 15. Golven (Open-Meteo Marine, vanaf WP-12)
+1. **Wat er gebeurt.** Elk uur, direct na de forecast, haalt de ingest per spot met coördinaten golfhoogte, golfperiode en golfrichting op bij de Open-Meteo Marine API (server-side) en bewaart die in `marine_hours`. Rijen ouder dan 48 uur worden opgeruimd. Golven zijn alleen informatie: ze tellen niet mee in het oordeel of in alerts. Ontwerp: `docs/wp/WP-12/blueprint.md`.
+2. **Commando** (vanuit `ingest/`). `uv run shakka marine fetch`. Eerste regel: `marine: spots=<n> rows=<n> calls=<x.xx> deleted=<n> skipped_budget=<yes|no> errors=<n>`, daarna per fout `error   chunk <n>/<totaal>: <melding>`, en tot slot `marine: ok` of `marine: failed`. Exit 0 bij succes; exit 1 bij fouten per chunk, een budgetstop, een onvolledige config of een databasefout. Er is geen `--dry-run`; `shakka forecast fetch --dry-run` toont het gedeelde verbruik al.
+3. **Modellen.** Eerst DWD EWAM (ca. 80 uur vooruit, ook op het IJsselmeer), daarna per uur ECMWF WAM (7 dagen, alleen kust), met `cell_selection=sea` (blueprint A1). Waarden van twee modellen komen nooit in één rij. Een spot zonder golfdata in beide modellen (binnenland) krijgt geen rijen.
+4. **Budget.** Gedeeld met de wind: bron `open_meteo_marine` in `api_usage`, ca. 1 call per spot per run (de guard telt alle bronnen met prefix `open_meteo_`).
+5. **Fouten.** Een mislukte marinestap geeft geen mail: de stap wordt `partial` of `failed` in `ingest_runs` (stap `marine`, zie §13.5) en de run `partial` met exitcode 0. De app verbergt golfdata met een `fetched_at` ouder dan 3 uur zonder melding.
+6. **Lokale test (AC-5).**
+   1. `supabase start`, en zet `.env` tijdelijk op de lokale stack (sectie 6).
+   2. Voeg een test-spot toe zoals in §9 (id `test-strand`, 52.47 / 4.57).
+   3. `uv run shakka marine fetch` (exit 0, `rows` > 0) en controleer met `select count(*), min(valid_at), max(valid_at) from public.marine_hours where spot_id = 'test-strand';` dat er rijen tot ca. dag 7 staan.
+   4. Draai het commando nogmaals: het aantal rijen verdubbelt niet.
+   5. Zet `.env` terug en verwijder de test-spot (de rijen verdwijnen mee). Draai `supabase test db` bij voorkeur na `supabase db reset`; de pgTAP-test filtert wel op `pgtap-spot`, dus losse rijen van andere spots storen niet.
+7. **Fixture opnieuw vastleggen.** Alleen nodig als een request-parameter verandert (`test_fixture_matches_current_params` faalt) of de dekking verandert. Vanuit de repo-root:
+
+   ```
+   curl -sS --fail -o ingest/tests/fixtures/openmeteo/marine_3loc_2models.json \
+    "https://marine-api.open-meteo.com/v1/marine?latitude=52.4700,52.7500,52.0900&longitude=4.5700,5.3000,5.1200&hourly=wave_height,wave_period,wave_direction&models=ewam,ecmwf_wam&timezone=GMT&timeformat=unixtime&forecast_days=7&cell_selection=sea"
+   ```
+
+   Pas daarna `CAPTURE_URL` en `CAPTURE_DATE` in `ingest/tests/test_openmeteo_marine.py` en de opnamedatum in `ingest/tests/fixtures/openmeteo/README.md` aan. Verandert de dekking (bijvoorbeeld ECMWF krijgt IJsselmeer-data), dan faalt `test_fixture_lake_uses_ewam_only`; pas die test dan aan.
+8. **Na de merge.** `supabase db push` (§8): de migratie `20261015180000_marine_hours.sql` maakt `marine_hours`.
