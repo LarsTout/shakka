@@ -7,7 +7,7 @@
 	// Safety net: the load in +page.ts normally redirects before this renders. replace keeps the
 	// back button from returning to /go (review N-4).
 	onMount(() => {
-		void goto(goTarget(page.url), { replace: true });
+		void goto(goTarget(new URL(page.url.href)), { replace: true });
 	});
 </script>
 
