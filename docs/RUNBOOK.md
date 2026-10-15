@@ -131,14 +131,15 @@ Pas daarna `CAPTURE_URL` en `CAPTURE_DATE` in `ingest/tests/test_openmeteo_forec
 3. **Cloudflare Pages (eenmalig, Lars).**
    - Workers & Pages, Create, Pages, Connect to Git, repo `LarsTout/shakka`;
    - production branch `main`;
-   - framework preset "None", build command `npm run build`, build output directory `build`, root directory `web`;
+   - framework preset "None", root directory leeg (repo-root), build command `cd web && npm ci && npm run build`, build output directory `web/build`. De app importeert `data/contracts/*.json` buiten `web/`; daarom bouwt Pages vanaf de repo-root (WP-14). Optioneel: build watch paths `web/*` en `data/contracts/*`, zodat een push die alleen `ingest/` raakt geen Pages-build start (gratis tier: 500 builds per maand);
    - Preview branches: alle niet-productiebranches (dus `develop` en `wp/*`);
-   - environment variables voor **Production en Preview**: `PUBLIC_SUPABASE_URL`, `PUBLIC_SUPABASE_PUBLISHABLE_KEY` en `NODE_VERSION=24.22.0` (het standaardimage heeft Node 22.16, en dat is te oud voor SvelteKit 3). Installeert 24.22.0 niet, gebruik dan een eerdere 24.x vanaf 24.15.
+   - environment variables voor **Production en Preview**: `PUBLIC_SUPABASE_URL`, `PUBLIC_SUPABASE_PUBLISHABLE_KEY` en `NODE_VERSION=24.22.0` (het standaardimage heeft Node 22.16, en dat is te oud voor SvelteKit 3; `web/.nvmrc` wordt vanaf de repo-root niet gelezen). Installeert 24.22.0 niet, gebruik dan een eerdere 24.x vanaf 24.15.
 4. **Supabase Auth (Lars).** Authentication, URL Configuration:
    - Site URL: `https://<project>.pages.dev`;
    - Redirect URLs: `https://<project>.pages.dev`, `https://<project>.pages.dev/**`, `https://*.<project>.pages.dev`, `https://*.<project>.pages.dev/**`, `http://localhost:5173` en `http://localhost:5173/**`.
 5. **Beperkingen.** De standaard-SMTP mailt alleen naar teamleden van het project, max. 2 per uur. Een inloglink is één keer bruikbaar en verloopt na 1 uur. Op iOS heeft een app op het beginscherm eigen opslag, los van Safari. Een magic link uit de mail logt je in Safari in, niet in de geïnstalleerde app (zie WP-18).
 6. **App-icoon vervangen.** Vervang de PNG's in `web/static/icons/` door bestanden met dezelfde naam en afmeting. `npm run icons` maakt de placeholders opnieuw.
+7. **Spotlijst, spotpagina en `/go` (vanaf WP-14).** De app leest alleen `spots`, `evaluations` en `tide_extremes`. Het oordeel gebruikt de standaardgrenzen van de spot, niet de persoonlijke instellingen. "Ouder dan 3 uur" kijkt naar `evaluated_at`; die is ook vers als alleen de forecast-ingest faalt, dus controleer bij twijfel `ingest_runs` (§13.5). Donkere uren (reden `dark`) zijn op de spotpagina standaard verborgen. `/go?spot=...&start=...&end=...` stuurt in M2 door naar `/spot/<spot>`; ongeldige parameters gaan naar `/`. De app pagineert per 1000 rijen; zet de Supabase-instelling "Max rows" (API settings) niet lager dan 1000.
 
 ## 12. Alerts in M1 (vanaf WP-10)
 In M1 worden er nog geen meldingen verstuurd. De alertjob berekent per favoriet of er een go-window is en legt dat vast in `alert_state`. Zo controleer je lokaal of de alerts kloppen; versturen komt in WP-17.
@@ -159,7 +160,7 @@ In M1 worden er nog geen meldingen verstuurd. De alertjob berekent per favoriet 
 ## 13. Uurlijkse run (vanaf WP-11)
 1. **Wat draait er.** Elk uur om :17 UTC (geen garantie: GitHub kan vertragen of een run overslaan) draait `shakka run-hourly`: `spots_sync`, `forecast`, `tides`, `evaluate`, `alerts`, met foutisolatie per stap. De schedule draait de code van `main`, met het workflowbestand van `develop` (de default branch). Alleen als de variable `HOURLY_ENABLED` op `true` staat. Er draait één run tegelijk.
 2. **Eenmalige setup.**
-   - Repo Settings, Secrets and variables, Actions: secrets `SUPABASE_URL` en `SUPABASE_SECRET_KEY`; optioneel de variable `APP_BASE_URL` (pas zinvol na WP-14).
+   - Repo Settings, Secrets and variables, Actions: secrets `SUPABASE_URL` en `SUPABASE_SECRET_KEY`; de variable `APP_BASE_URL` op de productie-URL zonder pad of slash aan het eind (bijv. `https://<project>.pages.dev`), vanaf WP-14. Daarmee bevat elk alertbericht een werkende "ik ga"-link (`/go`).
    - Settings, Actions, General: Actions aan.
    - E-mailmeldingen: github.com, Settings, Notifications, onderdeel voor Actions ("workflow runs updates on repositories set up with GitHub Actions"). Zet e-mail aan, desgewenst alleen bij gefaalde workflows. De GitHub-documentatie noemt deze opties maar geeft het exacte menupad niet; controleer de namen in de actuele interface.
    - Wie de mail krijgt: wie `hourly.yml` heeft aangemaakt, of als laatste de cron wijzigde, of de workflow opnieuw aanzette. Controleer dat jij dat bent.
