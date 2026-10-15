@@ -166,7 +166,7 @@ delete from public.sessions where id = 'b0000000-0000-4000-8000-000000000001';
 select is_empty($$select 1 from public.rsvps where session_id = 'b0000000-0000-4000-8000-000000000001'$$, 'deleting a session removes its rsvps');
 delete from auth.users where id = '11111111-1111-1111-1111-111111111111';
 select is_empty($$select 1 from public.sessions where organizer_id = '11111111-1111-1111-1111-111111111111'$$, 'deleting a user removes the sessions');
-select throws_ok($$delete from public.spots where id = 'pgtap-spot'$$, '23001', null, 'a spot with sessions cannot be deleted (restrict)');
+select throws_ok($$delete from public.spots where id = 'pgtap-spot'$$, '23503', null, 'a spot with sessions cannot be deleted (restrict)');
 
 select * from finish();
 rollback;
