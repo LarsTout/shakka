@@ -16,7 +16,7 @@ Opdeling: goedgekeurd.
 | WP-09 | Telegram-kanaal | dropped | Telegram vervallen, zie WP-17 (besluit Lars, 15 oktober 2026) |
 | WP-10 | Evaluatie- en alertjobs plus beheer-CLI | done | AC-11 open: M1-check door Lars (RUNBOOK §12, verification.md) |
 | WP-11 | Orkestratie: uurlijkse workflow, logging, foutmeldingen | done | AC-6 open: eerste echte run na promotie naar main (RUNBOOK §13) |
-| WP-12 | Marine-ingest (golven) en golven op de spotpagina | building | weergave verhuisd uit WP-14 (A-17) |
+| WP-12 | Marine-ingest (golven) en golven op de spotpagina | verifying | weergave verhuisd uit WP-14 (A-17) |
 | WP-13 | PWA-basis | done | AC-7 open: Cloudflare Pages + Supabase Auth-URLs door Lars (RUNBOOK §11) |
 | WP-14 | Spotlijst en spotpagina | done | AC-7 open: Cloudflare Pages, APP_BASE_URL, terugknop-test (RUNBOOK §11.3, §13.2) |
 | WP-15 | Kaart | todo | |
