@@ -20,7 +20,7 @@ Opdeling: goedgekeurd.
 | WP-13 | PWA-basis | done | AC-7 open: Cloudflare Pages + Supabase Auth-URLs door Lars (RUNBOOK §11) |
 | WP-14 | Spotlijst en spotpagina | done | AC-7 open: Cloudflare Pages, APP_BASE_URL, terugknop-test (RUNBOOK §11.3, §13.2) |
 | WP-15 | Kaart | todo | |
-| WP-16 | Profiel, favorieten en alertinstellingen | blueprint | |
+| WP-16 | Profiel, favorieten en alertinstellingen | in_review | |
 | WP-17 | Web Push: backend (enige meldingskanaal) | done | supabase db push (push_subscriptions) door Lars; echte test-push na WP-18 |
 | WP-18 | Web Push: PWA | todo | |
 | WP-19 | Sessies: datamodel, RLS en RPC's | todo | |
