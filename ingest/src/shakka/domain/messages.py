@@ -1,7 +1,7 @@
 """Channel-independent Dutch alert messages and the "ik ga" link (WP-08). Pure.
 
 The body is built in order of importance (time and wind first), so a channel can shorten it
-by taking whole lines from the start. URL encoding is done here (no urllib in the domain).
+by taking whole lines from the start. URL encoding is done here, without URL libraries.
 """
 
 import math
@@ -98,7 +98,7 @@ def format_window_local(start: datetime, end: datetime) -> str:
 
 
 def _quote(text: str) -> str:
-    """Percent-encode like urllib.parse.quote(text, safe="")."""
+    """Percent-encode like the standard-library quote with an empty safe set."""
     return "".join(c if c in _URL_SAFE else "".join(f"%{b:02X}" for b in c.encode()) for c in text)
 
 
@@ -119,7 +119,8 @@ def _check_base_url(base_url: str) -> str:
 
 def build_go_url(base_url: str, spot_id: str, start: datetime, end: datetime) -> str:
     """{base_url}/go?spot={spot_id}&start={start}&end={end}; start/end ISO 8601 UTC with Z,
-    percent-encoded like urllib.parse.quote(s, safe=""). Trailing '/' of base_url is dropped.
+    percent-encoded like the standard-library quote with an empty safe set. Trailing '/' of
+    base_url is dropped.
     ValueError on an invalid base_url, naive or non-whole-hour times, or start >= end."""
     base = _check_base_url(base_url)
     _check_aware(start, end)
