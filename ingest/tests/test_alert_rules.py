@@ -361,7 +361,9 @@ def test_ranges_match_migration() -> None:
 def test_no_bypass_parameters() -> None:
     assert list(inspect.signature(resolve_rule).parameters) == ["spot", "profile", "override"]
     assert list(inspect.signature(rider_limits).parameters) == ["rule"]
-    # FIND_WINDOWS_SIGNATURE_CHECK
+    params = inspect.signature(alerts.find_windows).parameters
+    assert list(params) == ["evaluations", "rule", "now"]
+    assert params["now"].kind is inspect.Parameter.KEYWORD_ONLY
     for name, fn in inspect.getmembers(alerts, inspect.isfunction):
         if name.startswith("_") or fn.__module__ != alerts.__name__:
             continue

@@ -6,15 +6,15 @@ refuse them, and Window refuses any hour that is not a ridable go.
 """
 
 from collections.abc import Mapping, Sequence
-from datetime import time
+from datetime import UTC, datetime, time, timedelta
 from enum import StrEnum
 from typing import Annotated, Any, Final, Self
 
 from pydantic import BaseModel, ConfigDict, Field, StrictInt, field_validator, model_validator
 
-from shakka.domain.defaults import DEFAULT_MAX_KN, DEFAULT_MIN_KN, MIN_LIMIT_SPAN_KN
+from shakka.domain.defaults import DEFAULT_MAX_KN, DEFAULT_MIN_KN, LOCAL_TZ, MIN_LIMIT_SPAN_KN
 from shakka.domain.direction import RIDABLE_DIR_CLASSES, DirClass
-from shakka.domain.evaluation import RiderLimits
+from shakka.domain.evaluation import HourEvaluation, RiderLimits, Verdict
 from shakka.domain.spot import SpotProfile
 
 DEFAULT_MIN_GO_HOURS: Final = 2
@@ -283,3 +283,100 @@ def resolve_rule(
 def rider_limits(rule: AlertRule) -> RiderLimits:
     """RiderLimits(min_kn=rule.min_kn, max_kn=rule.max_kn)."""
     return RiderLimits(min_kn=rule.min_kn, max_kn=rule.max_kn)
+
+
+class Window(_RevalidatingModel):
+    spot_id: str = Field(min_length=1)
+    start: datetime
+    end: datetime
+    hours: tuple[HourEvaluation, ...]
+
+    @field_validator("start", "end")
+    @classmethod
+    def _aware_utc(cls, value: datetime) -> datetime:
+        if value.tzinfo is None or value.utcoffset() is None:
+            raise ValueError("window times must be timezone-aware")
+        return value.astimezone(UTC)
+
+    @model_validator(mode="after")
+    def _invariants(self) -> Self:
+        hours = self.hours
+        if not hours:
+            raise ValueError("a window needs at least one hour")
+        if any(h.spot_id != self.spot_id for h in hours):
+            raise ValueError("all hours must belong to the window's spot")
+        if any(b.valid_at - a.valid_at != _HOUR for a, b in zip(hours, hours[1:], strict=False)):
+            raise ValueError("window hours must be consecutive")
+        if self.start != hours[0].valid_at or self.end != hours[-1].valid_at + _HOUR:
+            raise ValueError("start and end must match the first and last hour")
+        if any(h.verdict != Verdict.GO or h.dir_class not in RIDABLE_DIR_CLASSES for h in hours):
+            raise ValueError("window hours must be go with a ridable direction class")
+        return self
+
+
+_HOUR: Final = timedelta(hours=1)
+
+
+def _floor_hour(value: datetime) -> datetime:
+    return value.replace(minute=0, second=0, microsecond=0)
+
+
+def _qualifies(ev: HourEvaluation, rule: AlertRule, first_hour: datetime, last_day: Any) -> bool:
+    local = ev.valid_at.astimezone(LOCAL_TZ)
+    t = time(local.hour, local.minute)
+    return (
+        ev.verdict == Verdict.GO
+        and ev.dir_class is not None
+        and ev.dir_class in RIDABLE_DIR_CLASSES
+        and ev.dir_class in rule.dir_classes
+        and local.isoweekday() in rule.weekdays
+        and (rule.earliest_local is None or t >= rule.earliest_local)
+        and (rule.latest_local is None or t < rule.latest_local)
+        and ev.valid_at >= first_hour
+        and local.date() <= last_day
+    )
+
+
+def find_windows(
+    evaluations: Sequence[HourEvaluation], rule: AlertRule, *, now: datetime
+) -> list[Window]:
+    """Maximal runs of consecutive qualifying hours with length >= rule.min_go_hours, sorted by
+    start. [] if rule.enabled is False. ValueError on a naive now, mixed spot_ids or a
+    duplicate valid_at. Input order is free and the input is not modified."""
+    if now.tzinfo is None or now.utcoffset() is None:
+        raise ValueError("now must be timezone-aware")
+    now = now.astimezone(UTC)
+    if not rule.enabled:
+        return []
+    if len({ev.spot_id for ev in evaluations}) > 1:
+        raise ValueError("evaluations belong to more than one spot")
+    ordered = sorted(evaluations, key=lambda ev: ev.valid_at)
+    if len({ev.valid_at for ev in ordered}) != len(ordered):
+        raise ValueError("duplicate valid_at in evaluations")
+    if not ordered:
+        return []
+
+    first_hour = _floor_hour(now) + _HOUR
+    last_day = now.astimezone(LOCAL_TZ).date() + timedelta(days=rule.days_ahead)
+
+    runs: list[list[HourEvaluation]] = []
+    current: list[HourEvaluation] = []
+    for ev in ordered:
+        if not _qualifies(ev, rule, first_hour, last_day):
+            current = []
+            continue
+        if current and ev.valid_at - current[-1].valid_at == _HOUR:
+            current.append(ev)
+        else:
+            current = [ev]
+            runs.append(current)
+    return [
+        Window(
+            spot_id=run[0].spot_id,
+            start=run[0].valid_at,
+            end=run[-1].valid_at + _HOUR,
+            hours=tuple(run),
+        )
+        for run in runs
+        if len(run) >= rule.min_go_hours
+    ]
