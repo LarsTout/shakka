@@ -12,6 +12,7 @@ from fakes import FakeSupabase
 from job_fixtures import MODELS3, USER_A, WINDS, at, seed_favorite, seed_profile
 from shakka.config import Settings
 from shakka.domain.forecast import ForecastHour, SpotLocation
+from shakka.domain.marine import MarineHour
 
 PIPELINE_SPOT: dict[str, Any] = {
     "id": "test-strand",
@@ -59,6 +60,29 @@ def fake_forecast_fetch(
 
 
 def failing_forecast_fetch(exc: Exception) -> Callable[..., list[ForecastHour]]:
+    def fetch(http: httpx.Client, locations: Sequence[SpotLocation], **kw: Any) -> list:
+        raise exc
+
+    return fetch
+
+
+def fake_marine_fetch(
+    http: httpx.Client, locations: Sequence[SpotLocation], *, forecast_days: int = 7
+) -> list[MarineHour]:
+    return [
+        MarineHour(
+            spot_id=loc.spot_id,
+            valid_at=at(h),
+            wave_height_m=1.0,
+            wave_period_s=5.0,
+            wave_dir_deg=270,
+        )
+        for loc in locations
+        for h in WINDS
+    ]
+
+
+def failing_marine_fetch(exc: Exception) -> Callable[..., list[MarineHour]]:
     def fetch(http: httpx.Client, locations: Sequence[SpotLocation], **kw: Any) -> list:
         raise exc
 

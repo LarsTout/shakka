@@ -66,6 +66,19 @@ def forecast_fetch(dry_run: bool) -> None:
     raise SystemExit(run_forecast_cli(dry_run=dry_run, echo=click.echo))
 
 
+@cli.group()
+def marine() -> None:
+    """Wave forecast ingest (Open-Meteo Marine, server-side). Display only."""
+
+
+@marine.command("fetch")
+def marine_fetch() -> None:
+    """Fetch wave forecasts for all spots with coordinates."""
+    from shakka.jobs.marine import run_marine_cli
+
+    raise SystemExit(run_marine_cli(echo=click.echo))
+
+
 @cli.command()
 def evaluate() -> None:
     """Evaluate all spots with the spot defaults and store the hourly verdicts."""
@@ -384,7 +397,10 @@ def admin_alerts_preview(user_id) -> None:
 
 @cli.command("run-hourly")
 def run_hourly_cmd() -> None:
-    """Run all hourly steps (spots sync, forecast, tides, evaluate, alerts) and record the run."""
+    """Run all hourly steps (spots sync, forecast, marine, tides, evaluate, alerts).
+
+    Records the run.
+    """
     from shakka.pipeline import run_hourly_cli
 
     raise SystemExit(run_hourly_cli(echo=click.echo))

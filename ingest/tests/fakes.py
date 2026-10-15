@@ -339,6 +339,7 @@ class FakeSupabase:
             spot_ids = {row["id"] for row in matched}
             for child in (
                 "forecast_hours",
+                "marine_hours",
                 "evaluations",
                 "favorites",
                 "alert_rules",

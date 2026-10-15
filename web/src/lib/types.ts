@@ -272,3 +272,22 @@ export interface AlertDefaults {
 	min_go_hours: AlertDefaultItem<number>;
 	days_ahead: AlertDefaultItem<number>;
 }
+
+/** Row of public.marine_hours (all columns). Display only (WP-12). */
+export interface MarineHour {
+	spot_id: string;
+	valid_at: string;
+	wave_height_m: number | null;
+	wave_period_s: number | null;
+	wave_dir_deg: number | null;
+	fetched_at: string;
+}
+
+export const MARINE_HOUR_COLUMNS = [
+	'spot_id',
+	'valid_at',
+	'wave_height_m',
+	'wave_period_s',
+	'wave_dir_deg',
+	'fetched_at'
+] as const;

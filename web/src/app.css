@@ -250,3 +250,13 @@ fieldset label {
 [aria-invalid='true'] {
 	border-color: #a4161a;
 }
+
+/* WP-12: waves */
+.waves {
+	margin: 0.25rem 0 0.5rem;
+	font-size: 0.875rem;
+}
+
+.waves-note {
+	font-size: 0.875rem;
+}

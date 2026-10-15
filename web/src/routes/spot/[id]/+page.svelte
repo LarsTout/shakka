@@ -13,7 +13,9 @@
 		statusLabel,
 		tideText
 	} from '#lib/labels.js';
+	import { WAVES_NOTE_NL, marineByHour, waveText } from '#lib/marine.js';
 	import { localDateKey } from '#lib/time.js';
+	import type { MarineHour } from '#lib/types.js';
 	import {
 		dayHeading,
 		groupByLocalDay,
@@ -33,6 +35,16 @@
 	const groups = $derived(data.kind === 'ok' ? groupByLocalDay(data.evaluations) : []);
 	const latest = $derived(data.kind === 'ok' ? latestEvaluatedAt(data.evaluations) : null);
 	const station = $derived(data.kind === 'ok' ? data.spot.rws_station?.trim() || null : null);
+
+	const waves = $derived(
+		data.kind === 'ok' ? marineByHour(data.marine, now) : new Map<number, MarineHour>()
+	);
+	// The note only shows when at least one wave line is visible (review N-3).
+	const anyWaveVisible = $derived(
+		groups.some((g) =>
+			visibleHours(g.hours, showDark).some((e) => waves.has(Date.parse(e.valid_at)))
+		)
+	);
 
 	const title = $derived(
 		data.kind === 'ok'
@@ -87,6 +99,7 @@
 		Het oordeel gebruikt de standaardgrenzen van deze spot, niet je eigen alertinstellingen.
 	</p>
 	<Freshness {latest} {now} showUpdated />
+	{#if anyWaveVisible}<p class="muted waves-note">{WAVES_NOTE_NL}</p>{/if}
 
 	{#if groups.length === 0}
 		<p class="no-data">Nog geen data voor deze spot.</p>
@@ -107,7 +120,11 @@
 				{#if hours.length}
 					<ol class="hours">
 						{#each hours as e (e.valid_at)}
-							<li><HourVerdict evaluation={e} /></li>
+							{@const wave = waves.get(Date.parse(e.valid_at))}
+							<li>
+								<HourVerdict evaluation={e} />
+								{#if wave}<p class="waves">{waveText(wave)}</p>{/if}
+							</li>
 						{/each}
 					</ol>
 				{:else}

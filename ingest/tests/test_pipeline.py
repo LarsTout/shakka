@@ -11,12 +11,14 @@ import pywebpush
 import shakka.pipeline as pipeline
 from evaluation_fixtures import make_spot
 from fakes import FakeSupabase
-from job_fixtures import NOW, USER_A, seed_favorite, seed_forecasts, seed_profile
+from job_fixtures import NOW, USER_A, WINDS, seed_favorite, seed_forecasts, seed_profile
 from pipeline_fixtures import (
     PIPELINE_SPOT,
     blocked_http,
     failing_forecast_fetch,
+    failing_marine_fetch,
     fake_forecast_fetch,
+    fake_marine_fetch,
     make_settings,
     no_tides,
     seed_user,
@@ -290,6 +292,7 @@ def test_steps_sequence_type():
 def run_real(tmp_path, db, *, spots=(PIPELINE_SPOT,), settings=None, **kw) -> RunReport:
     settings = settings or make_settings(write_spots_yaml(tmp_path, spots))
     kw.setdefault("forecast_fetch", fake_forecast_fetch)
+    kw.setdefault("marine_fetch", fake_marine_fetch)
     kw.setdefault("tide_fetch", no_tides)
     return run_hourly(settings, now=NOW, db=db, http=blocked_http(), **kw)
 
@@ -300,7 +303,7 @@ def step(report: RunReport, name: str) -> StepReport:
 
 def test_steps_contract_order():
     assert [n for n, _ in pipeline.STEPS] == [
-        "spots_sync", "forecast", "tides", "evaluate", "alerts",
+        "spots_sync", "forecast", "marine", "tides", "evaluate", "alerts",
     ]  # fmt: skip
     assert [n for n, _ in pipeline.STEPS] == list(pipeline.STEP_NAMES)
 
@@ -430,6 +433,81 @@ def test_budget_below_threshold_no_warning(tmp_path, calls):
     assert step(report, "forecast").warnings == ()
 
 
+# -- marine step (WP-12) -----------------------------------------------------------------------
+
+
+def test_marine_step_ok_counts(tmp_path):
+    db = FakeSupabase()
+    report = run_real(tmp_path, db)
+    marine = step(report, "marine")
+    assert marine.status == "ok"
+    assert marine.counts["rows"] == len(WINDS) and marine.counts["calls"] == 1.0
+    assert len(db.rows("marine_hours")) == len(WINDS)
+    assert {r["source"] for r in db.rows("api_usage")} == {
+        "open_meteo_forecast",
+        "open_meteo_marine",
+    }
+
+
+def test_marine_exception_is_partial_run(tmp_path):
+    db = FakeSupabase()
+    seed_user(db)
+    report = run_real(tmp_path, db, marine_fetch=failing_marine_fetch(RuntimeError("boom")))
+    marine = step(report, "marine")
+    assert marine.status == "failed" and marine.error_type == "RuntimeError"
+    assert [step(report, n).status for n in ("tides", "evaluate", "alerts")] == ["ok"] * 3
+    assert report.status == "partial" and report.exit_code == 0
+    assert step(report, "alerts").counts["events"] == 1
+
+
+def test_marine_fetch_error_is_partial_step(tmp_path):
+    from shakka.openmeteo.marine import MarineFetchError
+
+    db = FakeSupabase()
+    report = run_real(tmp_path, db, marine_fetch=failing_marine_fetch(MarineFetchError("down")))
+    marine = step(report, "marine")
+    assert marine.status == "partial"
+    assert marine.counts["errors"] == ["chunk 1/1: down"]
+    assert report.status == "partial" and report.exit_code == 0
+    assert db.rows("marine_hours") == []
+
+
+def test_marine_budget_skipped_after_forecast(tmp_path):
+    db = FakeSupabase()
+    db.seed(
+        "api_usage",
+        [{"day": "2026-07-15", "source": "open_meteo_forecast", "calls": 7998.5, "requests": 1}],
+    )
+    report = run_real(tmp_path, db)
+    assert step(report, "forecast").status == "ok"
+    marine = step(report, "marine")
+    assert marine.status == "partial" and marine.counts["skipped_budget"] is True
+    assert marine.warnings == (pipeline.MARINE_BUDGET_WARNING,)
+    assert (
+        "::warning::marine: Open-Meteo budget guard reached: marine request skipped"
+        in report.annotations
+    )
+    assert report.status == "partial" and report.exit_code == 0
+    assert db.rows("marine_hours") == []
+
+
+def test_marine_fallback_looks_up_module_function(tmp_path, monkeypatch):
+    import shakka.openmeteo.marine as om_marine
+
+    monkeypatch.setattr(om_marine, "fetch_marine", fake_marine_fetch)
+    db = FakeSupabase()
+    settings = make_settings(write_spots_yaml(tmp_path))
+    report = run_hourly(
+        settings,
+        now=NOW,
+        db=db,
+        http=blocked_http(),
+        forecast_fetch=fake_forecast_fetch,
+        tide_fetch=no_tides,
+    )
+    assert step(report, "marine").status == "ok"
+
+
 def test_spots_sync_failure_continues(tmp_path):
     db = FakeSupabase()
     seed_user(db)
@@ -438,7 +516,7 @@ def test_spots_sync_failure_continues(tmp_path):
     report = run_real(tmp_path, db, settings=settings)
     sync = step(report, "spots_sync")
     assert sync.status == "failed" and sync.error_type == "SpotValidationError"
-    assert [s.status for s in report.steps[1:]] == ["ok"] * 4
+    assert [s.status for s in report.steps[1:]] == ["ok"] * 5
     assert report.status == "partial" and report.exit_code == 0
 
 

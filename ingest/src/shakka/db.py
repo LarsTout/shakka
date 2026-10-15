@@ -29,6 +29,7 @@ RESERVED_PARAMS: Final = frozenset(
 TABLE_KEYS: Final[Mapping[str, tuple[str, ...]]] = {
     "spots": ("id",),
     "forecast_hours": ("spot_id", "model", "valid_at"),
+    "marine_hours": ("spot_id", "valid_at"),
     "tide_extremes": ("station", "at"),
     "evaluations": ("spot_id", "valid_at"),
     "profiles": ("user_id",),

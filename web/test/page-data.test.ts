@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { NOW_FRESH, SPOT_UNVERIFIED, SPOT_VERIFIED } from './fixtures/spot-data.js';
+import { MARINE_FRESH, NOW_FRESH, SPOT_UNVERIFIED, SPOT_VERIFIED } from './fixtures/spot-data.js';
 
 const data = vi.hoisted(() => ({
 	listSpots: vi.fn(),
 	getSpot: vi.fn(),
 	getEvaluations: vi.fn(),
 	getTideExtremes: vi.fn(),
+	getMarineHours: vi.fn(),
 	getSpotSummaries: vi.fn()
 }));
 vi.mock('#lib/data.js', () => data);
@@ -17,6 +18,7 @@ let warn: ReturnType<typeof vi.spyOn>;
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	data.getMarineHours.mockResolvedValue([]);
 	warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
 });
 
@@ -58,6 +60,43 @@ describe('loadSpotPage', () => {
 		expect(warn).toHaveBeenCalledTimes(1);
 		expect(JSON.stringify(warn.mock.calls)).not.toContain('secret detail');
 		expect(JSON.stringify(warn.mock.calls)).not.toContain('test-meer');
+	});
+});
+
+describe('loadSpotPage waves (WP-12)', () => {
+	it('loads marine hours for the same window as the evaluations', async () => {
+		data.getSpot.mockResolvedValue(SPOT_UNVERIFIED);
+		data.getEvaluations.mockResolvedValue([]);
+		data.getTideExtremes.mockResolvedValue([]);
+		data.getMarineHours.mockResolvedValue([MARINE_FRESH]);
+		const res = await loadSpotPage('test-strand', now);
+		expect(data.getMarineHours).toHaveBeenCalledWith(
+			'test-strand',
+			new Date('2026-07-15T12:00:00Z'),
+			new Date('2026-07-22T22:00:00Z')
+		);
+		expect(res.kind === 'ok' && res.marine).toEqual([MARINE_FRESH]);
+	});
+	it('no coordinates: no wave query', async () => {
+		data.getSpot.mockResolvedValue({ ...SPOT_UNVERIFIED, lat: null, lon: null });
+		data.getEvaluations.mockResolvedValue([]);
+		data.getTideExtremes.mockResolvedValue([]);
+		const res = await loadSpotPage('test-strand', now);
+		expect(data.getMarineHours).not.toHaveBeenCalled();
+		expect(res.kind === 'ok' && res.marine).toEqual([]);
+	});
+	it('a failing wave query does not break the page', async () => {
+		data.getSpot.mockResolvedValue(SPOT_UNVERIFIED);
+		data.getEvaluations.mockResolvedValue([]);
+		data.getTideExtremes.mockResolvedValue([]);
+		data.getMarineHours.mockRejectedValue(new Error('secret detail'));
+		const res = await loadSpotPage('test-strand', now);
+		expect(res.kind).toBe('ok');
+		expect(res.kind === 'ok' && res.marine).toEqual([]);
+		expect(warn).toHaveBeenCalledTimes(1);
+		const logged = JSON.stringify(warn.mock.calls);
+		expect(logged).not.toContain('secret detail');
+		expect(logged).not.toContain('test-strand');
 	});
 });
 

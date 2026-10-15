@@ -13,12 +13,19 @@ import {
 	DataError,
 	fetchAllPages,
 	getEvaluations,
+	getMarineHours,
 	getSpot,
 	getSpotSummaries,
 	getTideExtremes,
 	listSpots
 } from '../src/lib/data.js';
-import { EVALUATION_COLUMNS, SPOT_COLUMNS, SUMMARY_COLUMNS, TIDE_EXTREME_COLUMNS } from '../src/lib/types.js';
+import {
+	EVALUATION_COLUMNS,
+	MARINE_HOUR_COLUMNS,
+	SPOT_COLUMNS,
+	SUMMARY_COLUMNS,
+	TIDE_EXTREME_COLUMNS
+} from '../src/lib/types.js';
 
 beforeEach(() => {
 	vi.clearAllMocks();
@@ -71,6 +78,29 @@ describe('data queries', () => {
 				['range', 0, 999]
 			]
 		});
+	});
+
+	it('getMarineHours', async () => {
+		await getMarineHours('test-strand', new Date('2026-07-15T12:00:00Z'), new Date('2026-07-22T22:00:00Z'));
+		expect(fake.current.calls[0]).toEqual({
+			table: 'marine_hours',
+			ops: [
+				['select', MARINE_HOUR_COLUMNS.join(',')],
+				['eq', 'spot_id', 'test-strand'],
+				['gte', 'valid_at', '2026-07-15T12:00:00.000Z'],
+				['lt', 'valid_at', '2026-07-22T22:00:00.000Z'],
+				['order', 'valid_at', asc],
+				['range', 0, 999]
+			]
+		});
+	});
+
+	it('getMarineHours wraps errors without the message', async () => {
+		fake.current.respond('marine_hours', { data: null, error: { code: '42501', message: 'secret detail' } });
+		const err = await getMarineHours('test-strand', new Date(0), new Date(1)).catch((e: unknown) => e);
+		expect(err).toBeInstanceOf(DataError);
+		expect((err as DataError).operation).toBe('getMarineHours');
+		expect((err as DataError).message).not.toContain('secret detail');
 	});
 
 	it('getTideExtremes trims and skips empty stations', async () => {
