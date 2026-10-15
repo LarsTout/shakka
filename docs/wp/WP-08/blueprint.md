@@ -1,5 +1,5 @@
 # Blueprint WP-08: Alert-deduplicatie en berichtopbouw (puur)
-Status: DRAFT
+Status: APPROVED
 Revisie: 2
 
 ## Doel
