@@ -11,6 +11,8 @@ const mocks = vi.hoisted(() => ({
 	registerServiceWorker: vi.fn(),
 	linkExpired: 'Deze inloglink is verlopen of al gebruikt. Vraag een nieuwe aan.'
 }));
+const nav = vi.hoisted(() => ({ goto: vi.fn(async () => {}), refreshAll: vi.fn() }));
+vi.mock('$app/navigation', () => ({ goto: nav.goto, refreshAll: nav.refreshAll }));
 const sessionStore = vi.hoisted(() => ({ current: null as unknown }));
 
 vi.mock('#lib/auth.js', async () => {
@@ -25,6 +27,7 @@ vi.mock('#lib/auth.js', async () => {
 });
 vi.mock('#lib/sw-register.js', () => ({ registerServiceWorker: mocks.registerServiceWorker }));
 
+import { GO_URL_SUMMER } from './fixtures/spot-data.js';
 import Layout from '../src/routes/+layout.svelte';
 
 const children = createRawSnippet(() => ({ render: () => '<p>Kind</p>' }));
@@ -32,6 +35,7 @@ const store = () => sessionStore.current as ReturnType<typeof writable<unknown>>
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	localStorage.clear();
 	mocks.initAuth.mockReturnValue(() => {});
 	mocks.initialAuthRedirectError.mockReturnValue(null);
 	store().set(null);
@@ -109,5 +113,45 @@ describe('+layout.svelte', () => {
 		expect(await screen.findByRole('alert')).toHaveTextContent(mocks.linkExpired);
 		await userEvent.click(screen.getByRole('button', { name: 'Sluiten' }));
 		expect(screen.queryByRole('alert')).toBeNull();
+	});
+
+	describe('WP-20: return after login', () => {
+		const PATH = new URL(GO_URL_SUMMER).pathname + new URL(GO_URL_SUMMER).search;
+		const save = (savedAt: number) =>
+			localStorage.setItem('shakka:return_to', JSON.stringify({ path: PATH, saved_at: savedAt }));
+
+		it('goes back to the saved /go link and removes the key', async () => {
+			save(Date.now());
+			store().set({ user: { email: 'lars@example.com' } });
+			render(Layout, { children });
+			await vi.waitFor(() => expect(nav.goto).toHaveBeenCalledWith(PATH, { replace: true }));
+			expect(nav.goto).toHaveBeenCalledTimes(1);
+			expect(localStorage.getItem('shakka:return_to')).toBeNull();
+		});
+		it('ignores a key older than 60 minutes but removes it', async () => {
+			save(Date.now() - 61 * 60 * 1000);
+			store().set({ user: { email: 'lars@example.com' } });
+			render(Layout, { children });
+			await vi.waitFor(() => expect(localStorage.getItem('shakka:return_to')).toBeNull());
+			expect(nav.goto).not.toHaveBeenCalled();
+		});
+		it('does nothing while signed out and keeps the key', () => {
+			save(Date.now());
+			render(Layout, { children });
+			expect(nav.goto).not.toHaveBeenCalled();
+			expect(localStorage.getItem('shakka:return_to')).not.toBeNull();
+		});
+		it('shows Mijn sessies only when signed in', () => {
+			const { unmount } = render(Layout, { children });
+			expect(screen.queryByRole('link', { name: 'Mijn sessies' })).toBeNull();
+			unmount();
+			store().set(undefined);
+			const second = render(Layout, { children });
+			expect(screen.queryByRole('link', { name: 'Mijn sessies' })).toBeNull();
+			second.unmount();
+			store().set({ user: { email: 'lars@example.com' } });
+			render(Layout, { children });
+			expect(screen.getByRole('link', { name: 'Mijn sessies' })).toHaveAttribute('href', '/mijn-sessies');
+		});
 	});
 });

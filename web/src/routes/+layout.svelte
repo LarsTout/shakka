@@ -2,8 +2,11 @@
 	import '../app.css';
 	import type { Snippet } from 'svelte';
 	import { onMount } from 'svelte';
+	import { goto } from '$app/navigation';
 	import Attribution from '#lib/components/Attribution.svelte';
 	import { session, initAuth, signOut, initialAuthRedirectError } from '#lib/auth.js';
+	import { browserStorage } from '#lib/browser-storage.js';
+	import { takeReturnTo } from '#lib/local-prefs.js';
 	import { registerServiceWorker } from '#lib/sw-register.js';
 
 	let { children }: { children: Snippet } = $props();
@@ -20,6 +23,14 @@
 		}
 	}
 
+	// Back to the /go link that was saved before logging in (A2). takeReturnTo always removes the key,
+	// so a token refresh (a new session object) finds nothing and does nothing.
+	$effect(() => {
+		if (!$session) return;
+		const path = takeReturnTo(browserStorage(), Date.now());
+		if (path !== null) void goto(path, { replace: true });
+	});
+
 	onMount(() => {
 		redirectError = initialAuthRedirectError();
 		const stop = initAuth();
@@ -35,6 +46,7 @@
 		{#if $session}
 			<a href="/alerts">Alerts</a>
 			<a href="/profiel">Profiel</a>
+			<a href="/mijn-sessies">Mijn sessies</a>
 			<span class="who">{$session.user.email}</span>
 			<button type="button" disabled={signingOut} onclick={handleSignOut}>{signingOut ? 'Uitloggen…' : 'Uitloggen'}</button>
 		{:else if $session === null}
