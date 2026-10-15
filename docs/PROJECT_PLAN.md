@@ -41,7 +41,7 @@ GitHub Actions (cron, elk uur)
        ├─ Open-Meteo marine (golven)                ├─► Supabase Postgres
        ├─ Rijkswaterstaat (getijden, 1x per dag)    │     ├─ spots, forecasts, tides
        ├─ evaluatie per spot per uur ───────────────┤     ├─ evaluations
-       └─ alert engine ──► Web Push / Telegram      │     └─ users, rules, sessions
+       └─ alert engine ──► Web Push (VAPID)         │     └─ users, rules, sessions
                                                     │
 Cloudflare Pages: PWA (SvelteKit, static) ◄─────────┘ (supabase-js + RLS)
   ├─ kaart (MapLibre + MapTiler)
@@ -60,7 +60,7 @@ Cloudflare Pages: PWA (SvelteKit, static) ◄─────────┘ (sup
 | Frontend | SvelteKit met static adapter, TypeScript, PWA (manifest + service worker) | Licht, snel, geen server nodig. |
 | Hosting frontend | Cloudflare Pages | Gratis. |
 | Kaart | MapLibre GL + MapTiler tiles | Gratis tier. |
-| Notificaties | Web Push (VAPID) als hoofdkanaal, Telegram-bot als kanaal voor M1 | Allebei gratis. |
+| Notificaties | Web Push (VAPID) als enige kanaal. Besluit Lars, 15 oktober 2026: Telegram vervalt volledig. | Gratis, geen extra account of app nodig naast de PWA. |
 
 ### Repo-structuur
 
@@ -136,8 +136,8 @@ Volgorde en afhankelijkheden. Elke WP doorloopt de pijplijn uit sectie 6.
 | WP-05 | Evaluatie-engine (puur Python, zonder I/O) | WP-02, WP-03, WP-04 | M1 |
 | WP-06 | Kite-advies | WP-05 | M1 |
 | WP-07 | Alert-engine: regels, windows, deduplicatie, berichtopbouw | WP-05, WP-06 | M1 |
-| WP-08 | Notificaties: Telegram-kanaal (M1), daarna Web Push (M2) | WP-07 | M1/M2 |
-| WP-09 | Orchestratie: GitHub Actions workflow die alles elk uur draait, logging, foutmeldingen naar Lars | WP-03 t/m WP-08 | M1 |
+| WP-08 | Notificaties: Web Push (VAPID), het enige kanaal | WP-07 | M2 |
+| WP-09 | Orchestratie: GitHub Actions workflow die alles elk uur draait, logging, foutmeldingen naar Lars via de ingebouwde GitHub-melding bij een gefaalde run | WP-03 t/m WP-07 | M1 |
 | WP-10 | PWA-basis: SvelteKit, auth (magic link), layout, bronvermelding, installeerbaar | WP-01 | M2 |
 | WP-11 | Kaart en spotpagina met uuroordeel en redenen | WP-10, WP-05 | M2 |
 | WP-12 | Favorieten, profiel (gewicht, niveau, quiver) en alertinstellingen | WP-10, WP-07 | M2 |
@@ -145,9 +145,11 @@ Volgorde en afhankelijkheden. Elke WP doorloopt de pijplijn uit sectie 6.
 | WP-14 | Sessies: aanmaken vanuit alert of spotpagina, publieke pagina `/s/{slug}`, RSVP zonder account, carpoolvelden, WhatsApp-share | WP-11, WP-12 | M3 |
 | WP-15 | Hardening: rate limits, foutafhandeling, privacy-check, toegankelijkheid, performance, kostenbewaking | alles | M4 |
 
+Scopewijziging, besluit Lars op 15 oktober 2026: **Telegram vervalt volledig; Web Push (VAPID) is het enige meldingskanaal.** Plan-WP-08 is daardoor alleen nog Web Push (M2). De uitwerking staat in `docs/WORK_PACKAGES.md` (afwijking A-16).
+
 ### Mijlpalen
-- **M1, "werkt voor mij"**: Lars krijgt correcte Telegram-alerts voor zijn favoriete spots. Geen UI nodig.
-- **M2, "PWA"**: kaart, spotoordeel, eigen alertinstellingen, push op telefoon.
+- **M1, "werkt voor mij"**: alerts voor Lars' favoriete spots worden correct berekend en als `alert_state`/events vastgelegd, controleerbaar via CLI en database. Geen UI nodig. De eerste melding op de telefoon komt met Web Push in M2 (besluit Lars, 15 oktober 2026).
+- **M2, "PWA"**: kaart, spotoordeel, eigen alertinstellingen, push op telefoon (het enige meldingskanaal).
 - **M3, "crew"**: "ik ga"-links in WhatsApp, RSVP zonder account, carpoolplekken.
 - **M4, "klaar voor anderen"**: hardening, daarna delen met kitevrienden en een studentenclub.
 
@@ -172,7 +174,7 @@ Mechanisch werk (formatteren, lint fixen, seed-YAML valideren) mag naar `haiku`.
 - **Review** checkt: past het bij het plan en de randvoorwaarden, zijn de acceptatiecriteria toetsbaar, kloppen de interfaces met afhankelijke WP's, missen er edge cases, wordt er iets gebouwd dat een non-goal is, zijn er kosten- of licentierisico's. Blokkerende punten genummerd. Maximaal 2 review-rondes, daarna beslist Lars.
 - **Bouwen** volgt alleen een blueprint met status `APPROVED`. Afwijken mag niet stilzwijgend: de builder schrijft een afwijking op in `deviations.md` en stopt als die het ontwerp raakt. Tests eerst voor alle domeinlogica.
 - **Verificatie** draait de volledige testsuite, toetst elk acceptatiecriterium, en checkt de randvoorwaarden uit sectie 2. Bij falen terug naar de builder, maximaal 2 keer, daarna naar Lars.
-- **Status** van elke WP staat in `docs/STATUS.md`: `todo`, `blueprint`, `in_review`, `approved`, `building`, `verifying`, `done`, `blocked`. Een nieuwe sessie leest eerst dit bestand.
+- **Status** van elke WP staat in `docs/STATUS.md`: `todo`, `blueprint`, `in_review`, `approved`, `building`, `verifying`, `done`, `blocked`, `dropped` (vervallen door een scopebesluit van Lars). Een nieuwe sessie leest eerst dit bestand.
 
 ### Context-hygiëne
 - `CLAUDE.md` blijft kort: projectdoel in twee zinnen, stack, commando's (test, lint, run), en de harde randvoorwaarden. Details staan in dit plan.

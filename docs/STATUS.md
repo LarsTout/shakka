@@ -13,15 +13,15 @@ Opdeling: goedgekeurd.
 | WP-06 | Kite-advies (puur) | done | AC-2 open: Lars toetst kite_examples.yaml en zet checked_by_lars: true |
 | WP-07 | Alertregels en windows (puur) | done | defaults min_go_hours=2, days_ahead=3 toetsen in M1-testweek |
 | WP-08 | Alert-deduplicatie en berichtopbouw (puur) | todo | |
-| WP-09 | Telegram-kanaal | todo | |
+| WP-09 | Telegram-kanaal | dropped | Telegram vervallen, zie WP-17 (besluit Lars, 15 oktober 2026) |
 | WP-10 | Evaluatie- en alertjobs plus beheer-CLI | todo | |
 | WP-11 | Orkestratie: uurlijkse workflow, logging, foutmeldingen | todo | |
-| WP-12 | Marine-ingest (golven) | todo | |
+| WP-12 | Marine-ingest (golven) en golven op de spotpagina | todo | weergave verhuisd uit WP-14 (A-17) |
 | WP-13 | PWA-basis | done | AC-7 open: Cloudflare Pages + Supabase Auth-URLs door Lars (RUNBOOK §11) |
 | WP-14 | Spotlijst en spotpagina | todo | |
 | WP-15 | Kaart | todo | |
 | WP-16 | Profiel, favorieten en alertinstellingen | todo | |
-| WP-17 | Web Push: backend | todo | |
+| WP-17 | Web Push: backend (enige meldingskanaal) | todo | |
 | WP-18 | Web Push: PWA | todo | |
 | WP-19 | Sessies: datamodel, RLS en RPC's | todo | |
 | WP-20 | Sessie aanmaken en delen | todo | |
@@ -29,4 +29,6 @@ Opdeling: goedgekeurd.
 | WP-22 | Hardening backend en kostenbewaking | todo | |
 | WP-23 | Privacy, toegankelijkheid en performance | todo | |
 
-Statussen: `todo`, `blueprint`, `in_review`, `approved`, `building`, `verifying`, `done`, `blocked`.
+Statussen: `todo`, `blueprint`, `in_review`, `approved`, `building`, `verifying`, `done`, `blocked`, `dropped` (vervallen door een scopebesluit van Lars; wordt niet gebouwd).
+
+Aanbevolen volgorde M2 (zie `docs/WORK_PACKAGES.md`, A-16 en A-17): WP-14 → WP-16 → WP-17 → WP-18 → WP-12 → WP-15.

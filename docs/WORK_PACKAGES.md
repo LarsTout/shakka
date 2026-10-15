@@ -4,7 +4,7 @@
 
 ## Afwijkingen van het plan
 
-De opdeling volgt sectie 5, maar is op de volgende punten aangepast. Elke wijziging maakt het bouwen kleiner, beter testbaar of veiliger; geen enkele wijziging voegt eindgebruikersfunctionaliteit toe of haalt die weg.
+De opdeling volgt sectie 5, maar is op de volgende punten aangepast. A-1 t/m A-15 maken het bouwen kleiner, beter testbaar of veiliger; geen van die wijzigingen voegt eindgebruikersfunctionaliteit toe of haalt die weg. A-16 en A-17 volgen uit een scopebesluit van Lars (15 oktober 2026) en zijn ook in `docs/PROJECT_PLAN.md` verwerkt.
 
 | # | Afwijking | Reden |
 |---|---|---|
@@ -12,9 +12,9 @@ De opdeling volgt sectie 5, maar is op de volgende punten aangepast. Elke wijzig
 | A-2 | **Schema per mijlpaal.** WP-01 maakt alleen de tabellen voor M1. `marine_hours` komt in WP-12, `push_subscriptions` in WP-17, `sessions` en `rsvps` in WP-19. Alle tabelnamen en sleutelkolommen staan wel nu al vast (zie de contracten). | RSVP zonder account, edit-tokens en rate limits zijn veiligheidsgevoelig. Die tabellen ontwerp je het best samen met de RPC's die erbij horen. M1 wordt er kleiner door. |
 | A-3 | **Tabelnamen.** `forecasts` heet `forecast_hours`, `tides` heet `tide_extremes`, `rules` heet `alert_rules`, `users` heet `profiles`. Erbij komen `favorites`, `api_usage` en `ingest_runs`. | Supabase beheert gebruikers zelf in `auth.users`. De app-gegevens staan in `profiles`. De andere namen beschrijven de inhoud preciezer. `api_usage` is nodig voor de budgetbewaking (sectie 2) en `ingest_runs` voor logging en foutmeldingen (plan-WP-09). |
 | A-4 | **Plan-WP-03 is gesplitst.** Wind multi-model zit in WP-03 (M1), golven via de Marine API in WP-12 (M2). | Golven tellen niet mee in de evaluatie of de alerts (sectie 4). Ze worden alleen getoond. M1 heeft ze dus niet nodig. |
-| A-5 | **Puur en I/O gescheiden.** Plan-WP-05 en plan-WP-07 worden puur (WP-05, WP-07, WP-08). De koppeling met de database (evaluaties wegschrijven, `alert_state` bijhouden, versturen) zit in de nieuwe WP-10. Plan-WP-09 (orkestratie) is daardoor WP-11 en bevat alleen nog workflow, logging en foutmeldingen. | Domeinlogica moet zonder I/O te testen zijn. Als de I/O in dezelfde WP zit, sluipt die er snel toch in. |
+| A-5 | **Puur en I/O gescheiden.** Plan-WP-05 en plan-WP-07 worden puur (WP-05, WP-07, WP-08). De koppeling met de database (evaluaties wegschrijven, `alert_state` bijhouden) zit in de nieuwe WP-10; versturen zit sinds A-16 in WP-17. Plan-WP-09 (orkestratie) is daardoor WP-11 en bevat alleen nog workflow, logging en foutmeldingen. | Domeinlogica moet zonder I/O te testen zijn. Als de I/O in dezelfde WP zit, sluipt die er snel toch in. |
 | A-6 | **Plan-WP-07 is gesplitst** in WP-07 (alertregels en windows) en WP-08 (deduplicatie en berichtopbouw). | Deduplicatie is de lastigste logica van M1 en verdient een eigen review. |
-| A-7 | **Plan-WP-08 is gesplitst.** Telegram is WP-09 (M1). Web Push heeft een backend-WP (WP-17) en een PWA-WP (WP-18, was plan-WP-13). | Het plan gaf al M1/M2 aan. De verzendkant en de browserkant hebben elk eigen risico's (VAPID, iOS). |
+| A-7 | **Plan-WP-08 is gesplitst.** Telegram was WP-09 (M1; vervallen, zie A-16). Web Push heeft een backend-WP (WP-17) en een PWA-WP (WP-18, was plan-WP-13). | Het plan gaf al M1/M2 aan. De verzendkant en de browserkant hebben elk eigen risico's (VAPID, iOS). |
 | A-8 | **Kite-advies (WP-06) hangt af van WP-02, niet van WP-05.** | Kite-advies gebruikt alleen de `Level`-enum en windkracht. Geen evaluatie. |
 | A-9 | **Beheer-CLI voor M1** in WP-10 (`shakka admin ...`): profiel, favorieten en alertregels van Lars invoeren en alerts vooraf bekijken zonder UI. | M1 is "geen UI nodig". Zonder deze CLI kun je de alertregels van Lars alleen met losse SQL invoeren. Dit is beheertooling, geen eindgebruikersfunctie. |
 | A-10 | **Plan-WP-11 is gesplitst** in WP-14 (spotlijst en spotpagina) en WP-15 (kaart). | De kaart heeft een eigen externe dienst (MapTiler) met een sessielimiet. Lazy laden en de lijst als fallback zijn apart te toetsen. |
@@ -23,6 +23,8 @@ De opdeling volgt sectie 5, maar is op de volgende punten aangepast. Elke wijzig
 | A-13 | **Nieuwe Supabase-sleutels.** Er komen `SUPABASE_PUBLISHABLE_KEY` en `SUPABASE_SECRET_KEY` in plaats van `SUPABASE_ANON_KEY` en `SUPABASE_SERVICE_ROLE_KEY`. WP-00 past `.env.example` aan. | Supabase stopt eind 2026 met de legacy `anon`- en `service_role`-sleutels ([bron](https://supabase.com/docs/guides/api/api-keys)). |
 | A-14 | **Contractbestanden** in `data/contracts/*.json`. Ze worden gegenereerd uit Python en bevatten redencodes, richtingsklassen en alert-defaults met Nederlandse labels. | De PWA (TypeScript) en de alerts (Python) gebruiken zo exact dezelfde codes en labels. Een test bewaakt dat de bestanden actueel zijn. |
 | A-15 | **Database-toegang via de Supabase REST-API (PostgREST over HTTPS)**, niet via een directe Postgres-verbinding. | Op het gratis plan loopt een directe verbinding via IPv6, en GitHub Actions ondersteunt alleen IPv4. Een IPv4-add-on kost geld ([bron](https://supabase.com/docs/guides/database/connecting-to-postgres)). De stack in het plan (httpx) is hiermee voldoende. |
+| A-16 | **Telegram vervalt; Web Push is het enige meldingskanaal** (besluit Lars, 15 oktober 2026). WP-09 is `dropped`; de nummering van de andere WP's blijft gelijk. Gevolgen: (1) in M1 berekent WP-10 de alerts en legt ze vast in `alert_state`, zonder kanaal; de berichten zijn controleerbaar via CLI en database. (2) `Notifier`, `DeliveryResult`, `DeliveryTarget` en de afleverregel verhuizen naar WP-17. (3) WP-10 haalt de `telegram_*`-velden uit `Settings` en de `TELEGRAM_*`-variabelen uit `.env.example`; het env-contract wijzigt per WP-10 (WP-00 AC-8 blijft historisch). (4) Operatormeldingen in WP-11 gaan via de ingebouwde e-mailmelding van GitHub bij een gefaalde workflow-run, plus `ingest_runs`. (5) Het wekelijkse gebruiksrapport (WP-22) wordt een pushmelding aan Lars. (6) De kolom `profiles.telegram_chat_id` (WP-01, al gemigreerd) blijft ongebruikt staan en wordt in WP-22 verwijderd. | Scopebesluit van Lars. Eén kanaal minder betekent minder code, geen bot-token en geen tweede account voor gebruikers. De eerste melding op de telefoon schuift daardoor van M1 naar M2. |
+| A-17 | **Golven op de spotpagina verhuizen van WP-14 naar WP-12, en WP-14 hangt niet meer af van WP-12.** WP-12 hangt nu af van WP-11 en WP-14. | Gevolg van A-16: om de eerste pushmelding zo vroeg mogelijk te krijgen is de aanbevolen M2-volgorde WP-14 → WP-16 → WP-17 → WP-18 → WP-12 → WP-15. Dat kan alleen als WP-14 niet op de marine-ingest wacht. Golven tellen niet mee in oordeel of alerts (sectie 4), dus de spotpagina is zonder golven al bruikbaar. |
 
 ### Mapping plan → work packages
 
@@ -36,7 +38,7 @@ De opdeling volgt sectie 5, maar is op de volgende punten aangepast. Elke wijzig
 | WP-05 | WP-05 (puur), evaluatiejob in WP-10 |
 | WP-06 | WP-06 |
 | WP-07 | WP-07, WP-08, alertjob in WP-10 |
-| WP-08 | WP-09 (Telegram), WP-17 (Web Push backend) |
+| WP-08 | WP-17 (Web Push backend); WP-09 (Telegram) is vervallen, zie A-16 |
 | WP-09 | WP-10 (jobs en beheer-CLI), WP-11 (workflow, logging, foutmeldingen) |
 | WP-10 | WP-13 |
 | WP-11 | WP-14, WP-15 |
@@ -58,23 +60,25 @@ De opdeling volgt sectie 5, maar is op de volgende punten aangepast. Elke wijzig
 | WP-06 | Kite-advies (puur) | M1 | WP-02 | S |
 | WP-07 | Alertregels en windows (puur) | M1 | WP-05 | S |
 | WP-08 | Alert-deduplicatie en berichtopbouw (puur) | M1 | WP-06, WP-07 | M |
-| WP-09 | Telegram-kanaal | M1 | WP-08 | S |
-| WP-10 | Evaluatie- en alertjobs plus beheer-CLI | M1 | WP-02 t/m WP-09 | M |
+| WP-09 | ~~Telegram-kanaal~~ **vervallen** (A-16) | - | - | - |
+| WP-10 | Evaluatie- en alertjobs plus beheer-CLI | M1 | WP-02 t/m WP-08 | M |
 | WP-11 | Orkestratie: uurlijkse workflow, logging, foutmeldingen | M1 | WP-10 | M |
-| WP-12 | Marine-ingest (golven) | M2 | WP-11 | S |
+| WP-12 | Marine-ingest (golven) en golven op de spotpagina | M2 | WP-11, WP-14 | M |
 | WP-13 | PWA-basis | M2 | WP-01 | M |
-| WP-14 | Spotlijst en spotpagina | M2 | WP-10, WP-12, WP-13 | M |
+| WP-14 | Spotlijst en spotpagina | M2 | WP-10, WP-13 | M |
 | WP-15 | Kaart | M2 | WP-14 | S |
 | WP-16 | Profiel, favorieten en alertinstellingen | M2 | WP-07, WP-14 | M |
-| WP-17 | Web Push: backend | M2 | WP-11 | S |
+| WP-17 | Web Push: backend (enige meldingskanaal) | M2 | WP-11 | M |
 | WP-18 | Web Push: PWA | M2 | WP-16, WP-17 | M |
 | WP-19 | Sessies: datamodel, RLS en RPC's | M3 | WP-11 | M |
 | WP-20 | Sessie aanmaken en delen | M3 | WP-14, WP-19 | M |
 | WP-21 | Publieke sessiepagina en RSVP zonder account | M3 | WP-14, WP-19 | M |
-| WP-22 | Hardening backend en kostenbewaking | M4 | WP-00 t/m WP-21 | M |
-| WP-23 | Privacy, toegankelijkheid en performance | M4 | WP-00 t/m WP-21 | M |
+| WP-22 | Hardening backend en kostenbewaking | M4 | WP-00 t/m WP-21 (zonder het vervallen WP-09) | M |
+| WP-23 | Privacy, toegankelijkheid en performance | M4 | WP-00 t/m WP-21 (zonder het vervallen WP-09) | M |
 
-Aantallen: M1 12, M2 7, M3 3, M4 2. Totaal 24.
+Aantallen: M1 11 (plus het vervallen WP-09), M2 7, M3 3, M4 2. Totaal 23 actieve WP's; nummers WP-00 t/m WP-23.
+
+**Aanbevolen volgorde M2** (A-16, A-17): WP-14 → WP-16 → WP-17 → WP-18 → WP-12 → WP-15. Zo komt de eerste pushmelding zo vroeg mogelijk. De afhankelijkheden laten dit toe: WP-14 wacht alleen op WP-10 en WP-13, WP-16 op WP-07 en WP-14, WP-17 op WP-11, WP-18 op WP-16 en WP-17, WP-12 op WP-11 en WP-14, WP-15 op WP-14. WP-17 hangt niet van de PWA af en mag dus ook parallel aan WP-14 of WP-16 draaien.
 
 ## Afspraken die voor alle WP's gelden
 
@@ -120,13 +124,14 @@ Aantallen: M1 12, M2 7, M3 3, M4 2. Totaal 24.
 | `SUPABASE_URL` | `.env`, GitHub Secret | ingest | WP-00 |
 | `SUPABASE_PUBLISHABLE_KEY` | `.env` | ingest (`shakka doctor`) | WP-00 |
 | `SUPABASE_SECRET_KEY` | `.env`, GitHub Secret | ingest | WP-00 |
-| `TELEGRAM_BOT_TOKEN` | `.env`, GitHub Secret | ingest | WP-09 |
-| `TELEGRAM_CHAT_ID` | `.env`, GitHub Secret | ingest: operatormeldingen aan Lars en testberichten | WP-09 |
 | `APP_BASE_URL` | `.env`, GitHub Actions variable | ingest: "ik ga"-links in berichten | WP-14 |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | `.env`, GitHub Secrets | ingest | WP-17 |
+| `OPERATOR_USER_ID` (voorstel, de planner van WP-22 bevestigt) | `.env`, GitHub Secret | ingest: push-abonnementen van Lars vinden voor het gebruiksrapport | WP-22 |
 | `PUBLIC_SUPABASE_URL`, `PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `web/.env`, Cloudflare Pages | web | WP-13 |
 | `PUBLIC_MAPTILER_KEY` | `web/.env`, Cloudflare Pages | web | WP-15 |
 | `PUBLIC_VAPID_PUBLIC_KEY` | `web/.env`, Cloudflare Pages | web | WP-18 |
+
+Het env-contract wijzigt per WP-10 (A-16): `TELEGRAM_BOT_TOKEN` en `TELEGRAM_CHAT_ID` vervallen en verdwijnen uit `.env.example`, `Settings` en de GitHub Secrets. WP-00 AC-8 beschrijft de stand bij WP-00 en blijft als historisch criterium staan.
 
 Het root-bestand `.env.example` bevat alleen de ingest-variabelen. `web/.env.example` (uit WP-13) bevat de `PUBLIC_*`-variabelen. Supabase CLI-gegevens (access token, DB-wachtwoord) blijven bij Lars en komen nergens in de repo.
 
@@ -137,7 +142,8 @@ Het root-bestand `.env.example` bevat alleen de ingest-variabelen. `web/.env.exa
 | Offshore en side-offshore zijn altijd `no_go` | WP-05 (evaluatie, eigenschapstests), WP-07 (regels kunnen deze klassen niet bevatten), WP-01 (DB-check op `alert_rules.dir_classes`), WP-10 (alerts nooit bij offshore), WP-16 (UI biedt ze niet aan) |
 | Open-Meteo alleen server-side | WP-03 (Open-Meteo-hosts staan alleen in `shakka.openmeteo`), WP-13 (guard-script in CI op `web/`), WP-23 (CSP `connect-src` zonder Open-Meteo) |
 | Bronvermelding zichtbaar | WP-13 (`Attribution.svelte` in de footer, getest), WP-14 en WP-21 (op de spot- en sessiepagina) |
-| Geen secrets in code | WP-00 (grep-check), WP-09 en WP-11 (tests dat tokens niet in logs komen) |
+| Geen secrets in code | WP-00 (grep-check), WP-11 en WP-17 (tests dat secrets en push-endpoints niet in logs komen) |
+| Minimale persoonsgegevens in openbare logs | De repo is publiek, dus de Actions-logs ook. WP-10, WP-11 en WP-17 loggen geen user-id's, e-mailadressen, berichtteksten of push-endpoints. |
 | Geen scraping | Geen enkele WP haalt HTML van derden op. Bronnen: Open-Meteo API, Rijkswaterstaat API, handmatige spotdata. |
 | €0 per maand | Alleen gratis tiers. Budgetbewaking in WP-03, WP-12 en WP-22. |
 
@@ -160,13 +166,15 @@ Het root-bestand `.env.example` bevat alleen de ingest-variabelen. `web/.env.exa
 | MapTiler gratis | 5.000 map sessions/maand; daarna gepauzeerd tot de volgende maand (geen kosten); MapTiler-logo verplicht; niet-commercieel | https://www.maptiler.com/cloud/pricing/ |
 | Cloudflare Pages | 500 builds/maand, 20.000 bestanden. Zonder `404.html` gedraagt de site zich als SPA (onbekende paden serveren `/`). | https://developers.cloudflare.com/pages/platform/limits/, https://developers.cloudflare.com/pages/configuration/serving-pages/ |
 | GitHub Actions | Gratis en onbeperkt in publieke repo's. Privé: 2.000 min/maand. In publieke repo's worden schedules na 60 dagen zonder commits stil uitgeschakeld. | https://docs.github.com/en/billing/concepts/product-billing/github-actions, https://docs.github.com/actions/managing-workflow-runs/disabling-and-enabling-a-workflow |
-| Telegram Bot API | `sendMessage` met `chat_id`, `text`, `parse_mode`, `reply_markup` (inline keyboard met URL-knop) | https://core.telegram.org/bots/api#sendmessage |
+| GitHub Actions-meldingen (gecontroleerd 15 oktober 2026) | Meldingen over geplande workflows gaan naar de gebruiker die de workflow heeft aangemaakt; wijzigt een ander de cron-syntax, dan naar die gebruiker. Instelbaar per gebruiker: e-mail en/of web, eventueel alleen bij gefaalde runs. Er is geen ingebouwde deduplicatie: elke gefaalde run geeft een melding. | https://docs.github.com/en/actions/concepts/workflows-and-actions/notifications-for-workflow-runs |
+| GitHub Actions-logs in een publieke repo (gecontroleerd 15 oktober 2026) | Bij een publieke repo zijn de Actions-geschiedenis en -logs voor iedereen zichtbaar. Logs mogen dus geen persoonsgegevens bevatten. | https://docs.github.com/articles/setting-repository-visibility, https://docs.github.com/en/actions/how-tos/monitor-workflows/use-workflow-run-logs |
 
 **De planner verifieert dit per WP opnieuw**, omdat het niet volledig uit de documentatie bleek:
 - de exacte Open-Meteo-model-id's voor DWD ICON, ECMWF IFS en NCEP GFS, en de naamgeving van variabelen in een multi-model-respons. Leg daarvoor een echte respons vast als fixture (WP-03);
 - hoe hoog- en laagwater in de `GETETBRKD2`-reeks zijn gecodeerd (WP-04);
 - de headers voor de secret key richting PostgREST (WP-01);
-- de pywebpush-API en het gedrag van Web Push op iOS: alleen voor PWA's die op het beginscherm staan, iOS 16.4+ (WP-17, WP-18).
+- de pywebpush-API, hoe je een aanroep een expliciete timeout geeft, en het gedrag van Web Push op iOS: alleen voor PWA's die op het beginscherm staan, iOS 16.4+ (WP-17, WP-18, WP-22);
+- de grenzen voor titel (50 tekens) en body (150 tekens) van een pushmelding zijn een besluit van Lars (15 oktober 2026), geen gemeten waarde. Hoeveel tekens iOS en Android werkelijk tonen, is niet gecontroleerd; WP-18 AC-5 laat het op Lars' telefoon zien.
 
 ---
 
@@ -189,9 +197,9 @@ Het root-bestand `.env.example` bevat alleen de ingest-variabelen. `web/.env.exa
 **Buiten scope:** databaseschema en de CI-job `db` (WP-01), `/web` en de CI-job `web` (WP-13), de cron-workflow (WP-11).
 **Contracten:**
 - Paden: `ingest/pyproject.toml`, `ingest/src/shakka/`, `ingest/tests/`, `.github/workflows/ci.yml`, `docs/RUNBOOK.md`.
-- `shakka.config.Settings`, velden: `supabase_url: str`, `supabase_publishable_key: str | None`, `supabase_secret_key: SecretStr`, `telegram_bot_token: SecretStr | None`, `telegram_chat_id: str | None`, `app_base_url: str | None`, `vapid_public_key: str | None`, `vapid_private_key: SecretStr | None`, `vapid_subject: str | None`, `spots_path: Path` (standaard `<repo>/data/spots.yaml`). Functie `get_settings() -> Settings`.
+- `shakka.config.Settings`, velden: `supabase_url: str`, `supabase_publishable_key: str | None`, `supabase_secret_key: SecretStr`, `telegram_bot_token: SecretStr | None`, `telegram_chat_id: str | None`, `app_base_url: str | None`, `vapid_public_key: str | None`, `vapid_private_key: SecretStr | None`, `vapid_subject: str | None`, `spots_path: Path` (standaard `<repo>/data/spots.yaml`). Functie `get_settings() -> Settings`. Per WP-10 vervallen `telegram_bot_token` en `telegram_chat_id` (A-16).
 - `shakka.http.make_client(*, timeout: float = 30.0) -> httpx.Client`.
-- CLI-groepen die latere WP's toevoegen: `doctor` (WP-00), `spots` (WP-02), `forecast` (WP-03), `tides` (WP-04), `contracts` (WP-05), `alerts` (WP-09/WP-10), `evaluate` en `admin` (WP-10), `run-hourly` (WP-11), `marine` (WP-12).
+- CLI-groepen die latere WP's toevoegen: `doctor` (WP-00), `spots` (WP-02), `forecast` (WP-03), `tides` (WP-04), `contracts` (WP-05), `alerts` (WP-10, WP-17), `evaluate` en `admin` (WP-10), `run-hourly` (WP-11), `marine` (WP-12).
 - De puurheidsregels uit "Code-indeling" staan in `ingest/tests/test_domain_purity.py`.
 **Acceptatiecriteria:**
 - AC-1: `cd ingest && uv sync && uv run pytest` slaagt en draait minstens `tests/test_domain_purity.py`.
@@ -201,7 +209,7 @@ Het root-bestand `.env.example` bevat alleen de ingest-variabelen. `web/.env.exa
 - AC-5: Met Lars' `.env` eindigt `cd ingest && uv run shakka doctor` met exitcode 0. Ontbreekt `.env`, dan is dit `NEEDS_LARS`.
 - AC-6: `.github/workflows/ci.yml` draait op `push` en `pull_request` en voert exact de commando's van AC-1 en AC-2 uit. De laatste CI-run van de branch is groen; controleer met `gh run list --workflow ci.yml --limit 1` of in GitHub, anders `NEEDS_LARS`.
 - AC-7: `supabase/config.toml` bestaat en `.gitignore` bevat `supabase/.temp/`.
-- AC-8: `.env.example` bevat exact `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `APP_BASE_URL`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` en `VAPID_SUBJECT`, zonder waarden (behalve `VAPID_SUBJECT=mailto:`). `git grep -nE "sb_(secret|publishable)_[A-Za-z0-9_-]{20,}|eyJhbGciOi" -- . ':!docs'` geeft geen treffers.
+- AC-8: `.env.example` bevat exact `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`, `APP_BASE_URL`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` en `VAPID_SUBJECT`, zonder waarden (behalve `VAPID_SUBJECT=mailto:`). `git grep -nE "sb_(secret|publishable)_[A-Za-z0-9_-]{20,}|eyJhbGciOi" -- . ':!docs'` geeft geen treffers. (Historisch: per WP-10 vervallen de twee `TELEGRAM_*`-variabelen, zie A-16 en WP-10 AC-10.)
 - AC-9: De puurheidstest is aantoonbaar scherp. Een geparametriseerde test voert de checker uit op broncode-strings met `import httpx`, `from os import environ`, `datetime.now()` en `open("x")`, en elk ervan wordt als overtreding gemeld. Een string met alleen `from pydantic import BaseModel` wordt niet gemeld.
 **Nodig van Lars:**
 - Een GitHub-repo met remote, en de keuze publiek of privé (zie "Beslissingen voor Lars").
@@ -225,7 +233,7 @@ Het root-bestand `.env.example` bevat alleen de ingest-variabelen. `web/.env.exa
 **Buiten scope:** `marine_hours` (WP-12), `push_subscriptions` (WP-17), `sessions` en `rsvps` (WP-19), het vullen van tabellen (WP-02, WP-03, WP-04, WP-10).
 **Contracten:**
 
-Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen toevoegen als hun blueprint dat onderbouwt. Hernoemen of verwijderen mag niet.
+Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen toevoegen als hun blueprint dat onderbouwt. Hernoemen of verwijderen mag niet, met één uitzondering: `profiles.telegram_chat_id` is sinds 15 oktober 2026 ongebruikt (Telegram vervallen, A-16). De migratie is al toegepast, dus de kolom blijft bestaan tot WP-22 hem verwijdert. Geen enkele WP leest of schrijft hem nog. AC-2 (e) hieronder blijft als historisch criterium staan.
 
 | Tabel | Kolommen (type, null) | Sleutel |
 |---|---|---|
@@ -642,7 +650,7 @@ Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen t
 **In scope:**
 - `shakka.domain.dedup`: een snapshot per window, matching van oude statusregels aan nieuwe windows op overlap, drempels voor een wezenlijke verandering (gedocumenteerd in de blueprint), en verlopen windows zonder melding afsluiten.
 - `shakka.domain.messages`: titel en body in platte tekst, lokale tijden, de Nederlandse labels uit WP-05, het "ik ga"-URL-contract, en de regel over getij (alleen bij getijgevoelige spots).
-**Buiten scope:** versturen (WP-09, WP-17), state opslaan en laden (WP-10), het `/go`-endpoint in de app (WP-14, WP-20).
+**Buiten scope:** versturen (WP-17), state opslaan en laden (WP-10), het `/go`-endpoint in de app (WP-14, WP-20).
 **Contracten:**
 - `shakka.domain.dedup`:
   - `WindowSnapshot(start: datetime, end: datetime, wind_min_kn: float, wind_max_kn: float, gust_max_kn: float, dir_deg: int, dir_class: DirClass, confidence: Confidence)` met `to_json() -> dict` en `from_json(d) -> WindowSnapshot`;
@@ -687,40 +695,15 @@ Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen t
 **Nodig van Lars:** Niets. Optioneel: feedback op de toon van de berichten.
 **Omvang:** M
 
-## WP-09: Telegram-kanaal
-**Mijlpaal:** M1
-**Afhankelijk van:** WP-08
-**Doel:** `AlertMessage`-berichten en operatormeldingen betrouwbaar via een Telegram-bot versturen, met een "Ik ga"-knop, zonder het bot-token te lekken.
-**In scope:**
-- `shakka.notify.base`: de notifier-interface.
-- `shakka.notify.telegram`:
-  - `sendMessage` met HTML-parse-mode en correcte escaping;
-  - een inline keyboard met een URL-knop "Ik ga" als `go_url` gezet is;
-  - één retry bij 429 die `retry_after` respecteert;
-  - 400 en 403 zijn een permanente fout;
-  - het token wordt geredigeerd in logs en exceptions.
-- CLI: `shakka alerts test-telegram [--chat-id ID]` stuurt een voorbeeldbericht, gerenderd uit een fixture-event, naar `TELEGRAM_CHAT_ID` of de opgegeven chat.
-- `docs/RUNBOOK.md`: hoe je een bot aanmaakt en je chat-id vindt.
-**Buiten scope:** bepalen wie wat krijgt (WP-10), Web Push (WP-17), operatormeldingen versturen bij fouten (WP-11; die gebruikt `send_text`).
-**Contracten:**
-- `shakka.notify.base`: `DeliveryResult(ok: bool, permanent_failure: bool, detail: str)`, `TelegramTarget(chat_id: str)`, en het `Notifier`-Protocol met `channel: str` en `send(target, message: AlertMessage) -> DeliveryResult`.
-- `shakka.notify.telegram.TelegramNotifier(bot_token: str, http: httpx.Client)` met `channel = "telegram"`, `send(target: TelegramTarget, message: AlertMessage) -> DeliveryResult` en `send_text(chat_id: str, text: str) -> DeliveryResult`.
-**Acceptatiecriteria:**
-- AC-1: `cd ingest && uv run pytest tests/test_telegram.py` met MockTransport:
-  - het request gaat naar het pad `/bot<token>/sendMessage`;
-  - `chat_id` klopt;
-  - een spotnaam met `<&>` wordt correct HTML-geëscaped;
-  - met `go_url` is er een `reply_markup.inline_keyboard` met een knop `{text: "Ik ga", url: go_url}`, zonder `go_url` ontbreekt die.
-- AC-2: 429 met `retry_after` geeft precies één retry. 403 geeft `ok=False, permanent_failure=True`. 500 geeft `ok=False, permanent_failure=False`. Er worden geen exceptions doorgegeven.
-- AC-3: Bij een falend request (MockTransport geeft 500 of een connectiefout) staat het token niet in `DeliveryResult.detail`, niet in `repr(notifier)` en niet in de gelogde berichten (caplog).
-- AC-4: `cd ingest && uv run shakka alerts test-telegram` levert een voorbeeldalert af in de Telegram-chat van Lars. Als `APP_BASE_URL` gezet is, heeft het bericht een werkende "Ik ga"-knop. Dit is `NEEDS_LARS`.
-**Nodig van Lars:** Een Telegram-bot via @BotFather. Zet `TELEGRAM_BOT_TOKEN` en je eigen `TELEGRAM_CHAT_ID` in `.env` (stappen in `docs/RUNBOOK.md`).
-**Omvang:** S
+## WP-09: Telegram-kanaal (vervallen)
+**Status:** `dropped`.
+
+Vervallen (15 oktober 2026): Telegram is geschrapt; zie WP-17. Besluit van Lars, uitgewerkt in A-16. De interface `shakka.notify.base` (`DeliveryResult`, `Notifier`, `DeliveryTarget`) wordt nu in WP-17 gedefinieerd. Er komt geen `TelegramTarget`, `TelegramNotifier`, `send_text` of `shakka alerts test-telegram`.
 
 ## WP-10: Evaluatie- en alertjobs plus beheer-CLI
 **Mijlpaal:** M1
-**Afhankelijk van:** WP-02, WP-03, WP-04, WP-05, WP-06, WP-07, WP-08, WP-09
-**Doel:** De pure engines aan de database en de kanalen koppelen. Evaluaties per spot opslaan, per gebruiker alerts bepalen, versturen en de status bijhouden. Lars kan zijn profiel, favorieten en regels zonder UI beheren.
+**Afhankelijk van:** WP-02, WP-03, WP-04, WP-05, WP-06, WP-07, WP-08
+**Doel:** De pure engines aan de database koppelen. Evaluaties per spot opslaan, per gebruiker alerts bepalen en als events in `alert_state` vastleggen, zodat Lars in M1 via CLI en database kan controleren dat de alerts kloppen. Er is in M1 geen meldingskanaal (A-16); versturen komt in WP-17. Lars kan zijn profiel, favorieten en regels zonder UI beheren.
 **In scope:**
 - `shakka.jobs.inputs`: laadt per spot met coördinaten het profiel, de forecasts (`now - 1h` tot `now + 8 dagen`) en de getij-extremen van het station.
 - `shakka.jobs.evaluate`:
@@ -734,115 +717,131 @@ Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen t
   - `find_windows`;
   - `diff_windows` op `alert_state`;
   - `render_alert` met kite-advies uit `profiles`;
-  - afleveren aan alle doelen van de gebruiker;
-  - de status opslaan.
-- Afleverregel: als geen enkele aflevering voor een event slaagt en er minstens één niet-permanente fout is, wordt de state voor dat event niet bijgewerkt, zodat de volgende run het opnieuw probeert. In alle andere gevallen wel.
+  - de status opslaan in `alert_state` (`status`, `snapshot`, `last_event`);
+  - de gerenderde berichten teruggeven in het resultaat (`AlertJobResult.messages`), zonder kanaal.
+- In M1 schuift de state na elk event altijd door, want er is geen aflevering die kan falen. De afleverregel (state niet bijwerken bij een niet-permanente fout) komt in WP-17. De planner houdt "bericht renderen" en "state opslaan" als aparte stappen per event, zodat WP-17 de aflevering ertussen kan zetten zonder de job te herschrijven.
+- `last_notified_at`: in M1 wordt niets afgeleverd. De planner legt vast wat dit veld in M1 bevat (voorstel: leeg laten tot WP-17 echt aflevert) en controleert dat tegen de blueprint van WP-08. Open punt, geen besluit.
+- Logging: de uurlijkse run draait in een publieke repo, dus de Actions-logs zijn openbaar. `run_alerts` logt alleen aantallen (gebruikers, events per soort), geen user-id's, e-mailadressen of berichtteksten. De berichtteksten zijn lokaal te zien via `shakka alerts run` en `shakka admin alerts preview`.
 - Statusregels met `window_end < now - 48h` worden opgeruimd.
 - `shakka.jobs.admin` en de CLI-groep `shakka admin`, met dry-run-preview.
-- CLI: `shakka evaluate` en `shakka alerts run [--dry-run]`.
-- `docs/RUNBOOK.md`: de M1-setup voor Lars (user aanmaken, profiel en favorieten zetten, preview bekijken).
-**Buiten scope:** de uurlijkse volgorde, logging in `ingest_runs` en operatormeldingen (WP-11), Web Push-doelen (WP-17 breidt `load_targets` uit), UI (WP-16).
+- CLI: `shakka evaluate` en `shakka alerts run [--dry-run]`. `alerts run` toont per bericht de spot, het soort event, de titel en de body.
+- Env-contract bijwerken (A-16):
+  - `shakka.config.Settings` verliest `telegram_bot_token` en `telegram_chat_id`. Omdat `Settings` `extra="ignore"` gebruikt, laadt een oude `.env` met `TELEGRAM_*` nog steeds zonder fout.
+  - `.env.example` verliest `TELEGRAM_BOT_TOKEN` en `TELEGRAM_CHAT_ID`.
+  - Bestaande tests die deze namen gebruiken worden aangepast: `tests/test_repo_hygiene.py` (`ENV_KEYS`), `tests/test_config.py` en `tests/test_cli.py` (de lektest van `doctor` gebruikt een andere gezette variabele, bijv. `VAPID_PRIVATE_KEY`).
+  - `shakka doctor` noemt geen Telegram-variabelen.
+  - In `docs/RUNBOOK.md` gaan de `TELEGRAM_*`-rijen uit de tabel met variabelen.
+- `docs/RUNBOOK.md`: de M1-setup voor Lars (user aanmaken, profiel en favorieten zetten, preview bekijken, `alert_state` bekijken in het Supabase-dashboard).
+**Buiten scope:** de uurlijkse volgorde, logging in `ingest_runs` en operatormeldingen (WP-11), versturen, `Notifier`, `DeliveryTarget`, `load_targets` en de afleverregel (WP-17), UI (WP-16), de kolom `profiles.telegram_chat_id` verwijderen (WP-22).
 **Contracten:**
 - `shakka.jobs.inputs`: `SpotInputs(spot: SpotProfile, forecasts: list[ForecastHour], tides: list[TideExtreme])` en `load_inputs(db, *, now: datetime) -> dict[str, SpotInputs]`.
 - `shakka.jobs.evaluate`: `run_evaluation(db, *, now: datetime) -> EvaluationJobResult(spots: int, rows: int, deleted: int)`.
 - `shakka.jobs.alerts`:
-  - `DeliveryTarget = TelegramTarget` (WP-17 voegt `PushTarget` toe aan de union);
-  - `load_targets(db, user_id: str) -> list[DeliveryTarget]`;
-  - `run_alerts(db, notifiers: Mapping[str, Notifier], *, now: datetime, base_url: str | None, dry_run: bool = False) -> AlertJobResult(users: int, events: int, sent: int, failed: int, no_target: int)`.
+  - `RenderedAlert(user_id: str, state_id: str | None, message: AlertMessage)`. `state_id` is de `alert_state.id` van het event na opslaan (WP-17 gebruikt die voor de push-`tag`); bij `dry_run` is het `None` als de rij nog niet bestaat.
+  - `run_alerts(db, *, now: datetime, base_url: str | None, dry_run: bool = False) -> AlertJobResult(users: int, events: int, messages: list[RenderedAlert])`.
+  - WP-17 breidt dit uit met de keyword-parameter `notifiers` en de velden `sent`, `failed` en `no_target`. Bestaande aanroepen blijven werken.
 - CLI `shakka admin`:
-  - `profile set --user-id UUID [--weight KG] [--level L] [--quiver 7,9,12] [--min-kn N] [--max-kn N] [--telegram-chat-id ID]` (schrijft alleen de opgegeven velden);
+  - `profile set --user-id UUID [--weight KG] [--level L] [--quiver 7,9,12] [--min-kn N] [--max-kn N]` (schrijft alleen de opgegeven velden);
   - `profile show --user-id UUID`;
   - `favorite add|remove --user-id UUID --spot ID`;
   - `favorite list --user-id UUID`;
   - `rule set --user-id UUID --spot ID [--min-kn N] [--max-kn N] [--dir-classes onshore,side_onshore,sideshore] [--weekdays 6,7] [--after HH:MM] [--before HH:MM] [--min-go-hours N] [--days-ahead N] [--enable|--disable]`;
-  - `alerts preview --user-id UUID`: windows en berichten tonen zonder te versturen of op te slaan.
+  - `alerts preview --user-id UUID`: windows en berichten tonen zonder iets op te slaan.
+- `shakka.config.Settings` na deze WP: `supabase_url`, `supabase_publishable_key`, `supabase_secret_key`, `app_base_url`, `vapid_public_key`, `vapid_private_key`, `vapid_subject`, `spots_path`.
 **Acceptatiecriteria:**
 - AC-1: `cd ingest && uv run pytest tests/test_job_evaluate.py` met `FakeSupabase` (2 spots, waarvan 1 zonder coördinaten, forecasts van 3 modellen, getij). Er komen alleen evaluaties voor de spot met coördinaten, precies één rij per uur. Rijen ouder dan 48 uur worden verwijderd.
-- AC-2: `tests/test_job_alerts.py` end-to-end met `FakeSupabase` en een nep-notifier:
-  - de eerste run geeft 1 `new`-bericht aan het Telegram-doel van de gebruiker en 1 actieve `alert_state`-rij;
-  - een tweede run met dezelfde data geeft 0 berichten;
-  - als de forecasts daarna zo wijzigen dat het window verdwijnt, volgt 1 `cancelled`.
-- AC-3: Een gebruiker zonder `telegram_chat_id` en zonder andere doelen leidt niet tot een crash en verhoogt `no_target`.
-- AC-4: Afleverregel:
-  - een niet-permanente fout zonder andere geslaagde aflevering laat de state ongewijzigd en de volgende run verstuurt opnieuw;
-  - een permanente fout wordt geteld in `failed` en de state schuift door.
+- AC-2: `tests/test_job_alerts.py` end-to-end met `FakeSupabase`:
+  - de eerste run geeft precies 1 `RenderedAlert` met `message.kind == new` en een titel met de spotnaam, plus 1 `alert_state`-rij met `status = active` en `last_event = new`; `state_id` is gelijk aan de `id` van die rij;
+  - een tweede run met dezelfde data geeft 0 berichten en laat de `alert_state`-rij ongewijzigd;
+  - als de forecasts daarna zo wijzigen dat het window verdwijnt, volgt 1 `cancelled`-bericht en krijgt de rij `status = cancelled`.
+- AC-3: Geen kanaal in M1: `grep -rniE "telegram" ingest/src .env.example` geeft niets, en `grep -rn "shakka.notify" ingest/src/shakka/jobs` geeft niets.
+- AC-4: Logging: in een test met caplog en capsys rond `run_alerts` (niet via de CLI) komen de user-id's van de testgebruikers en de body-teksten van de berichten niet voor in de logregels.
 - AC-5: Dezelfde spot en data met gebruiker A (`min_kn` 12) en gebruiker B (`min_kn` 20) geven aantoonbaar verschillende windows.
 - AC-6: Veiligheid. Forecasts die voor elk uur `offshore` of `side_offshore` zijn, geven bij elke regel 0 events.
 - AC-7: Het gedrag voor spots met `verified: false` volgt de beslissing van Lars en is getest.
-- AC-8: `shakka alerts run --dry-run` en `shakka admin alerts preview` doen geen schrijfacties (`FakeSupabase.writes` is leeg) en versturen niets.
+- AC-8: `shakka alerts run --dry-run` en `shakka admin alerts preview` doen geen schrijfacties (`FakeSupabase.writes` is leeg).
 - AC-9: CLI-tests voor de beheer-CLI:
   - `profile set --weight 80` wijzigt alleen `weight_kg`;
+  - `profile set --telegram-chat-id 1` geeft een exitcode ongelijk aan 0 (onbekende optie);
   - `rule set --dir-classes offshore` geeft exitcode 1 met een duidelijke melding;
   - `favorite add` voor een onbekende spot geeft exitcode 1.
-- AC-10: Met Lars' gebruiker en minstens één ingevulde favoriete spot toont `uv run shakka evaluate` gevolgd door `uv run shakka admin alerts preview --user-id <id>` de windows of "geen windows" zonder fouten. Dit is `NEEDS_LARS`.
+- AC-10: Env-contract:
+  - `.env.example` bevat exact `SUPABASE_URL`, `SUPABASE_PUBLISHABLE_KEY`, `SUPABASE_SECRET_KEY`, `APP_BASE_URL`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` en `VAPID_SUBJECT`, zonder waarden (behalve `VAPID_SUBJECT=mailto:`), getoetst door `tests/test_repo_hygiene.py`;
+  - `Settings` heeft geen veld waarvan de naam met `telegram` begint;
+  - een test laat zien dat `Settings` laadt zonder fout als `TELEGRAM_BOT_TOKEN` in de omgeving staat;
+  - `cd ingest && uv run pytest` is volledig groen.
+- AC-11: Met Lars' gebruiker en minstens één ingevulde favoriete spot toont `uv run shakka evaluate` gevolgd door `uv run shakka admin alerts preview --user-id <id>` de windows of "geen windows" zonder fouten. Daarna maakt `uv run shakka alerts run` bij een gevonden window een `alert_state`-rij aan die in het Supabase-dashboard te zien is. Dit is `NEEDS_LARS`.
 **Nodig van Lars:**
 - Een auth-user voor jezelf (Supabase dashboard → Authentication → Add user) en de user-id daarvan.
 - Beslissing: gaan alerts alleen af voor spots met `verified: true`? Voorstel: ja. Niet-geverifieerde spots worden wel geëvalueerd en getoond, met een label.
+- Optioneel: `TELEGRAM_*` uit je lokale `.env` halen. Laten staan kan geen kwaad.
 **Omvang:** M
 
 ## WP-11: Orkestratie: uurlijkse workflow, logging, foutmeldingen
 **Mijlpaal:** M1
 **Afhankelijk van:** WP-10
-**Doel:** Alle stappen elk uur via GitHub Actions in een vaste volgorde draaien, elke run vastleggen in `ingest_runs` en Lars via Telegram waarschuwen bij storingen, zonder hem elk uur te spammen.
+**Doel:** Alle stappen elk uur via GitHub Actions in een vaste volgorde draaien, elke run vastleggen in `ingest_runs` en Lars bij storingen laten waarschuwen via de ingebouwde e-mailmelding van GitHub bij een gefaalde workflow-run. Er is geen eigen meldingskanaal (A-16).
 **In scope:**
 - `shakka.pipeline` met een geordende stappenlijst en per stap foutisolatie:
   - faalt `spots_sync`, dan gaat de run door met de spots in de database;
   - faalt `forecast` en is de nieuwste `forecast_hours.fetched_at` ouder dan 3 uur, dan wordt `alerts` overgeslagen met de reden `stale_forecast`;
   - de getijstap gebruikt de 20-uursregel uit WP-04.
 - Een `ingest_runs`-rij: `running` bij de start, aan het eind `ok`, `partial` of `failed`, met per stap `{name, status, duration_ms, counts, error}`.
-- Operatormeldingen via `TelegramNotifier.send_text` aan `TELEGRAM_CHAT_ID`:
-  - bij de eerste run met `partial` of `failed` na een `ok`-run;
-  - bij herstel;
-  - bij een dagverbruik van Open-Meteo boven 80% van de guard.
-
-  Dezelfde storing geeft geen herhaalde melding; dat wordt afgeleid uit de vorige `ingest_runs`-rij.
-- Exitcode: 0 bij `ok` en `partial`, 1 bij `failed`.
-- Gestructureerde logging naar stdout, zonder secrets.
+- Operatorsignalen, zonder eigen kanaal:
+  - de exitcode van `shakka run-hourly` (zie hieronder). Een exitcode 1 laat de workflow-run falen; GitHub mailt Lars dan volgens zijn meldingsinstellingen;
+  - de `ingest_runs`-rij is de bron voor de details (welke stap, welke fout);
+  - een dagverbruik van Open-Meteo boven 80% van de guard wordt vastgelegd in de `ingest_runs`-rij (in `steps` bij de stap `forecast`) en als `::warning::`-annotatie in de workflow-uitvoer geschreven. Dat geeft geen e-mail; WP-22 voegt pushwaarschuwingen aan Lars toe.
+- Exitcode: 1 bij `failed`, en ook bij een run waarin `alerts` is overgeslagen wegens `stale_forecast` (dan komen er geen alerts, en dat moet Lars weten). Anders 0, ook bij `partial`.
+- GitHub dedupliceert niet: tijdens een aanhoudende storing komt er elk uur een mail. Dat is bewust geaccepteerd (geen eigen dedup-logica meer); de RUNBOOK beschrijft het.
+- Gestructureerde logging naar stdout, zonder secrets en zonder persoonsgegevens (user-id's, e-mailadressen, berichtteksten); de Actions-logs van deze publieke repo zijn openbaar.
 - `.github/workflows/hourly.yml`.
 - `docs/RUNBOOK.md`:
-  - runs bekijken;
+  - runs bekijken, en de `ingest_runs`-tabel lezen;
   - een run handmatig starten;
-  - wat de operatormeldingen betekenen;
+  - de GitHub-meldingsinstelling voor Actions (in de meldingsinstellingen van het GitHub-account, onderdeel Actions: e-mail aan, desgewenst alleen bij gefaalde workflows; de builder controleert het exacte menupad), en wie de mail krijgt: de gebruiker die de workflow heeft aangemaakt of als laatste de cron-syntax wijzigde ([bron](https://docs.github.com/en/actions/concepts/workflows-and-actions/notifications-for-workflow-runs));
+  - wat een gefaalde run betekent en waar je de oorzaak vindt;
   - de maatregel tegen het uitschakelen van schedules na 60 dagen (als de repo publiek is), met de gekozen aanpak.
-**Buiten scope:** marine-stap (WP-12), opruimen van sessies (WP-19), wekelijks gebruiksrapport (WP-22).
+**Buiten scope:** marine-stap (WP-12), versturen van alerts (WP-17), opruimen van sessies (WP-19), wekelijks gebruiksrapport en pushwaarschuwingen aan Lars (WP-22).
 **Contracten:**
 - `shakka.pipeline`:
   - `STEPS`: een geordende lijst van `(name, callable)`. In M1 is de volgorde `spots_sync`, `forecast`, `tides`, `evaluate`, `alerts`. Latere WP's voegen stappen toe op een vaste plek: `marine` direct na `forecast` (WP-12), `sessions_cleanup` aan het eind (WP-19), `usage_report` aan het eind (WP-22).
-  - `run_hourly(settings: Settings, *, now: datetime, db=None, http=None, notifiers=None) -> RunReport(status: str, steps: list[StepReport])`.
-  - CLI: `shakka run-hourly`.
+  - `run_hourly(settings: Settings, *, now: datetime, db=None, http=None) -> RunReport(status: str, steps: list[StepReport], exit_code: int)`. `exit_code` volgt de regel hierboven. WP-17 voegt de keyword-parameter `notifiers=None` toe.
+  - CLI: `shakka run-hourly`, met als exitcode `RunReport.exit_code`.
 - Workflow `.github/workflows/hourly.yml`:
   - `schedule` met cron `17 * * * *` en `workflow_dispatch`;
   - `concurrency` met group `hourly` en `cancel-in-progress: false`;
   - `timeout-minutes: 15`;
   - draait in `ingest/` het commando `uv run shakka run-hourly`;
-  - secrets alleen via `${{ secrets.* }}`: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `TELEGRAM_BOT_TOKEN`, `TELEGRAM_CHAT_ID`;
+  - secrets alleen via `${{ secrets.* }}`: `SUPABASE_URL`, `SUPABASE_SECRET_KEY`;
   - `APP_BASE_URL` via `${{ vars.APP_BASE_URL }}`.
 **Acceptatiecriteria:**
-- AC-1: `cd ingest && uv run pytest tests/test_pipeline.py` met fakes. Als alle stappen slagen, krijgt de `ingest_runs`-rij status `ok`, met de stappen in exact de contractvolgorde.
+- AC-1: `cd ingest && uv run pytest tests/test_pipeline.py` met fakes. Als alle stappen slagen, krijgt de `ingest_runs`-rij status `ok`, met de stappen in exact de contractvolgorde, en is `exit_code` 0.
 - AC-2: Als de forecaststap een exception geeft:
   - draaien `tides` en `evaluate` toch;
   - wordt `alerts` overgeslagen als de nieuwste `fetched_at` ouder is dan 3 uur, en anders uitgevoerd;
-  - krijgt de run status `partial`;
-  - wordt precies 1 operatormelding verstuurd.
+  - krijgt de run status `partial`, met de fout bij de stap `forecast` in `steps`;
+  - is `exit_code` 1 als `alerts` is overgeslagen (`stale_forecast`), en 0 als `alerts` wel is uitgevoerd.
 
-  Een volgende run met dezelfde fout verstuurt geen nieuwe melding. De eerste `ok`-run daarna verstuurt 1 herstelmelding.
-- AC-3: Met dummy-secrets (`SUPABASE_SECRET_KEY=sb_secret_TESTVALUE`, `TELEGRAM_BOT_TOKEN=123:TESTTOKEN`) en een falende stap staan deze waarden niet in de log-uitvoer van een run (caplog en capsys).
-- AC-4: `hourly.yml` bevat alle elementen uit het contract. `grep -nE "sb_secret_|[0-9]{8,10}:[A-Za-z0-9_-]{30,}" .github/workflows/*.yml` geeft niets.
-- AC-5: Een handmatige `workflow_dispatch`-run op GitHub slaagt en maakt een `ingest_runs`-rij met `status = ok` in het remote project. Binnen 2 uur daarna volgt een geplande run. Dit is `NEEDS_LARS`.
+  Een run met status `failed` heeft `exit_code` 1. Een CLI-test laat zien dat `shakka run-hourly` `RunReport.exit_code` als exitcode teruggeeft.
+- AC-3: Met de dummy-secret `SUPABASE_SECRET_KEY=sb_secret_TESTVALUE` en een falende stap staat die waarde niet in de log-uitvoer van een run (caplog en capsys).
+- AC-4: `hourly.yml` bevat alle elementen uit het contract. `grep -nE "sb_secret_" .github/workflows/*.yml` en `grep -niE "telegram" .github/workflows/*.yml` geven niets.
+- AC-5: Budgetwaarschuwing: bij een dagverbruik boven 80% van de guard (fake `api_usage`) staat de waarschuwing in de `steps` van de `ingest_runs`-rij en bevat stdout een regel die begint met `::warning::`. De exitcode wordt er niet 1 door.
+- AC-6: Een handmatige `workflow_dispatch`-run op GitHub slaagt en maakt een `ingest_runs`-rij met `status = ok` in het remote project. Binnen 2 uur daarna volgt een geplande run. Lars bevestigt dat e-mailmeldingen voor GitHub Actions aan staan voor zijn account. Dit is `NEEDS_LARS`.
 **Nodig van Lars:**
-- GitHub Secrets `SUPABASE_URL`, `SUPABASE_SECRET_KEY`, `TELEGRAM_BOT_TOKEN` en `TELEGRAM_CHAT_ID`.
+- GitHub Secrets `SUPABASE_URL` en `SUPABASE_SECRET_KEY`.
 - Optioneel de Actions-variable `APP_BASE_URL` (pas zinvol na WP-14).
 - GitHub Actions aangezet voor de repo.
+- In je GitHub-account e-mailmeldingen voor Actions aanzetten (meldingsinstellingen, onderdeel Actions; desgewenst alleen bij gefaalde workflows; stappen in de RUNBOOK). Controleer daarna dat jij de gebruiker bent die `hourly.yml` heeft aangemaakt, want die krijgt de meldingen.
 **Omvang:** M
 
 ---
 
 ## M2: "PWA"
 
-## WP-12: Marine-ingest (golven)
+## WP-12: Marine-ingest (golven) en golven op de spotpagina
 **Mijlpaal:** M2
-**Afhankelijk van:** WP-11
-**Doel:** Golfhoogte, golfperiode en golfrichting per spot server-side ophalen via de Open-Meteo Marine API, binnen hetzelfde call-budget, zodat de spotpagina ze kan tonen.
+**Afhankelijk van:** WP-11, WP-14 (sinds A-17; aanbevolen na WP-18)
+**Doel:** Golfhoogte, golfperiode en golfrichting per spot server-side ophalen via de Open-Meteo Marine API, binnen hetzelfde call-budget, en ze op de spotpagina tonen.
 **In scope:**
 - Een migratie voor `marine_hours` met RLS (`select` voor `anon` en `authenticated`) en een pgTAP-test.
 - `shakka.domain.marine`.
@@ -851,20 +850,26 @@ Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen t
 - Pipelinestap `marine` direct na `forecast`. Als die faalt, wordt de run `partial` en gaan de andere stappen door.
 - CLI: `shakka marine fetch`.
 - Een vastgelegde echte respons als fixture, met minstens één binnenwaterlocatie (null-waarden).
-**Buiten scope:** golven in de evaluatie of alerts (niet in het plan), weergave (WP-14).
+- Weergave (verhuisd uit WP-14, A-17):
+  - `getMarineHours` in `web/src/lib/data.ts` en het type `MarineHour` in `web/src/lib/types.ts`;
+  - op `/spot/[id]` per uur golfhoogte, periode en richting, alleen als er data is. Zonder data verschijnt er niets extra en geen fout.
+**Buiten scope:** golven in de evaluatie of alerts (niet in het plan), de rest van de spotpagina (WP-14).
 **Contracten:**
 - Tabel `marine_hours`: `spot_id text` (FK `spots`, cascade), `valid_at timestamptz`, `wave_height_m real null`, `wave_period_s real null`, `wave_dir_deg smallint null`, `fetched_at timestamptz not null`. PK (`spot_id`, `valid_at`).
 - `shakka.domain.marine.MarineHour(spot_id: str, valid_at: datetime, wave_height_m: float | None, wave_period_s: float | None, wave_dir_deg: int | None)`.
 - `shakka.openmeteo.marine`: `parse_marine_response(payload, locations) -> list[MarineHour]` en `fetch_marine(http, locations, *, forecast_days: int = 7) -> list[MarineHour]`.
 - `shakka.jobs.marine.run_marine_ingest(db, http, budget, *, now: datetime) -> MarineIngestResult(spots: int, rows: int, calls: float, skipped_budget: bool, errors: list[str])`.
+- `web/src/lib/data.ts`: `getMarineHours(spotId: string, from: Date, to: Date): Promise<MarineHour[]>`, leest alleen `marine_hours`.
 **Acceptatiecriteria:**
 - AC-1: Parsertest op de fixture: alle tijden zijn UTC, waarden horen bij de juiste spot, en voor een locatie met alleen `null`-waarden worden geen rijen opgeslagen.
 - AC-2: Budget. Het gewicht wordt geregistreerd onder `open_meteo_marine`. Is het forecastverbruik van de dag al zo hoog dat dagverbruik plus het marinegewicht boven 8.000 komt, dan gaat er geen marine-request uit.
 - AC-3: Pipelinetest. Als de marinestap faalt, wordt de run `partial` en draaien `tides`, `evaluate` en `alerts` gewoon. `STEPS` heeft de volgorde `spots_sync`, `forecast`, `marine`, `tides`, `evaluate`, `alerts`.
 - AC-4: `supabase test db` is groen, inclusief: `anon` leest `marine_hours` en kan er niet in schrijven.
 - AC-5: Tegen de lokale stack met een test-spot op de Noordzeekust vult `uv run shakka marine fetch` de tabel `marine_hours`.
+- AC-6: `cd web && npm run check && npm test && npm run build` slaagt, en de guard uit WP-13 slaagt. Een componenttest van de spotpagina toont golfhoogte en periode bij een uur met marinedata, en geen golfregel en geen fout bij een spot zonder marinedata.
+- AC-7: Alle `.from(...)`-aanroepen in `web/src/lib/data.ts` gebruiken alleen de tabellen `spots`, `evaluations`, `tide_extremes` en `marine_hours`.
 **Nodig van Lars:** Na de merge `supabase db push`.
-**Omvang:** S
+**Omvang:** M (was S; de weergave uit WP-14 is erbij gekomen)
 
 ## WP-13: PWA-basis
 **Mijlpaal:** M2
@@ -929,8 +934,8 @@ Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen t
 
 ## WP-14: Spotlijst en spotpagina
 **Mijlpaal:** M2
-**Afhankelijk van:** WP-10, WP-12, WP-13
-**Doel:** Per spot het uuroordeel met redenen, wind, richting, betrouwbaarheid, getij en golven tonen, plus een spotlijst als standaardweergave. Alles uit de database, met eerlijke meldingen over niet-geverifieerde spots en verouderde data.
+**Afhankelijk van:** WP-10, WP-13 (WP-12 is sinds A-17 geen afhankelijkheid meer)
+**Doel:** Per spot het uuroordeel met redenen, wind, richting, betrouwbaarheid en getij tonen, plus een spotlijst als standaardweergave. Alles uit de database, met eerlijke meldingen over niet-geverifieerde spots en verouderde data.
 **In scope:**
 - `web/src/lib/types.ts`: types met de kolomnamen uit de database.
 - `web/src/lib/data.ts`: getypeerde queries.
@@ -942,10 +947,9 @@ Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen t
   - een richtingspijl met windroos en het label van de richtingsklasse;
   - de betrouwbaarheid;
   - de redenen als Nederlandse labels;
-  - getij-extremen van die dag;
-  - golven (als die er zijn).
+  - getij-extremen van die dag.
 
-  Daarnaast:
+  Golven komen er in WP-12 bij (A-17). Daarnaast:
   - profielinfo (status, seizoen, hazards, notes);
   - een banner "niet geverifieerd" bij `verified: false`;
   - de versheid van de data (`evaluated_at`), met een waarschuwing als die ouder is dan 3 uur;
@@ -953,17 +957,16 @@ Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen t
 - Alle tijden in Europe/Amsterdam.
 - Route `/go?spot&start&end`: in M2 een redirect naar `/spot/{spot}` (in WP-20 vervangen door sessie aanmaken). Bij ongeldige parameters een redirect naar `/`.
 - `tests/test_contracts.py` (ingest) controleert dat `data/contracts/*.json` actueel is. Dat bestaat al uit WP-05.
-**Buiten scope:** kaart (WP-15), favorieten (WP-16), persoonlijke limieten op de spotpagina (alleen in alerts; de pagina toont het oordeel op basis van de spot-defaults), sessies (WP-20).
+**Buiten scope:** golven en `marine_hours` (WP-12), kaart (WP-15), favorieten (WP-16), persoonlijke limieten op de spotpagina (alleen in alerts; de pagina toont het oordeel op basis van de spot-defaults), sessies (WP-20).
 **Contracten:**
 - `web/src/lib/data.ts`:
   - `listSpots(): Promise<Spot[]>`;
   - `getSpot(id: string): Promise<Spot | null>`;
   - `getEvaluations(spotId: string, from: Date, to: Date): Promise<Evaluation[]>`;
   - `getSpotSummaries(now: Date): Promise<Record<string, SpotSummary>>`;
-  - `getTideExtremes(station: string, from: Date, to: Date): Promise<TideExtreme[]>`;
-  - `getMarineHours(spotId: string, from: Date, to: Date): Promise<MarineHour[]>`.
+  - `getTideExtremes(station: string, from: Date, to: Date): Promise<TideExtreme[]>`.
 
-  Deze functies lezen alleen `spots`, `evaluations`, `tide_extremes` en `marine_hours`.
+  Deze functies lezen alleen `spots`, `evaluations` en `tide_extremes`. WP-12 voegt `getMarineHours` toe.
 - `web/src/lib/contracts.ts`: `reasonLabel(code)`, `dirClassLabel(code)`, `confidenceLabel(code)` en `RIDABLE_DIR_CLASSES`.
 - `web/src/lib/components/HourVerdict.svelte`: toont één uur met oordeel, wind, richting en redenen. Hergebruikt in WP-21.
 - `web/src/lib/time.ts`: `formatLocal(date, pattern)` en `parseGoParams(url): { spot: string; start: Date; end: Date } | null`.
@@ -983,8 +986,8 @@ Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen t
   - geldige parameters in het formaat uit WP-08 leiden naar `/spot/{spot}`;
   - ontbrekende of ongeldige parameters leiden naar `/`;
   - een test gebruikt een URL die `build_go_url` uit WP-08 genereert (vastgelegd als fixture-string).
-- AC-6: Alle `.from(...)`-aanroepen in `web/src/lib/data.ts` (`grep -n "\.from(" web/src/lib/data.ts`) gebruiken alleen de tabellen `spots`, `evaluations`, `tide_extremes` en `marine_hours`.
-- AC-7: Op de gedeployde site toont `/spot/<een ingevulde spot>` actuele uren. Met de Actions-variable `APP_BASE_URL` opent de "Ik ga"-knop in Telegram de spotpagina. Dit is `NEEDS_LARS`.
+- AC-6: Alle `.from(...)`-aanroepen in `web/src/lib/data.ts` (`grep -n "\.from(" web/src/lib/data.ts`) gebruiken alleen de tabellen `spots`, `evaluations` en `tide_extremes`.
+- AC-7: Op de gedeployde site toont `/spot/<een ingevulde spot>` actuele uren. Een `/go`-URL die met de Actions-variable `APP_BASE_URL` is gemaakt (bijv. uit `shakka admin alerts preview`), geopend in een browser, leidt naar de spotpagina. Dit is `NEEDS_LARS`. (Een tik op een pushmelding wordt in WP-18 AC-5 getoetst.)
 **Nodig van Lars:** De GitHub Actions-variable `APP_BASE_URL` op de productie-URL zetten.
 **Omvang:** M
 
@@ -1034,11 +1037,11 @@ Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen t
 - `data/contracts/rule_resolution_cases.json` met minstens 8 gevallen, getoetst door een Python-test en een vitest-test.
 - Validatie in formulieren, gelijk aan de DB-constraints.
 - Uitgelogde gebruikers zien een loginprompt.
-**Buiten scope:** `telegram_chat_id` in de UI (blijft beheer via CLI), push-instellingen (WP-18), account verwijderen (WP-23).
+**Buiten scope:** push-instellingen (WP-18), account verwijderen (WP-23). De ongebruikte kolom `profiles.telegram_chat_id` (A-16) komt niet in de UI en niet in de types; WP-22 verwijdert hem.
 **Contracten:**
 - `web/src/lib/rules.ts`: `effectiveRule(spot: Spot, profile: Profile | null, override: AlertRuleRow | null, defaults: AlertDefaults): EffectiveRule`.
 - `data/contracts/rule_resolution_cases.json`: een lijst `{spot, profile, override, expected}`.
-- De UI schrijft alleen naar `profiles` (zonder `telegram_chat_id`), `favorites` en `alert_rules`.
+- De UI schrijft alleen naar `profiles` (uitsluitend `weight_kg`, `level`, `quiver_m2`, `default_min_kn` en `default_max_kn`, de kolommen die `authenticated` mag wijzigen), `favorites` en `alert_rules`.
 **Acceptatiecriteria:**
 - AC-1: `cd web && npm run check && npm test && npm run build` slaagt, en `cd ingest && uv run pytest` slaagt.
 - AC-2: Pariteit tussen Python en TypeScript. `cd ingest && uv run pytest -k rule_resolution_cases` en de vitest-test voor `effectiveRule` slagen allebei op hetzelfde JSON-bestand. Het bestand bevat minstens 8 gevallen en dekt alle vier de prioriteitsniveaus.
@@ -1047,46 +1050,78 @@ Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen t
 - AC-5: De favorietenster doet met een gemockte supabase een insert of delete op `favorites` met het juiste `spot_id`.
 - AC-6: Een uitgelogde gebruiker op `/profiel` of `/alerts` ziet een loginprompt, en er gaan geen queries naar `profiles`, `favorites` of `alert_rules`.
 - AC-7: Een regel die in de app is gewijzigd, verandert de uitvoer van `uv run shakka admin alerts preview --user-id <Lars>`. Dit is `NEEDS_LARS`.
+- AC-8: `grep -rni "telegram" web/src` geeft niets.
 **Nodig van Lars:** Niets.
 **Omvang:** M
 
 ## WP-17: Web Push: backend
 **Mijlpaal:** M2
 **Afhankelijk van:** WP-11
-**Doel:** Alerts naast Telegram ook als Web Push versturen naar alle geregistreerde apparaten van een gebruiker, en dode abonnementen automatisch opruimen.
+**Doel:** Alerts als Web Push versturen, het enige meldingskanaal (besluit Lars, 15 oktober 2026; A-16), naar alle geregistreerde apparaten van een gebruiker, en dode abonnementen automatisch opruimen.
 **In scope:**
 - Een migratie voor `push_subscriptions` met RLS, plus pgTAP-tests.
+- `shakka.notify.base`: de kanaalinterface (overgenomen uit het vervallen WP-09).
+- `shakka.domain.push` (puur): de `AlertMessage` uit WP-08 inkorten tot een pushtekst. WP-08 levert berichten tot 1.000 tekens; een melding toont veel minder.
 - `shakka.notify.webpush.WebPushNotifier` met `pywebpush` en VAPID:
-  - payloadcontract;
+  - payloadcontract, met titel en body uit `to_push_text`;
   - TTL van 12 uur;
   - `tag` per `alert_state`, zodat een update de oude melding vervangt;
-  - 404 en 410 zijn een permanente fout.
-- `shakka.jobs.alerts.load_targets` geeft ook push-doelen terug. Bij een permanente pushfout verwijdert de job dat abonnement.
-- Zonder VAPID-configuratie is het pushkanaal uitgeschakeld, met een waarschuwing in de log. Telegram blijft werken.
+  - 404 en 410 zijn een permanente fout;
+  - endpoints, sleutels en de VAPID-private key komen niet in logs of exceptions.
+- `shakka.jobs.alerts` (uit WP-10) uitbreiden:
+  - `load_targets` geeft de push-doelen van een gebruiker;
+  - aflevering tussen "bericht renderen" en "state opslaan";
+  - afleverregel (verhuisd uit WP-10): als geen enkele aflevering voor een event slaagt en er minstens één niet-permanente fout is, wordt de state voor dat event niet bijgewerkt, zodat de volgende run het opnieuw probeert. In alle andere gevallen wel, ook als de gebruiker geen abonnementen heeft (`no_target`);
+  - bij een permanente pushfout verwijdert de job dat abonnement; bij succes wordt `last_success_at` bijgewerkt;
+  - `last_notified_at` krijgt het tijdstip van de eerste geslaagde aflevering van het event (de planner stemt dit af op wat WP-10 voor M1 heeft vastgelegd).
+- Overgang van M1 naar push: windows die in M1 al een `new`-event kregen, staan als `active` in `alert_state` en geven door de deduplicatie pas weer een event bij een wezenlijke wijziging. Ze worden dus niet alsnog gepusht. De planner legt vast of dat acceptabel is of dat er bij de livegang een eenmalige stap nodig is (bijv. actieve rijen zonder `last_notified_at` opnieuw als `new` behandelen). Open punt, geen besluit.
+- Zonder VAPID-configuratie is het pushkanaal uitgeschakeld, met een waarschuwing in de log. `run_alerts` draait dan zoals in M1: events worden berekend en `alert_state` wordt bijgewerkt, maar er wordt niets afgeleverd.
+- `shakka.pipeline.run_hourly` krijgt de keyword-parameter `notifiers` en bouwt de `WebPushNotifier` uit `Settings`.
 - `hourly.yml` geeft de VAPID-secrets door.
 - CLI: `shakka alerts test-push --user-id UUID`.
 - `docs/RUNBOOK.md`: hoe je een VAPID-sleutelpaar genereert.
-**Buiten scope:** abonneren in de browser en de service worker (WP-18).
+**Buiten scope:** abonneren in de browser en de service worker (WP-18), pushmeldingen aan Lars over gebruik en drempels (WP-22), andere kanalen.
 **Contracten:**
 - Tabel `push_subscriptions`: `id uuid default gen_random_uuid()`, `user_id uuid` (FK `auth.users`, cascade), `endpoint text unique not null`, `p256dh text not null`, `auth text not null`, `created_at`, `last_success_at timestamptz null`. PK `id`. RLS: `select`, `insert` en `delete` op de eigen rijen. `anon` heeft geen rechten.
-- `shakka.notify.base.PushTarget(subscription_id: str, endpoint: str, p256dh: str, auth: str)`. `DeliveryTarget` wordt `TelegramTarget | PushTarget`.
-- `WebPushNotifier(vapid_private_key: str, vapid_subject: str)` met `channel = "webpush"` en `send(target: PushTarget, message: AlertMessage) -> DeliveryResult`.
-- Push-payload (JSON, maximaal 3.000 bytes): `{"title": str, "body": str, "url": str, "tag": str}`. `url` is de `go_url`, of anders `/spot/{spot_id}`. `tag` is `alert-{alert_state.id}`.
+- `shakka.notify.base`:
+  - `DeliveryResult(ok: bool, permanent_failure: bool, detail: str)`;
+  - `PushTarget(subscription_id: str, endpoint: str, p256dh: str, auth: str)`;
+  - `DeliveryTarget = PushTarget` (een alias, zodat een later kanaal de union kan uitbreiden);
+  - het `Notifier`-Protocol met `channel: str` en `send(target: DeliveryTarget, message: AlertMessage, *, tag: str) -> DeliveryResult`.
+- `shakka.domain.push`:
+  - `PUSH_TITLE_MAX = 50` en `PUSH_BODY_MAX = 150` (tekens, Unicode code points; besluit Lars);
+  - `PushText(title: str, body: str)`;
+  - `to_push_text(message: AlertMessage) -> PushText`. Regels: past de tekst, dan blijft hij ongewijzigd. Is de body te lang, dan worden hele regels vanaf het begin van `body` genomen zolang ze passen. Past zelfs de eerste regel niet, dan wordt die op een woordgrens afgekapt en eindigt hij op "…". Voor de titel geldt hetzelfde afkappen. De titel is nooit leeg. De volledige tekst blijft bereikbaar via de `url` van de melding. De volgorde van de regels in `body` bepaalt WP-08; WP-17 verandert die niet.
+- `shakka.notify.webpush.WebPushNotifier(vapid_private_key: str, vapid_subject: str)` met `channel = "webpush"` en `send(target: PushTarget, message: AlertMessage, *, tag: str) -> DeliveryResult`.
+- Push-payload (JSON, maximaal 3.000 bytes): `{"title": str, "body": str, "url": str, "tag": str}`. `title` en `body` komen uit `to_push_text`. `url` is de `go_url`, of anders `/spot/{spot_id}`. `tag` is `alert-{alert_state.id}` (de `state_id` uit `RenderedAlert`).
+- `shakka.jobs.alerts`:
+  - `load_targets(db, user_id: str) -> list[DeliveryTarget]`;
+  - `run_alerts(db, *, now: datetime, base_url: str | None, dry_run: bool = False, notifiers: Mapping[str, Notifier] | None = None) -> AlertJobResult(users: int, events: int, messages: list[RenderedAlert], sent: int, failed: int, no_target: int)`. Zonder `notifiers` (of met een lege mapping) gedraagt de functie zich als in WP-10.
+- `shakka.pipeline.run_hourly(settings, *, now, db=None, http=None, notifiers=None)`.
 **Acceptatiecriteria:**
 - AC-1: `supabase test db` is groen. Een gebruiker ziet, maakt en verwijdert alleen eigen abonnementen, en `anon` heeft geen toegang.
 - AC-2: Een unittest met een gemockte pywebpush-aanroep laat zien:
   - de payload heeft exact de sleutels `title`, `body`, `url` en `tag`;
+  - `title` en `body` zijn gelijk aan `to_push_text(message)`;
   - de payload is maximaal 3.000 bytes;
   - de VAPID-claims bevatten `sub` = `VAPID_SUBJECT`.
-- AC-3: Bij een `FakeSupabase`-test volgt op 410 of 404 `permanent_failure` en verwijdert `run_alerts` dat abonnement. Een 5xx telt als niet-permanent en volgt de afleverregel uit WP-10.
-- AC-4: Een gebruiker met Telegram en 2 push-abonnementen krijgt per event 3 afleveringen. Als één kanaal faalt, worden de andere toch bediend.
-- AC-5: Zonder VAPID-variabelen draait `run_alerts` zonder exception, met alleen Telegram, en logt een waarschuwing.
-- AC-6: `hourly.yml` geeft `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` en `VAPID_SUBJECT` door via `${{ secrets.* }}`.
+- AC-3: `cd ingest && uv run pytest tests/test_push_text.py`:
+  - voor elk golden-bericht uit de tests van WP-08 is de titel hoogstens 50 en de body hoogstens 150 tekens;
+  - een bericht dat al past blijft ongewijzigd;
+  - een lange body met meerdere regels wordt op een regelgrens afgekapt;
+  - een eerste regel die te lang is, eindigt op "…" en wordt niet midden in een woord afgekapt;
+  - de titel is nooit leeg;
+  - `tests/test_domain_purity.py` is groen met `shakka.domain.push`.
+- AC-4: Bij een `FakeSupabase`-test volgt op 410 of 404 `permanent_failure`, verwijdert `run_alerts` dat abonnement en schuift de state door. Een 5xx telt als niet-permanent: zonder andere geslaagde aflevering blijft de state ongewijzigd en levert de volgende run opnieuw af.
+- AC-5: Een gebruiker met 2 push-abonnementen krijgt per event 2 afleveringen. Faalt één abonnement, dan wordt het andere toch bediend. Een gebruiker zonder abonnementen leidt niet tot een crash, verhoogt `no_target` en de state schuift door.
+- AC-6: Zonder VAPID-variabelen draait `run_alerts` (via `run_hourly`) zonder exception en logt een waarschuwing. Er zijn 0 afleveringen, `messages` is gevuld en `alert_state` wordt bijgewerkt zoals in WP-10 AC-2.
+- AC-7: `hourly.yml` geeft `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY` en `VAPID_SUBJECT` door via `${{ secrets.* }}`.
+- AC-8: Met dummy-waarden voor endpoint, `p256dh`, `auth` en `VAPID_PRIVATE_KEY` en een falende aflevering staan die waarden en de user-id niet in `DeliveryResult.detail` en niet in caplog of capsys.
 **Nodig van Lars:**
 - Een VAPID-sleutelpaar genereren (commando in de RUNBOOK) en in `.env` en de GitHub Secrets zetten.
 - `VAPID_SUBJECT=mailto:<adres>`.
 - `supabase db push`.
-**Omvang:** S
+**Omvang:** M (was S; de kanaalinterface, de afleverregel en de inkorting zijn erbij gekomen door A-16)
 
 ## WP-18: Web Push: PWA
 **Mijlpaal:** M2
@@ -1102,7 +1137,7 @@ Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen t
   - een `push`-handler die `showNotification(title, { body, tag, data: { url } })` aanroept;
   - een `notificationclick`-handler die een bestaand venster focust of `clients.openWindow(url)` aanroept.
 - Op iOS buiten standalone-modus: een uitleg om de app eerst op het beginscherm te zetten (iOS 16.4+). Browsers zonder ondersteuning krijgen een melding.
-**Buiten scope:** de verzendkant (WP-17), meldingsvoorkeuren per kanaal.
+**Buiten scope:** de verzendkant (WP-17), meldingsvoorkeuren (er is maar één kanaal).
 **Contracten:** `web/src/lib/push.ts` met `isPushSupported(): boolean`, `needsInstallFirst(): boolean`, `enablePush(): Promise<{ ok: boolean; error?: string }>` en `disablePush(): Promise<void>`. Omgevingsvariabele `PUBLIC_VAPID_PUBLIC_KEY`. De payload is zoals in WP-17.
 **Acceptatiecriteria:**
 - AC-1: `cd web && npm run check && npm test && npm run build` slaagt.
@@ -1244,7 +1279,7 @@ Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen t
   - een voornaam van meer dan 30 tekens wordt geweigerd;
   - bij een weigering volgt geen insert.
 - AC-5: `cancelSession` zet `cancelled_at` (gemockt). `/mijn-sessies` vraagt alleen sessies op van de ingelogde gebruiker.
-- AC-6: Op een telefoon: vanuit een echte Telegram-alert op "Ik ga" tikken, sessie aanmaken, delen naar WhatsApp en de link openen. Dit is `NEEDS_LARS`.
+- AC-6: Op een telefoon: op een echte pushmelding van een alert tikken (die opent de `go_url`), sessie aanmaken, delen naar WhatsApp en de link openen. Dit is `NEEDS_LARS`.
 **Nodig van Lars:**
 - `APP_BASE_URL` gezet (sinds WP-14).
 - Beslissing: mogen crewleden in M3 zelf sessies organiseren? Dan moet eerst een eigen SMTP-dienst (gratis tier) in Supabase Auth worden ingesteld, omdat de standaard-SMTP alleen naar teamleden mailt en max. 2 per uur. Zonder eigen SMTP kan in M3 alleen Lars organiseren; de crew RSVP't zonder account.
@@ -1291,18 +1326,22 @@ Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen t
 
 ## WP-22: Hardening backend en kostenbewaking
 **Mijlpaal:** M4
-**Afhankelijk van:** WP-00 t/m WP-21 (alle eerdere WP's)
+**Afhankelijk van:** WP-00 t/m WP-21 (alle eerdere WP's, zonder het vervallen WP-09)
 **Doel:** De backend betrouwbaar maken bij storingen van externe bronnen, en het verbruik van alle gratis tiers zichtbaar bewaken, zodat Shakka ook met meer gebruikers €0 per maand blijft.
 **In scope:**
-- Alle externe calls (Open-Meteo, Rijkswaterstaat, Telegram, push) via `shakka.http.make_client` met een timeout en een uniforme retry/backoff-helper.
+- Alle externe HTTP-calls (Open-Meteo, Rijkswaterstaat, Supabase REST) via `shakka.http.make_client` met een timeout en een uniforme retry/backoff-helper. De pywebpush-aanroep (WP-17) krijgt een expliciete timeout; de planner verifieert hoe pywebpush dat ondersteunt.
 - Een service-only RPC `db_usage()` die de databasegrootte en het aantal rijen per tabel teruggeeft.
-- Een wekelijks gebruiksrapport voor Lars via Telegram, als pipelinestap `usage_report`. Die draait op maandag één keer, gededupliceerd via `ingest_runs`. Het rapport bevat:
-  - Open-Meteo-calls (maximum per dag en totaal per maand, afgezet tegen de limieten);
-  - de grootte van de database tegen 500 MB;
-  - het aantal rijen per tabel;
-  - het succespercentage van `ingest_runs`;
-  - het aantal gebruikers en abonnementen.
-- Drempelwaarschuwingen: database boven 300 MB, Open-Meteo boven 70% van een limiet.
+- Een wekelijks gebruiksrapport voor Lars als pushmelding (A-16; Web Push is het enige kanaal), als pipelinestap `usage_report`. Die draait op maandag één keer, gededupliceerd via `ingest_runs`.
+  - Het volledige rapport wordt opgeslagen in de `steps` van de `ingest_runs`-rij (te lezen in het Supabase-dashboard). Het bevat:
+    - Open-Meteo-calls (maximum per dag en totaal per maand, afgezet tegen de limieten);
+    - de grootte van de database tegen 500 MB;
+    - het aantal rijen per tabel;
+    - het succespercentage van `ingest_runs`;
+    - het aantal gebruikers en abonnementen.
+  - De pushmelding is een korte samenvatting binnen de grenzen van `shakka.domain.push` (titel 50, body 150 tekens), met eventuele waarschuwingen eerst.
+  - De melding gaat naar de push-abonnementen van Lars, gevonden via `OPERATOR_USER_ID` (voorstel; de planner bevestigt of kiest een alternatief zonder persoonsgegevens in de repo). Ontbreekt die of heeft Lars geen abonnement, dan wordt het rapport wel opgeslagen en logt de stap een waarschuwing.
+- Drempelwaarschuwingen, ook als pushmelding aan Lars: database boven 300 MB, Open-Meteo boven 70% van een limiet.
+- Een migratie die de ongebruikte kolom `profiles.telegram_chat_id` (en de check-constraint `profiles_telegram_chat_id_format`) verwijdert, met aangepaste pgTAP-tests (`01_schema`, `02_privileges`, `04_rls_users`). Zie A-16.
 - De rate limits van Supabase Auth controleren en documenteren.
 - Eigen SMTP voor magic links (gratis tier, keuze van Lars).
 - `docs/RUNBOOK.md` aanvullen met:
@@ -1312,17 +1351,22 @@ Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen t
 **Buiten scope:** privacy, toegankelijkheid en performance van de PWA (WP-23). Betaalde monitoring.
 **Contracten:**
 - `shakka.http.with_retries(fn, *, attempts: int = 3, backoff: float = 1.0)`.
-- `shakka.domain.usage.build_usage_report(stats: UsageStats) -> str` (puur) en `usage_warnings(stats: UsageStats) -> list[str]` (puur).
+- `shakka.domain.usage.build_usage_report(stats: UsageStats) -> str` (puur), `usage_warnings(stats: UsageStats) -> list[str]` (puur) en `usage_push_text(stats: UsageStats) -> PushText` (puur, binnen `PUSH_TITLE_MAX` en `PUSH_BODY_MAX` uit WP-17).
 - RPC `db_usage() returns jsonb`, alleen voor de service role.
-- Pipelinestap `usage_report`.
+- Pipelinestap `usage_report`, die verstuurt via de `Notifier` uit WP-17.
+- Omgevingsvariabele `OPERATOR_USER_ID` (voorstel, zie het env-contract).
+- Tabel `profiles` zonder de kolom `telegram_chat_id`.
 **Acceptatiecriteria:**
 - AC-1: `grep -rn "httpx.Client(" ingest/src` vindt alleen `shakka/http.py`. Een test laat zien dat clients uit `make_client` een eindige timeout hebben.
 - AC-2: `cd ingest && uv run pytest tests/test_usage.py` toetst `build_usage_report` (golden-tekst) en `usage_warnings`. Bij 310 MB volgt een databasewaarschuwing, bij 7.100 calls per dag een Open-Meteo-waarschuwing, en onder de drempels volgt geen waarschuwing.
-- AC-3: Een pipelinetest laat zien dat `usage_report` alleen op maandag en maar één keer per week een bericht verstuurt.
+- AC-3: Een pipelinetest met een nep-notifier laat zien dat `usage_report` alleen op maandag en maar één keer per week een pushmelding verstuurt, naar de abonnementen van de operator. Zonder operator of zonder abonnement crasht de stap niet en staat het rapport toch in `ingest_runs`. De titel en body van de melding blijven binnen 50 en 150 tekens.
 - AC-4: `supabase test db` laat zien dat `db_usage()` niet uitvoerbaar is door `anon` en `authenticated`.
 - AC-5: `cd web && npm audit --omit=dev --audit-level=high` geeft exitcode 0.
 - AC-6: In `docs/RUNBOOK.md` staan de bevestiging van Open-Meteo (datum en uitkomst) en de gekozen SMTP-dienst. Een magic link naar een e-mailadres dat geen teamlid is, komt aan. Dit is `NEEDS_LARS`.
+- AC-7: `supabase test db` is groen, en de `columns_are`-test voor `profiles` in `supabase/tests/01_schema.test.sql` noemt `telegram_chat_id` niet meer (de tabel heeft die kolom dus niet). `grep -rni "telegram" ingest/src web/src` geeft niets. De oude migraties blijven ongewijzigd.
 **Nodig van Lars:**
+- Na de merge `supabase db push` (verwijdert `profiles.telegram_chat_id`).
+- `OPERATOR_USER_ID` (je eigen user-id) in `.env` en als GitHub Secret, als de planner dat voorstel overneemt, en push aan op je telefoon (WP-18).
 - Een mail aan Open-Meteo met de vraag of een gratis publieke app zonder ads onder niet-commercieel gebruik valt (open punt uit het plan).
 - Een keuze en account voor een SMTP-dienst met een gratis tier, ingesteld in Supabase Auth.
 - De rate limits van Supabase Auth instellen in het dashboard.
@@ -1330,7 +1374,7 @@ Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen t
 
 ## WP-23: Privacy, toegankelijkheid en performance
 **Mijlpaal:** M4
-**Afhankelijk van:** WP-00 t/m WP-21 (alle eerdere WP's)
+**Afhankelijk van:** WP-00 t/m WP-21 (alle eerdere WP's, zonder het vervallen WP-09)
 **Doel:** De PWA klaarmaken voor anderen. Minimale en uitlegbare persoonsgegevens, met de mogelijkheid je account te verwijderen. Toegankelijk, snel, en met een CSP die afdwingt dat de browser alleen met de eigen origin, Supabase en MapTiler praat.
 **In scope:**
 - `/privacy`: welke gegevens, waarom en hoe lang, en hoe je ze verwijdert. Gelinkt vanuit de footer.
@@ -1351,7 +1395,7 @@ Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen t
 - AC-2: axe-core-tests op `/`, `/spot/[id]`, `/s/[slug]`, `/profiel`, `/alerts` en `/login` met fixturedata geven 0 overtredingen met impact `serious` of `critical`.
 - AC-3: `node scripts/check-bundle-size.mjs` draait in CI en faalt boven de drempel.
 - AC-4: Een test parseert `web/static/_headers`. De CSP bevat `connect-src`, en die bevat geen `open-meteo`, geen `*` en geen analytics-domeinen.
-- AC-5: `/privacy` bestaat en is gelinkt vanuit de footer. De pagina noemt e-mail (login), voornaam (RSVP), profielgegevens, push-abonnementen en Telegram chat-id. De bewaartermijnen komen overeen met de implementatie: forecastdata 48 uur, sessies volgens WP-19.
+- AC-5: `/privacy` bestaat en is gelinkt vanuit de footer. De pagina noemt e-mail (login), voornaam (RSVP), profielgegevens en push-abonnementen, en noemt Telegram niet (A-16). De bewaartermijnen komen overeen met de implementatie: forecastdata 48 uur, sessies volgens WP-19.
 - AC-6: Lighthouse op de gedeployde site (mobiel): toegankelijkheid minstens 90, performance minstens 80, en de PWA is te installeren. Dit is `NEEDS_LARS`.
 **Nodig van Lars:** Akkoord op de privacytekst.
 **Omvang:** M
@@ -1367,6 +1411,8 @@ Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen t
 | Start WP-06 | Voorbeeldtabel voor kite-advies | De planner stelt hem op. Lars zet `checked_by_lars: true`. |
 | Start WP-07 | Defaults `min_go_hours` en `days_ahead` | De planner doet een voorstel. |
 | Start WP-10 | Alerts alleen voor spots met `verified: true`? | Ja. |
+| Start WP-11 | GitHub-meldingen bij een gefaalde run aanzetten; accepteren dat er tijdens een storing elk uur een mail komt | Ja (A-16). Wie de mail krijgt, volgt uit wie `hourly.yml` aanmaakt; controleren bij WP-11 AC-6. |
+| Start WP-22 | Hoe vindt de pipeline jouw push-abonnementen voor het gebruiksrapport? | `OPERATOR_USER_ID` als secret. |
 | Start WP-19 | Bewaartermijn sessies en RSVP's | 7 dagen na `ends_at`. |
 | Start WP-20 of WP-22 | Eigen SMTP-dienst (gratis tier) | Uiterlijk vóór M4. Eerder als crewleden in M3 zelf moeten kunnen organiseren. |
 
@@ -1385,3 +1431,4 @@ Genomen tijdens de nachtrun van 14 oktober en door Lars bevestigd. Latere planne
 | WP-13 | SvelteKit 3 (niet 2). | `#lib`, `$app/env/public` via `src/env.ts`, `src/service-worker/index.ts`, config in `vite.config.ts`. Contractregels van WP-13 en WP-18 zijn aangepast. |
 | WP-13 | `shouldCreateUser: false` bij de magic link, tot WP-22. | Nieuwe gebruikers maakt Lars aan in het Dashboard. Open aanmelden komt pas met eigen SMTP. |
 | WP-13 | Node 24.22.0 op Cloudflare Pages; placeholder-icoon tot er een echt icoon is. | `NODE_VERSION=24.22.0` als Pages-variabele. |
+| Alle | **Telegram vervalt volledig; Web Push (VAPID) is het enige meldingskanaal.** Scopewijziging van 15 oktober 2026. Pushteksten: titel hoogstens 50, body hoogstens 150 tekens. | Zie A-16 en A-17. WP-09 is `dropped`. M1 = alerts berekend en vastgelegd in `alert_state`, controleerbaar via CLI en database; de eerste melding op de telefoon komt in M2 (WP-17, WP-18). Operatormeldingen via GitHub. Aanbevolen M2-volgorde: WP-14 → WP-16 → WP-17 → WP-18 → WP-12 → WP-15. |
