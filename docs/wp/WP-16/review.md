@@ -1,55 +1,75 @@
-# Review WP-16, ronde 1
-Oordeel: CHANGES_REQUIRED
+# Review WP-16, ronde 2
+Oordeel: APPROVED
 
-Samenvatting: de blueprint dekt alle acceptatiecriteria (AC-1 t/m AC-8). De harde regels zijn goed geborgd:
-- offshore en side-offshore zijn nergens instelbaar (alleen `allowed` uit het contract, `parseAlertDefaults` weigert niet-rijdbare klassen, `parseAlertRuleForm` en `effectiveRule` weigeren ze, en daarachter staan de DB-CHECK en Pydantic);
-- er komt geen tracking en geen nieuwe dienst bij;
-- `sb_secret_` komt niet in `web/`.
+Samenvatting: revisie 2 lost B-1 volledig op. N-1 en N-3 geven aantoonbaar pariteit met Python, en de revisie introduceert geen nieuwe blokkerende punten. Ik heb de punten opnieuw gecontroleerd tegen `ingest/src/shakka/domain/alerts.py` (`AlertRuleOverride`, `ProfileDefaults`, `resolve_rule`, `FIELD_SOURCES`), `data/contracts/alert_defaults.json` en de bestaande web-modules.
 
-De schrijfregel past bij de M1-securitymigratie:
-- `profiles` alleen via `update` met letterlijk de vijf kolommen uit de kolomgrant, geen insert en geen upsert (WP-01 R8);
-- `favorites` en `alert_rules` met insert, upsert en delete op de eigen rijen;
-- upsert met `ON CONFLICT DO UPDATE` heeft de select-, insert- en update-policy nodig, en die zijn er alle drie.
+**B-1 (ronde 1): opgelost.**
+- `parseRuleFields` past nu ook de twee controles tussen velden toe en zet het latere veld in `value` op `null`: `min >= max` maakt `max_kn` `null` en `earliest >= latest` maakt `latest_local` `null`. Ook `latest_local '00:00'` wordt `null`.
+- Elk veld dat in `value` blijft staan, ligt binnen het bereik dat stap 2 van `effectiveRule` controleert:
+  - kn 5–60;
+  - richtingen alleen uit `allowed` en niet leeg;
+  - dagen 1–7 en niet leeg;
+  - tijden via een regex die een deelverzameling is van wat `normalizeLocalTime` accepteert, geschreven als `HH:MM:00`, `HH:MM:SS` of `HH:MM:SS.ffffff`;
+  - `min_go_hours` 1–24;
+  - `days_ahead` 0–7;
+  - `enabled` altijd een boolean.
 
-De 18 gedeelde gevallen heb ik met de hand doorgerekend tegen `resolve_rule`, `AlertRuleOverride.from_row` en `ProfileDefaults.from_row` in `ingest/src/shakka/domain/alerts.py`. Ze kloppen allemaal: afgeleide max 33/32/65, conflicten 14 en 15, invalid 16 t/m 18, 24:00 bij 12, en de bronnen. Ook de spotwaarden 16, 22 en 28 vallen binnen `SpotProfile.default_min_kn` 5–40. De Python-test draait de echte domeincode. Er is één blokkerend punt, in `ruleHints`.
+  Stap 2 kan dus niet meer gooien. Alleen stap 4 (conflict) en stap 1 (een ongeldig profiel) kunnen dat nog, en die vangt de enige `try` in `ruleHints` op.
+- De terugvalaanroep weghalen is correct en volledig. `ruleHints` geeft alleen een hint bij een leeg veld. Voor `dir_classes`, `weekdays`, `earliest_local`, `latest_local`, `min_go_hours` en `days_ahead` kent `FIELD_SOURCES` alleen `rule` en `system`. Bij een leeg veld is de effectieve waarde daar dus altijd de systeemdefault, en die hint kan zonder `effectiveRule` direct uit `defaults` komen. Alleen `min_kn` en `max_kn` hangen af van profiel en spot. Daar is de terugval-tekst "botst met je andere windgrenzen" een redelijke keuze. Het doel van de opdracht ("`ruleHints` gooit nooit") wordt hiermee strenger gehaald dan met een tweede `try`.
+- De tests dekken het:
+  - `forms.test.ts` test drie formulieren plus een ongeldig profiel plus een conflict, telkens met `not.toThrow`, en test daarnaast de waarden van `parseRuleFields`;
+  - `alert-rule-form.test.ts` doet de echte gebruikersflow (Tot staat op 17:00, daarna Vanaf 19:00 kiezen), met een spy op `window`-`error`, `timeOrder` en 0 writes.
+
+  R8 legt vast dat de andere `$derived`-aanroepen (`timeOptions`, `daysAheadOptions`) ook niet gooien. `storedRuleStatus` heeft een eigen `try`, en `ruleToForm` vangt de fouten van `normalizeLocalTime` af.
+
+**N-1 (`enabled: null`): pariteit klopt.**
+- Python: `enabled: bool | None = Field(default=None, strict=True)` accepteert `None`. `resolve_rule` geeft dan `True`, en `_expected_sources` ziet `None` op het niveau `RULE` en kiest dus `system`.
+- TS: `null` geeft de default `true` met bron `system`. `'yes'` is aan beide kanten `invalid` (strict bool).
+- Geval 19 (D, alle bronnen `system`) klopt met de hand doorgerekend.
+
+**N-3 (tijdnormalisatie): pariteit klopt binnen de vormen die PostgREST teruggeeft.**
+- `_fmt` geeft `HH:MM` als seconde en microseconde 0 zijn, en anders `isoformat()`. Dat is `HH:MM:SS` als de microseconde 0 is, en anders `HH:MM:SS.ffffff`. Dat is precies de regel in `normalizeLocalTime` (`ss`/`frac`, met `padEnd(6, '0')`).
+- Speedate neemt 1 tot 6 fractiecijfers over in `time.microsecond`; zelf gecontroleerd. Dus `"17:00:30.5"` wordt `time(17,0,30,500000)` en daarna `"17:00:30.500000"`.
+- Het vergelijken van strings in TS is gelijkwaardig aan het vergelijken van `time` in Python:
+  - een weggelaten `:00`- of `.000000`-deel komt alleen voor als dat deel echt nul is, dus de kortere string is dan een voorvoegsel en echt kleiner;
+  - alle andere delen hebben een vaste breedte en zijn met nullen aangevuld.
+- Gelijke tijden (`'17:00:30'` en `'17:00:30'`) zijn aan beide kanten `invalid` (`not earliest < latest`).
+- Geval 20 is met de hand doorgerekend:
+  - Python: `from_row` slaagt (17:00:30 < 17:00:30.5), `_fmt` geeft `"17:00:30"` en `"17:00:30.500000"`, en de bronnen `enabled`, `earliest_local` en `latest_local` zijn `rule`;
+  - TS: komt overeen.
+- De afwijkingen buiten de pariteit zijn expliciet afgebakend in A18: meer dan 6 fractiecijfers (TS `invalid`, Python kapt af) en tijdzones (aan beide kanten `invalid`, via de regex respectievelijk `_naive`). Postgres geeft ze voor `time` niet terug.
+- De terugweg klopt ook. `ruleToForm` geeft de genormaliseerde vorm, de formulier-regex accepteert precies die vormen, en `17:00:30.500000` wordt ongewijzigd geschreven. Postgres geeft daarna `17:00:30.5` terug, en dat normaliseert weer naar dezelfde string. De round-trip is stabiel (E33).
+
+**Overige revisiepunten zonder bezwaar:**
+- De 20 gevallen kloppen: 1–18 had ik al in ronde 1 gecontroleerd, 19 en 20 hierboven. De Python-test draait de echte `from_row`/`resolve_rule`. `make_spot(default_min_kn=None)` is geldig (`SpotProfile.default_min_kn` 5–40 of `None`). `DirClass` heeft de contractvolgorde, en `evaluation_fixtures` en `REPO_ROOT` worden al zo geïmporteerd in bestaande tests.
+- `untrack(() => ruleToForm(row, …))` is onschadelijk.
+- De user-id-guard (`retry`, `submit`, `{#if page.kind === 'ok' && userId !== null}`) is correct. Het vernauwen van `page`/`userId` in de template werkt, omdat `page.profile` niet in een closure staat. `onsaved` muteert alleen `e.rule` en wijst `e` niet opnieuw toe, en dat is toegestaan in runes-modus.
+- De `<details>`-aanpak (`details.open = true` plus `tick()`) is robuust in jsdom. De extra test dat hij bij het laden dicht is, is zinvol.
+- N-4 (`storedRuleStatus` bij `latest_local '00:00'`) en N-5 (`profileInvalid`) zijn netjes verwerkt.
 
 ## Blokkerend
-
-B-1: `ruleHints` kan gooien bij een omgekeerd tijdvenster, en dan crasht het formulier. Waar: Interfaces, `forms.ts`, **`ruleHints`**, en `AlertRuleForm` (`hints = $derived(ruleHints(form, ctx))`).
-- Waarom: de "soepele" override parseert "elk veld apart", en elke fout wordt `null`. Zijn Vanaf (`18:00`) en Tot (`17:00`) elk apart geldig, dan blijven ze allebei staan. `effectiveRule` gooit dan `RuleError('invalid', 'latest_local')` (stap 2: `earliest < latest`).
-- De fallback zet alleen `min_kn` en `max_kn` op `null` en laat de tijden staan. Daardoor gooit hij opnieuw, en niets vangt die fout op. Een fout in een `$derived` die de template gebruikt, breekt de component.
-- Dit is een gewone gebruikersflow: Tot staat al op 17:00 en je kiest daarna Vanaf 19:00. E24 test alleen `parseAlertRuleForm`, niet `ruleHints`.
-- Hetzelfde patroon kan bij elke andere combinatie van velden die effectiveRule als invalid ziet maar die de soepele parse per veld laat staan.
-- Voorstel: leg vast dat de soepele parse ook de controles tussen velden toepast. Bij `earliest >= latest` wordt `latest_local` `null`; bij `min >= max` wordt `max_kn` `null`, net als de foutsleutels in `parseAlertRuleForm`. Laat `ruleHints` daarnaast nooit gooien: zet de fallback ook in een `try`, en geef bij een tweede fout alleen de statische hints terug (of `{}`). Voeg in `forms.test.ts` een test toe (Vanaf `18:00`, Tot `17:00`: `ruleHints` gooit niet), en in `alert-rule-form.test.ts` een test waarin die selectie het formulier niet laat crashen en bij Opslaan `timeOrder` toont.
+Geen.
 
 ## Niet-blokkerend
+N-1: Bij "Externe afhankelijkheden" staat dat speedate tijden met "optioneel een tijdzone" leest. De speedate-README noemt tijdzones alleen bij datetime, niet bij losse tijden. Voor de pariteit maakt het niet uit: een tijd met offset is in Python `invalid` (parsefout of `_naive`) en in TS ook (regex). Formuleer het eventueel voorzichtiger.
 
-N-1: `enabled: null` is geen exacte spiegel. Volgens Interfaces stap 2 weigert `effectiveRule` een `enabled` dat geen boolean is, en `rules.test.ts` toetst dat `enabled null` `invalid` geeft. Python `AlertRuleOverride.enabled` is `bool | None` en valt bij `None` terug op de default (`True`); stap 3 ("enabled: regel, anders system") gaat daar ook van uit. In de praktijk komt het niet voor, want de DB-kolom is `not null default true`. Toch spreekt het "exacte spiegel" (A3/A4) tegen. Voorstel: accepteer `null` → system, of noem de afwijking expliciet als bewuste strengheid en haal de test eruit.
+N-2: `untrack` is voor `state_referenced_locally` strikt genomen niet nodig. Volgens de docs is een closure de oplossing, en `untrack(() => …)` is die closure. Het kan blijven. Geeft `npm run check` toch nog een waarschuwing, noteer het dan in `deviations.md`, niet als fout.
 
-N-2: Maak het succespad van de Python-test expliciet. De conflict- en invalid-takken noemen `from_row` en `resolve_rule` letterlijk. Bij "Anders vergelijkt de test `rule.enabled`…" staat niet waar `rule` vandaan komt. Schrijf erbij: `rule = resolve_rule(make_spot(...), ProfileDefaults.from_row(p) if p else None, AlertRuleOverride.from_row(o) if o else None)`, en bij `_expected_sources`: met het geparste override-model, zodat `latest_local` 24:00 als `None`/`system` telt (geval 12). Noem ook de imports (`REPO_ROOT` uit `shakka.config`, `make_spot` uit `evaluation_fixtures`).
+N-3: De risico's staan in de volgorde R1–R5, R8, R6, R7. Hernummer R8 of zet hem achteraan. Dit is cosmetisch.
 
-N-3: De pariteit bij tijden met fracties is onduidelijk. `normalizeLocalTime` geeft "anders de invoer ongewijzigd" terug, terwijl `_fmt` in Python `t.isoformat()` geeft (`'17:00:30.5'` tegenover `'17:00:30.500000'`). Of "numerically 0" ook voor `'17:00:00.5'` geldt, is ook niet vastgelegd. Dit valt buiten de gevallen en is via de UI niet bereikbaar. Voorstel: beperk de regex tot `HH:MM` en `HH:MM:SS` (PostgREST geeft voor `time` zonder fractie altijd `HH:MM:SS`), of normaliseer beide kanten op dezelfde manier.
+N-4: In `forms.test.ts` gebruikt de controle "`effectiveRule(...)` met `parseRuleFields(...).value` gooit niet" profiel `null`. Daardoor toetst hij alleen stap 2, en dat is precies de bedoeling. Een korte opmerking in de test dat dit de garantie van `parseRuleFields` toetst, en dus geen conflictcontrole is, voorkomt verwarring bij de builder.
 
-N-4: Bij E19 (Tot `00:00` in de DB) noemt `storedRuleStatus` de regel `ok`. De samenvatting toont dan bijvoorbeeld `00:00–00:00`, terwijl er nooit alerts komen (WP-07 E14). Overweeg een waarschuwing in `storedRuleStatus` voor `latest_local === '00:00'`, net als bij conflicten.
-
-N-5: Bij een `invalid` profiel geeft `parseAlertRuleForm` stap 3 de tekst "De opgeslagen instelling is ongeldig… tot je hem opnieuw opslaat." onder `min_kn`. Die tekst past niet bij een formulier dat net is ingediend. Door de DB-constraints komt dit niet voor; een eigen korte tekst ("Je profiel heeft ongeldige windgrenzen; pas die aan bij Profiel.") is duidelijker.
-
-N-6: Kleine type- en uitvoeringsdetails die de builder anders zelf moet invullen:
-- `AlertDefaultItem.allowed` is `(string | number)[] | null`, terwijl de component er `DirClass[]` mee bindt. Geef het item een tweede typeparameter of type `allowed` per veld.
-- `onclick={() => load(userId)}`: `userId` is `string | null` (non-null assertion of guard).
-- De initiële waarde van `form` op `/profiel` staat niet beschreven.
-- `$state(ruleToForm(row, …))` kan in recente Svelte-versies een `state_referenced_locally`-waarschuwing geven. Dat is geen fout voor `npm run check`, maar `untrack` of een opmerking voorkomt verwarring.
-
-N-7: Externe bronnen bij `bind:group`. De Svelte-docs zeggen expliciet dat `<select bind:value>` niet-stringwaarden behoudt. Voor `bind:group` op checkboxes staat dat er niet letterlijk. R5 heeft al een fallback; pas de bewering in "Externe afhankelijkheden" daarop aan.
-
-N-8: In `alerts-page.test.ts` staat het formulier binnen een gesloten `<details>`. Werkt `getByRole` daar in jsdom anders dan verwacht, open dan eerst de `<summary>` in de test. Dit is een tip, geen ontwerpkeuze.
-
-N-9: Voorstellen A9/A10 (labels) en A13/A14 (gedrag bij conflicten via het profiel en ontfavorieten) zijn redelijk en goed gedocumenteerd. Ze wachten op een reactie van Lars en blokkeren niet.
+N-5 (overgenomen uit ronde 1, N-9): de voorstellen A9/A10 (labels) en A13/A14 wachten nog op een reactie van Lars en blokkeren niet.
 
 ## Gecontroleerde bronnen
-- https://supabase.com/docs/reference/javascript/upsert (`onConflict`; rijen alleen terug met `.select()`)
-- https://docs.postgrest.org/en/v12/references/errors.html (`23505`/`23503` → 409, `42501` → 401/403, `PGRST116` → 406)
-- https://svelte.dev/docs/svelte/stores (`readable(initial, start)`: start bij de eerste abonnee, stop bij nul; `$store` in runes-modus)
-- https://svelte.dev/docs/svelte/$derived (gelijke waarde → geen updates verderop; onderbouwt E3)
-- https://svelte.dev/docs/svelte/bind (`select` behoudt waardetypes; `bind:group` noemt dat niet expliciet)
-- Repo: `ingest/src/shakka/domain/alerts.py` (`resolve_rule`, `AlertRuleOverride`, `ProfileDefaults`, `FIELD_SOURCES`), `ingest/src/shakka/domain/spot.py` (`default_min_kn` 5–40), `ingest/src/shakka/contracts.py`, `ingest/src/shakka/jobs/alerts.py`, `ingest/tests/evaluation_fixtures.py`, `data/contracts/alert_defaults.json`, `data/contracts/dir_classes.json`, `supabase/migrations/20261015090000_m1_schema.sql`, `supabase/migrations/20261015090100_m1_security.sql`, `web/src/lib/{auth,data,contracts,labels,types,time}.ts`, `web/src/routes/+layout.svelte`, `web/test/{data-tables,schema-columns,layout,spot-list}.test.ts`, `web/test/helpers/fake-supabase.ts`, `web/test/fixtures/spot-data.ts`, `web/vite.config.ts`, `web/package.json`, `docs/RUNBOOK.md` §11–12, de blueprints van WP-07, WP-13 en WP-14 ("Gevolgen voor latere WP's").
+- https://github.com/pydantic/speedate ("Time: `HH:MM:SS.FFFFFF` 1 to 6 digits are reflected in the `time.microsecond`, extra digits are ignored"; `HH:MM` wordt ondersteund; tijdzone alleen bij datetime genoemd)
+- https://svelte.dev/docs/svelte/compiler-warnings (`state_referenced_locally`; oplossing: verwijzen binnen een functie of closure)
+- Uit ronde 1, nog geldig: https://supabase.com/docs/reference/javascript/upsert, https://docs.postgrest.org/en/v12/references/errors.html, https://svelte.dev/docs/svelte/stores, https://svelte.dev/docs/svelte/$derived, https://svelte.dev/docs/svelte/bind
+- Repo (worktree WP-16):
+  - `ingest/src/shakka/domain/alerts.py` (`AlertRuleOverride` met `enabled: bool | None`, strict; tijdvalidators; `_check_time_window`; `ProfileDefaults`; `resolve_rule` met `enabled` `None` → `True` en de conflictmelding "must be below");
+  - `ingest/src/shakka/domain/direction.py` (volgorde van `DirClass`);
+  - `ingest/src/shakka/domain/spot.py` (`default_min_kn` 5–40 of `None`);
+  - `ingest/tests/evaluation_fixtures.py` (`make_spot`);
+  - bestaande imports in `ingest/tests/test_alert_rules.py` en `alert_fixtures.py`;
+  - `data/contracts/alert_defaults.json`;
+  - `web/src/lib/{contracts,labels,time,types}.ts` (`dirClassLabel`, `formatKn`, `WEEKDAY_ABBR_NL`, `WEEKDAY_NL`, `RIDABLE_DIR_CLASSES`).

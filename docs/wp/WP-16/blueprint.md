@@ -1,5 +1,5 @@
 # Blueprint WP-16: Profiel, favorieten en alertinstellingen
-Status: DRAFT
+Status: APPROVED
 Revisie: 2
 
 ## Doel
