@@ -1,5 +1,5 @@
 # Blueprint WP-06: Kite-advies (puur)
-Status: DRAFT
+Status: APPROVED
 Revisie: 1
 
 ## Doel
