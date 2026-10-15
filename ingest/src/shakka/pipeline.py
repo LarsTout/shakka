@@ -56,6 +56,10 @@ MAX_ANNOTATIONS: Final = 10
 # Read from the module at every step_tides call (never as a default argument), so a test can
 # monkeypatch it.
 TIDE_STEP_BUDGET_S: Final = 240.0
+# Budget for the whole run, checked before each step (read from the module at run time). The
+# job timeout is 900 s; this way a slow run is recorded instead of killed halfway.
+RUN_TIME_BUDGET_S: Final = 600.0
+RUN_TIME_BUDGET: Final = "run_time_budget"
 PUSH_DISABLED_WARNING: Final = (
     "push disabled: VAPID secrets not set; alerts are stored but not delivered"
 )
@@ -365,7 +369,8 @@ def exit_code_for(status: RunStatus, reports: Sequence[StepReport]) -> int:
     stale = any(
         r.name == "alerts" and r.status == "skipped" and r.reason == STALE_FORECAST for r in reports
     )
-    return 1 if stale else 0
+    over_budget = any(r.status == "skipped" and r.reason == RUN_TIME_BUDGET for r in reports)
+    return 1 if stale or over_budget else 0
 
 
 def error_summary(reports: Sequence[StepReport]) -> str | None:
@@ -398,6 +403,13 @@ def build_annotations(reports: Sequence[StepReport], *, run_id: int | None) -> t
                     "error",
                     "alerts skipped (stale_forecast): the newest forecast is older than "
                     "3 hours; no alerts this run",
+                )
+            )
+        elif r.status == "skipped" and r.reason == RUN_TIME_BUDGET:
+            lines.append(
+                github_annotation(
+                    "error",
+                    f"step {r.name} skipped: run time budget of {RUN_TIME_BUDGET_S:.0f} s reached",
                 )
             )
         for warning in r.warnings:
@@ -528,7 +540,10 @@ def _run(
     progress_warned = False
     started = _monotonic()
     for name, fn in steps:
-        report = run_step(name, fn, ctx)
+        if _monotonic() - started >= RUN_TIME_BUDGET_S:
+            report = StepReport(name, "skipped", 0, {}, reason=RUN_TIME_BUDGET)
+        else:
+            report = run_step(name, fn, ctx)
         ctx.reports.append(report)
         logger.log(_LEVELS.get(report.status, logging.ERROR), _step_log_line(report))
         try:

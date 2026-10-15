@@ -897,3 +897,38 @@ def test_per_spot_staleness_with_two_spots(tmp_path):
     assert spots == {"test-strand"}
     assert step(report, "evaluate").status in ("ok", "partial")
     assert step(report, "alerts").status in ("ok", "partial")
+
+
+def test_run_time_budget_skips_remaining_steps(monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr(pipeline, "_monotonic", lambda: clock[0])
+
+    def evaluate(ctx):
+        return pipeline.StepOutcome("ok", {})
+
+    def slow(ctx):
+        clock[0] += 601.0
+        return pipeline.StepOutcome("ok", {})
+
+    def never(ctx):
+        raise AssertionError("must be skipped")
+
+    db = FakeSupabase()
+    steps = [
+        ("evaluate", evaluate),
+        ("slow", slow),
+        ("alerts", never),
+        ("sessions_cleanup", never),
+        ("usage_report", never),
+    ]
+    report = run_hourly(SETTINGS, now=NOW, db=db, http=blocked_http(), steps=steps)
+    by_name = {s.name: s for s in report.steps}
+    assert by_name["slow"].status == "ok"
+    for name in ("alerts", "sessions_cleanup", "usage_report"):
+        assert by_name[name].status == "skipped"
+        assert by_name[name].reason == "run_time_budget"
+    assert report.status == "partial"
+    assert report.exit_code == 1
+    errors = [a for a in report.annotations if a.startswith("::error::")]
+    assert len(errors) == 3
+    assert "step alerts skipped: run time budget of 600 s reached" in errors[0]
