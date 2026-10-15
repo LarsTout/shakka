@@ -284,6 +284,59 @@ def test_rpc():
     assert info.value.status == 404
 
 
+def _seed_sessions(fake: FakeSupabase) -> None:
+    fake.seed(
+        "sessions",
+        [
+            {"id": "s-old", "ends_at": "2026-01-01T00:00:00Z"},
+            {"id": "s-edge", "ends_at": "2026-01-03T00:00:00Z"},
+            {"id": "s-new", "ends_at": "2026-01-04T00:00:00Z"},
+        ],
+    )
+    fake.seed(
+        "rsvps",
+        [
+            {"id": "r1", "session_id": "s-old"},
+            {"id": "r2", "session_id": "s-new"},
+        ],
+    )
+
+
+def test_delete_session_cascades_rsvps():
+    fake = FakeSupabase()
+    fake.seed("sessions", [{"id": "s1"}, {"id": "s2"}])
+    fake.seed("rsvps", [{"id": "r1", "session_id": "s1"}, {"id": "r2", "session_id": "s2"}])
+    assert fake.delete("sessions", filters={"id": "eq.s1"}) == 1
+    assert [r["id"] for r in fake.rows("rsvps")] == ["r2"]
+    assert fake.writes == [("delete", "sessions")]
+
+
+def test_builtin_purge_boundary():
+    fake = FakeSupabase()
+    _seed_sessions(fake)
+    # cutoff = 2026-01-10 minus 7 days = 2026-01-03: s-edge ends exactly there and stays
+    assert fake.rpc("purge_expired_sessions", {"p_now": "2026-01-10T00:00:00Z"}) == 1
+    assert {r["id"] for r in fake.rows("sessions")} == {"s-edge", "s-new"}
+    assert [r["id"] for r in fake.rows("rsvps")] == ["r2"]
+    assert fake.writes == []
+
+
+def test_registered_rpc_overrides_builtin():
+    fake = FakeSupabase()
+    _seed_sessions(fake)
+    fake.register_rpc("purge_expired_sessions", lambda args: 42)
+    assert fake.rpc("purge_expired_sessions", {"p_now": "2026-01-10T00:00:00Z"}) == 42
+    assert len(fake.rows("sessions")) == 3
+
+
+def test_builtin_purge_requires_p_now():
+    fake = FakeSupabase()
+    for args in ({}, {"p_now": None}):
+        with pytest.raises(DatabaseError) as info:
+            fake.rpc("purge_expired_sessions", args)
+        assert info.value.code == "PT400"
+
+
 def test_rows_returns_copies():
     fake = FakeSupabase()
     fake.seed("spots", [{"id": "s-one", "name": "x", "season": [1]}])
