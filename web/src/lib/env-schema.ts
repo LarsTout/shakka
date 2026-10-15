@@ -33,3 +33,13 @@ export function parsePublishableKey(value: string | undefined): string {
 	}
 	return key;
 }
+
+/** Validates PUBLIC_MAPTILER_KEY. Missing or blank -> '' (map disabled). Returns the trimmed key. Never echoes the value. */
+export function parseMaptilerKey(value: string | undefined): string {
+	const key = value?.trim() ?? '';
+	if (!key) return '';
+	if (!/^[A-Za-z0-9_-]{8,128}$/.test(key)) {
+		throw new Error('PUBLIC_MAPTILER_KEY must be a MapTiler API key (8-128 letters, digits, - or _)');
+	}
+	return key;
+}

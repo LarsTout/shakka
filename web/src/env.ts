@@ -1,5 +1,5 @@
 import { defineEnvVars } from '@sveltejs/kit/env';
-import { parsePublishableKey, parseSupabaseUrl } from './lib/env-schema.js';
+import { parseMaptilerKey, parsePublishableKey, parseSupabaseUrl } from './lib/env-schema.js';
 
 export const variables = defineEnvVars({
 	PUBLIC_SUPABASE_URL: {

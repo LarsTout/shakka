@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, expect, it } from 'vitest';
-import { parsePublishableKey, parseSupabaseUrl } from '../src/lib/env-schema.js';
+import { parseMaptilerKey, parsePublishableKey, parseSupabaseUrl } from '../src/lib/env-schema.js';
 
 describe('parseSupabaseUrl', () => {
 	it('normalises to the origin', () => {
@@ -54,5 +54,27 @@ describe('parsePublishableKey', () => {
 
 	it('names the secret key explicitly', () => {
 		expect(() => parsePublishableKey('sb_secret_xyz')).toThrow('never the secret key');
+	});
+});
+
+describe('parseMaptilerKey', () => {
+	it.each([undefined, '', '  '])('treats %j as not configured', (value) => {
+		expect(parseMaptilerKey(value)).toBe('');
+	});
+
+	it('returns the trimmed key', () => {
+		expect(parseMaptilerKey(' abcDEF123456 ')).toBe('abcDEF123456');
+		expect(parseMaptilerKey('get_your_own_Key-1')).toBe('get_your_own_Key-1');
+	});
+
+	it.each(['short1', 'abc def 12345', 'abc/def12345', 'x'.repeat(129)])('rejects %j without echoing it', (value) => {
+		let message = '';
+		try {
+			parseMaptilerKey(value);
+		} catch (error) {
+			message = (error as Error).message;
+		}
+		expect(message.startsWith('PUBLIC_MAPTILER_KEY')).toBe(true);
+		expect(message).not.toContain(value);
 	});
 });
