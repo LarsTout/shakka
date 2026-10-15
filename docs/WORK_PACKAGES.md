@@ -653,7 +653,7 @@ Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen t
 **Buiten scope:** versturen (WP-17), state opslaan en laden (WP-10), het `/go`-endpoint in de app (WP-14, WP-20).
 **Contracten:**
 - `shakka.domain.dedup`:
-  - `WindowSnapshot(start: datetime, end: datetime, wind_min_kn: float, wind_max_kn: float, gust_max_kn: float, dir_deg: int, dir_class: DirClass, confidence: Confidence)` met `to_json() -> dict` en `from_json(d) -> WindowSnapshot`;
+  - `WindowSnapshot(start: datetime, end: datetime, wind_min_kn: float, wind_max_kn: float, gust_max_kn: float | None, dir_deg: int, dir_class: DirClass, confidence: Confidence)` (`gust_max_kn` is `None` als geen uur in het window een vlaagwaarde heeft; gevolg van WP-03 A14 en WP-05) met `to_json() -> dict` en `from_json(d) -> WindowSnapshot`;
   - `snapshot_window(window: Window) -> WindowSnapshot`;
   - `AlertStateEntry(id: str | None, spot_id: str, window_start: datetime, window_end: datetime, status: Literal["active", "cancelled", "expired"], snapshot: WindowSnapshot, last_event: AlertEventKind | None, last_notified_at: datetime | None)`;
   - `AlertEventKind` (StrEnum: `new`, `improved`, `worsened`, `cancelled`);
