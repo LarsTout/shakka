@@ -18,7 +18,7 @@ Opdeling: goedgekeurd.
 | WP-11 | Orkestratie: uurlijkse workflow, logging, foutmeldingen | done | AC-6 open: eerste echte run na promotie naar main (RUNBOOK §13) |
 | WP-12 | Marine-ingest (golven) en golven op de spotpagina | todo | weergave verhuisd uit WP-14 (A-17) |
 | WP-13 | PWA-basis | done | AC-7 open: Cloudflare Pages + Supabase Auth-URLs door Lars (RUNBOOK §11) |
-| WP-14 | Spotlijst en spotpagina | verifying | |
+| WP-14 | Spotlijst en spotpagina | done | AC-7 open: Cloudflare Pages, APP_BASE_URL, terugknop-test (RUNBOOK §11.3, §13.2) |
 | WP-15 | Kaart | todo | |
 | WP-16 | Profiel, favorieten en alertinstellingen | todo | |
 | WP-17 | Web Push: backend (enige meldingskanaal) | todo | |
