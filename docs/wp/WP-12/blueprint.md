@@ -1,5 +1,5 @@
 # Blueprint WP-12: Marine-ingest (golven) en golven op de spotpagina
-Status: DRAFT
+Status: APPROVED
 Revisie: 1
 
 ## Doel
