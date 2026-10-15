@@ -4,12 +4,14 @@ from collections.abc import Mapping
 from datetime import UTC, datetime
 from typing import Any
 
+from shakka.domain.evaluation import RiderLimits
 from shakka.domain.forecast import ForecastHour, ModelKey
 from shakka.domain.spot import SpotProfile
 from shakka.domain.tide import TideExtreme
 
 LAT, LON = 52.47, 4.57  # test coordinates (WP-05 AC-5), not spot data
 NOON = datetime(2026, 7, 15, 10, tzinfo=UTC)  # 12:00 local, daylight
+LIMITS = RiderLimits(min_kn=12, max_kn=30)
 STATION = "teststation"
 
 
