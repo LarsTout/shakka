@@ -272,7 +272,7 @@ describe('parseRuleFields (B-1, E24, E34)', () => {
 	];
 	it.each(BAD)('ruleHints never throws: %s', (_n, f, c) => {
 		expect(() => ruleHints(f, c)).not.toThrow();
-		// Only step 2 of effectiveRule is checked here, hence profile null: this tests the guarantee
+		// N-4: only step 2 of effectiveRule is checked here, hence profile null: this tests the guarantee
 		// of parseRuleFields (its value always passes validation), not conflict detection.
 		expect(() =>
 			effectiveRule(c.spot, null, parseRuleFields(f, D).value, D)

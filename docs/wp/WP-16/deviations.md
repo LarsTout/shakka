@@ -1,0 +1,12 @@
+# Afwijkingen WP-16
+
+Alle punten zijn klein (geen contract, schema, externe API, dependency of acceptatiecriterium geraakt).
+
+- **N-4 (review ronde 2) verwerkt.** In `web/test/forms.test.ts` staat bij de controle "`effectiveRule(...)` met `parseRuleFields(...).value` gooit niet" een opmerking dat dit alleen stap 2 van `effectiveRule` toetst (profiel `null`): het toetst de garantie van `parseRuleFields`, geen conflictdetectie.
+- **N-1 (review ronde 2) verwerkt.** Geen comment in de code of tests neemt de bewering "speedate leest een tijdzone bij losse tijden" over. In `rules.ts` staat alleen dat de vorm gelijk is aan `time.isoformat()` (A18). De bewering in de blueprint (Externe afhankelijkheden) is te ruim: de speedate-README noemt tijdzones alleen bij datetime. Voor de pariteit maakt het niet uit, want een tijd met offset is aan beide kanten `invalid`.
+- **Gevallenbestand gegenereerd met een eenmalig script.** `rule_resolution_cases.json` is met een wegwerpscript uit de tabel van de blueprint geschreven (volledig uitgeschreven in het bestand, `json.dumps(indent=2)`; lijsten staan daardoor over meerdere regels). Het script is niet bewaard. De inhoud volgt de tabel; de Python-test draaide groen zonder codewijziging aan `alerts.py`.
+- **`profileInvalid` e.d. in `FORM_MESSAGES`.** `FORM_MESSAGES.kn` is een vaste tekst uit de bereiken van `min_kn`; `parseProfileForm` en `parseRuleFields` bouwen de kn-melding uit het meegegeven `defaults` (zelfde tekst, want min en max kn hebben hetzelfde bereik).
+- **Fieldsets met `aria-describedby`.** Extra toegankelijkheid: de fieldsets Windrichtingen, Dagen en Quiver verwijzen met `aria-describedby` naar hun hint en fout. Niet in de blueprint, wel onschadelijk.
+- **Extra tests.** Naast het testplan: `FavoriteStar` en favorites-store testen een stale load (A na B), tests voor `quiver` verwijderen en de 10-kites-grens, en een test dat een save-fout op `/profiel` de algemene melding toont.
+- **`web/.env`.** Lokaal aangemaakt (gitignored) met `PUBLIC_SUPABASE_URL` en de publishable key uit de root-`.env`; nooit de secret key. De tests hebben dit niet nodig.
+- **Stap 10 (rooktest tegen de lokale stack): NEEDS_LARS.** Docker is in deze omgeving niet bereikbaar, dus `supabase start` en de handmatige controle (ster, profiel opslaan met alleen de vijf kolommen, regel upsert en reset, ontfavorieten wist de regel, uitgelogd geen requests) zijn niet uitgevoerd. Blijft onderdeel van AC-7 (en R2 van de blueprint: upsert en kolomrechten zijn alleen met een nep-client getest).
