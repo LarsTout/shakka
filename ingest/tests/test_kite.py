@@ -1,8 +1,10 @@
 """Tests for shakka.domain.kite (WP-06)."""
 
 import math
+from pathlib import Path
 
 import pytest
+import yaml
 from pydantic import ValidationError
 
 from shakka.domain.kite import (
@@ -113,3 +115,32 @@ def test_rider_profile_is_frozen():
     rider = RiderProfile(weight_kg=75, level="intermediate")
     with pytest.raises(ValidationError):
         rider.weight_kg = 80  # type: ignore[misc]
+
+
+EXAMPLES_PATH = Path(__file__).parent / "fixtures" / "kite_examples.yaml"
+EXAMPLES = yaml.safe_load(EXAMPLES_PATH.read_text(encoding="utf-8"))
+
+
+def test_examples_file_shape():
+    assert set(EXAMPLES) == {"checked_by_lars", "cases"}
+    assert isinstance(EXAMPLES["checked_by_lars"], bool)
+    cases = EXAMPLES["cases"]
+    assert len(cases) >= 15
+    assert len({c["id"] for c in cases}) == len(cases)
+    for case in cases:
+        assert set(case) == {"id", "weight_kg", "level", "quiver_m2", "wind_kn", "expected"}
+        assert set(case["expected"]) == {"size_m2", "ideal_size_m2", "fit"}
+        assert case["expected"]["size_m2"] in case["quiver_m2"]
+
+
+@pytest.mark.parametrize("case", EXAMPLES["cases"], ids=[c["id"] for c in EXAMPLES["cases"]])
+def test_example(case):
+    rider = RiderProfile(
+        weight_kg=case["weight_kg"], level=case["level"], quiver_m2=case["quiver_m2"]
+    )
+    advice = recommend_kite(rider, case["wind_kn"])
+    assert advice is not None
+    expected = case["expected"]
+    assert advice.size_m2 == expected["size_m2"]
+    assert advice.ideal_size_m2 == expected["ideal_size_m2"]
+    assert advice.fit == KiteFit(expected["fit"])
