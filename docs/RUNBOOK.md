@@ -48,8 +48,6 @@ Wat `uv run shakka doctor` meldt:
 | `SUPABASE_URL` | `.env`, GitHub Secret | ingest | WP-00 |
 | `SUPABASE_PUBLISHABLE_KEY` | `.env` | ingest (`shakka doctor`) | WP-00 |
 | `SUPABASE_SECRET_KEY` | `.env`, GitHub Secret | ingest | WP-00 |
-| `TELEGRAM_BOT_TOKEN` | `.env`, GitHub Secret | ingest | WP-09 |
-| `TELEGRAM_CHAT_ID` | `.env`, GitHub Secret | ingest: operatormeldingen en testberichten | WP-09 |
 | `APP_BASE_URL` | `.env`, GitHub Actions variable | ingest: "ik ga"-links in berichten | WP-14 |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | `.env`, GitHub Secrets | ingest | WP-17 |
 | `PUBLIC_SUPABASE_URL`, `PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `web/.env`, Cloudflare Pages | web | WP-13 |
@@ -140,3 +138,19 @@ Pas daarna `CAPTURE_URL` en `CAPTURE_DATE` in `ingest/tests/test_openmeteo_forec
    - Redirect URLs: `https://<project>.pages.dev`, `https://<project>.pages.dev/**`, `https://*.<project>.pages.dev`, `https://*.<project>.pages.dev/**`, `http://localhost:5173` en `http://localhost:5173/**`.
 5. **Beperkingen.** De standaard-SMTP mailt alleen naar teamleden van het project, max. 2 per uur. Een inloglink is één keer bruikbaar en verloopt na 1 uur. Op iOS heeft een app op het beginscherm eigen opslag, los van Safari. Een magic link uit de mail logt je in Safari in, niet in de geïnstalleerde app (zie WP-18).
 6. **App-icoon vervangen.** Vervang de PNG's in `web/static/icons/` door bestanden met dezelfde naam en afmeting. `npm run icons` maakt de placeholders opnieuw.
+
+## 12. Alerts in M1 (vanaf WP-10)
+In M1 worden er nog geen meldingen verstuurd. De alertjob berekent per favoriet of er een go-window is en legt dat vast in `alert_state`. Zo controleer je lokaal of de alerts kloppen; versturen komt in WP-17.
+
+1. **Auth-user maken.** Supabase Dashboard, Authentication, Users, Add user. Kopieer de user-id (UUID). Het profiel wordt automatisch aangemaakt.
+2. **Profiel invullen.** `cd ingest && uv run shakka admin profile set --user-id <id> --weight <kg> --level <beginner|intermediate|advanced> --quiver "7 9 12"`, controleer met `uv run shakka admin profile show --user-id <id>`.
+   - `--quiver`: scheid maten met spaties, `;` of komma's. **Alleen komma's** betekent dat elke komma een scheidingsteken is, dus `--quiver 7,5` wordt 5 en 7 m² en niet 7,5 m². Typ een decimale maat met een punt (`10.5`), of met een komma als je de maten met spaties of `;` scheidt (`--quiver "10,5; 12"`). Bij twijfel toont de CLI een `note:`-regel met hoe de invoer gelezen is. Controleer altijd met `profile show`.
+   - `--quiver ""` maakt de quiver leeg. Een veld terugzetten op de standaard (`NULL`) kan alleen in het Supabase Dashboard (Table Editor).
+3. **Favoriet toevoegen.** `uv run shakka admin favorite add --user-id <id> --spot <spot-id>` en `uv run shakka admin favorite list --user-id <id>`.
+4. **Regel aanpassen (optioneel).** `uv run shakka admin rule set --user-id <id> --spot <spot-id> ...` met `--min-kn`, `--max-kn`, `--dir-classes`, `--weekdays` (1 = maandag), `--after HH:MM`, `--before HH:MM`, `--min-go-hours`, `--days-ahead` en `--enable/--disable`. Alleen de opgegeven velden veranderen. Offshore en side-offshore kunnen nooit in een regel; dat is geen instelling.
+5. **Alleen geverifieerde spots.** Alerts gaan alleen af voor spots met `verified: true`. Vul het profiel in `data/spots.yaml` volgens `docs/SPOT_DATA.md`, zet `verified: true` en draai `uv run shakka spots sync`. Een niet-geverifieerde spot wordt wel geëvalueerd, maar geeft geen alerts.
+6. **Volgorde.** `uv run shakka forecast fetch`, `uv run shakka tides fetch`, `uv run shakka evaluate`, `uv run shakka admin alerts preview --user-id <id>`, eventueel `uv run shakka alerts run --dry-run` en dan `uv run shakka alerts run`.
+7. **`alert_state` bekijken.** Dashboard, Table Editor, `alert_state`: `status`, `last_event` en `snapshot` (de laatst gemelde stand, niet de nieuwste verwachting). `last_notified_at` is in M1 altijd leeg. Rijen verdwijnen 48 uur na `window_end`.
+8. **Exitcodes.** `alerts run` geeft exitcode 1 bij `skipped` (een kapotte regel-, profiel- of staterij), `write_errors`, een databasefout, een onvolledige config of een ongeldige `APP_BASE_URL`. `ineligible` (spot niet geverifieerd, niet geladen of nog geen forecastdata: "no forecast data") en `disabled` (regel uitgezet) zijn geen fout: exitcode 0. `shakka evaluate` geeft exitcode 1 als een spot niet geladen of geëvalueerd kan worden; een spot zonder forecastrijen is geen fout.
+9. **Waarschuwing.** `alerts run` en `admin alerts preview` tonen berichtteksten. Gebruik ze lokaal en nooit in een GitHub-workflow: de logs van een publieke repo zijn openbaar. De uurlijkse workflow (WP-11) roept de functies aan, niet deze commando's.
+10. **Oude `TELEGRAM_*`-variabelen.** Die mag je uit je lokale `.env` halen. Ze worden genegeerd en zijn niet meer nodig.

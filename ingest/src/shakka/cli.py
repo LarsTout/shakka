@@ -66,6 +66,28 @@ def forecast_fetch(dry_run: bool) -> None:
     raise SystemExit(run_forecast_cli(dry_run=dry_run, echo=click.echo))
 
 
+@cli.command()
+def evaluate() -> None:
+    """Evaluate all spots with the spot defaults and store the hourly verdicts."""
+    from shakka.jobs.evaluate import run_evaluate_cli
+
+    raise SystemExit(run_evaluate_cli(echo=click.echo))
+
+
+@cli.group()
+def alerts() -> None:
+    """Alerts: evaluate favorites and record the state (nothing is sent yet)."""
+
+
+@alerts.command("run")
+@click.option("--dry-run", is_flag=True, help="Compute and show the messages; write nothing.")
+def alerts_run(dry_run: bool) -> None:
+    """Compute alerts for all favorites. Shows message texts: use locally only."""
+    from shakka.jobs.alerts import run_alerts_cli
+
+    raise SystemExit(run_alerts_cli(dry_run=dry_run, echo=click.echo))
+
+
 @cli.group()
 def tides() -> None:
     """Rijkswaterstaat astronomical tide extremes."""
@@ -150,6 +172,197 @@ def contracts_export(check: bool) -> None:
     from shakka.contracts import run_contracts_export
 
     raise SystemExit(run_contracts_export(check=check, echo=click.echo))
+
+
+@cli.group()
+def admin() -> None:
+    """Manage your profile, favorites and alert rules without a UI (M1)."""
+
+
+@admin.group("profile")
+def admin_profile() -> None:
+    """Rider profile."""
+
+
+@admin_profile.command("set")
+@click.option("--user-id", type=click.UUID, required=True)
+@click.option("--weight", type=int, default=None, help="Weight in kg (30-200).")
+@click.option("--level", default=None, help="beginner, intermediate or advanced.")
+@click.option(
+    "--quiver",
+    default=None,
+    help='Sizes in m2, e.g. "7 9 12" or 7,9,12; decimals with a point. "" empties the quiver.',
+)
+@click.option("--min-kn", type=int, default=None, help="Default minimum wind (5-60 kn).")
+@click.option("--max-kn", type=int, default=None, help="Default maximum wind (5-60 kn).")
+def admin_profile_set(user_id, weight, level, quiver, min_kn, max_kn) -> None:
+    """Change only the given profile fields."""
+    from shakka.jobs import admin as ops
+
+    def action(db, now, settings):
+        parsed = None if quiver is None else ops.parse_quiver(quiver)
+        row = ops.set_profile(
+            db,
+            str(user_id),
+            weight_kg=weight,
+            level=level,
+            quiver_m2=parsed,
+            min_kn=min_kn,
+            max_kn=max_kn,
+        )
+        note = None if quiver is None else ops.quiver_comma_note(quiver)
+        return [*([note] if note else []), "profile set: saved", *ops.format_profile(row)]
+
+    raise SystemExit(ops.run_admin("profile set", action, echo=click.echo))
+
+
+@admin_profile.command("show")
+@click.option("--user-id", type=click.UUID, required=True)
+def admin_profile_show(user_id) -> None:
+    """Show the rider profile."""
+    from shakka.jobs import admin as ops
+
+    def action(db, now, settings):
+        return ops.format_profile(ops.get_profile(db, str(user_id)))
+
+    raise SystemExit(ops.run_admin("profile show", action, echo=click.echo))
+
+
+@admin.group("favorite")
+def admin_favorite() -> None:
+    """Favorite spots."""
+
+
+@admin_favorite.command("add")
+@click.option("--user-id", type=click.UUID, required=True)
+@click.option("--spot", required=True, help="Spot id, e.g. wijk-aan-zee.")
+def admin_favorite_add(user_id, spot) -> None:
+    """Add a favorite spot."""
+    from shakka.jobs import admin as ops
+
+    def action(db, now, settings):
+        result = ops.add_favorite(db, str(user_id), spot)
+        lines = [
+            f"favorite add: added {spot}"
+            if result.added
+            else f"favorite add: {spot} is already a favorite"
+        ]
+        if not result.verified:
+            lines.append(
+                f"note: {spot} is not verified; it is evaluated but gives no alerts until "
+                "verified: true"
+            )
+        return lines
+
+    raise SystemExit(ops.run_admin("favorite add", action, echo=click.echo))
+
+
+@admin_favorite.command("remove")
+@click.option("--user-id", type=click.UUID, required=True)
+@click.option("--spot", required=True, help="Spot id.")
+def admin_favorite_remove(user_id, spot) -> None:
+    """Remove a favorite spot (and its alert rule)."""
+    from shakka.jobs import admin as ops
+
+    def action(db, now, settings):
+        if ops.remove_favorite(db, str(user_id), spot):
+            return [f"favorite remove: removed {spot} (and its alert rule)"]
+        return [f"favorite remove: {spot} was not a favorite"]
+
+    raise SystemExit(ops.run_admin("favorite remove", action, echo=click.echo))
+
+
+@admin_favorite.command("list")
+@click.option("--user-id", type=click.UUID, required=True)
+def admin_favorite_list(user_id) -> None:
+    """List favorite spots."""
+    from shakka.jobs import admin as ops
+
+    def action(db, now, settings):
+        infos = ops.list_favorites(db, str(user_id))
+        lines = [
+            f"{i.spot_id}\t{i.name}\t{'verified' if i.verified else 'not verified'}\t"
+            f"{'own rule' if i.has_rule else 'default rule'}"
+            for i in infos
+        ]
+        return [*lines, f"{len(infos)} favorite(s)"]
+
+    raise SystemExit(ops.run_admin("favorite list", action, echo=click.echo))
+
+
+@admin.group("rule")
+def admin_rule() -> None:
+    """Alert rules per favorite spot."""
+
+
+@admin_rule.command("set")
+@click.option("--user-id", type=click.UUID, required=True)
+@click.option("--spot", required=True, help="Spot id (must be a favorite).")
+@click.option("--min-kn", type=int, default=None, help="Minimum wind (5-60 kn).")
+@click.option("--max-kn", type=int, default=None, help="Maximum wind (5-60 kn).")
+@click.option(
+    "--dir-classes", default=None, help="onshore,side_onshore,sideshore (never offshore)."
+)
+@click.option("--weekdays", default=None, help="ISO weekdays 1-7, e.g. 6,7.")
+@click.option("--after", default=None, help="Earliest local start, HH:MM.")
+@click.option("--before", default=None, help="Latest local end, HH:MM.")
+@click.option("--min-go-hours", type=int, default=None, help="Minimum consecutive go hours (1-24).")
+@click.option("--days-ahead", type=int, default=None, help="Days ahead after today (0-7).")
+@click.option("--enable/--disable", "enabled", default=None, help="Switch the rule on or off.")
+def admin_rule_set(
+    user_id,
+    spot,
+    min_kn,
+    max_kn,
+    dir_classes,
+    weekdays,
+    after,
+    before,
+    min_go_hours,
+    days_ahead,
+    enabled,
+) -> None:
+    """Change only the given rule fields."""
+    from shakka.jobs import admin as ops
+
+    def action(db, now, settings):
+        rule = ops.set_rule(
+            db,
+            str(user_id),
+            spot,
+            min_kn=min_kn,
+            max_kn=max_kn,
+            dir_classes=None if dir_classes is None else ops.parse_dir_classes(dir_classes),
+            weekdays=None if weekdays is None else ops.parse_weekdays(weekdays),
+            earliest_local=None if after is None else ops.parse_local_time(after),
+            latest_local=None if before is None else ops.parse_local_time(before),
+            min_go_hours=min_go_hours,
+            days_ahead=days_ahead,
+            enabled=enabled,
+        )
+        from shakka.jobs.alerts import format_rule
+
+        return [f"rule set: saved for {spot}", f"rule: {format_rule(rule)}"]
+
+    raise SystemExit(ops.run_admin("rule set", action, echo=click.echo))
+
+
+@admin.group("alerts")
+def admin_alerts() -> None:
+    """Alerts without side effects."""
+
+
+@admin_alerts.command("preview")
+@click.option("--user-id", type=click.UUID, required=True)
+def admin_alerts_preview(user_id) -> None:
+    """Show what an alert run would do. Writes nothing; shows message texts (local use)."""
+    from shakka.jobs import admin as ops
+
+    def action(db, now, settings):
+        plans = ops.preview_alerts(db, str(user_id), now=now, base_url=settings.app_base_url)
+        return ops.format_preview(plans)
+
+    raise SystemExit(ops.run_admin("alerts preview", action, echo=click.echo))
 
 
 def main() -> None:
