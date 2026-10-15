@@ -151,7 +151,7 @@ Het root-bestand `.env.example` bevat alleen de ingest-variabelen. `web/.env.exa
 | Open-Meteo limieten | 600/min, 5.000/uur, 10.000/dag, 300.000/maand. Meer dan 10 variabelen of meer dan 2 weken telt fractioneel mee. Het gewicht schaalt met variabelen × modellen × dagen en daarna × locaties. | https://open-meteo.com/en/pricing, https://github.com/open-meteo/open-meteo/issues/464 |
 | Open-Meteo licentie | CC BY 4.0. Link "Weather data by Open-Meteo.com" bij de data. Onderliggende bronnen zijn o.a. DWD, ECMWF, NOAA en KNMI. | https://open-meteo.com/en/licence |
 | Rijkswaterstaat | De oude WaterWebservices zijn uitgezet. Huidig is `https://ddapi20-waterwebservices.rijkswaterstaat.nl/`. CC0. Astronomische voorspelling via `ProcesType: astronomisch`. | https://rijkswaterstaatdata.nl/waterdata/ |
-| ddlpy | v0.10.x. Selectie via `ProcesType`, `Grootheid.Code` (`WATHTE`), `Groepering.Code` (`GETETBRKD2` voor extremen), `Hoedanigheid.Code` (`NAP`). Stationcodes zoals `hoekvanholland`. | https://deltares.github.io/ddlpy/, https://github.com/Deltares/ddlpy/blob/main/docs/examples/minimal_example.py |
+| Rijkswaterstaat DDAPI20 (niet ddlpy, zie WP-04) | ddlpy v0.10.x is alleen nog referentie voor de codes. Selectie via `ProcesType`, `Grootheid.Code` (`WATHTE`), `Groepering.Code` (`GETETBRKD2` voor extremen), `Hoedanigheid.Code` (`NAP`). Stationcodes zoals `hoekvanholland`. | https://deltares.github.io/ddlpy/, https://github.com/Deltares/ddlpy/blob/main/docs/examples/minimal_example.py |
 | Supabase sleutels | `sb_publishable_…` en `sb_secret_…` via de `apikey`-header. Legacy-sleutels vervallen eind 2026. | https://supabase.com/docs/guides/api/api-keys |
 | Supabase gratis plan | 500 MB DB, 5 GB egress, gepauzeerd na 1 week inactiviteit, max. 2 actieve projecten | https://supabase.com/pricing |
 | Supabase e-mail | De standaard-SMTP stuurt alleen naar teamleden van het project, max. 2 per uur. Voor productie is eigen SMTP nodig. | https://supabase.com/docs/guides/auth/auth-smtp |
@@ -412,7 +412,7 @@ Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen t
 **In scope:**
 - `shakka.domain.tide` met het model en de interpolatie. De interpolatie is een cosinus tussen opeenvolgende extremen en geeft `None` buiten het bereik of bij een gat van meer dan 9 uur.
 - `shakka.rws.tides`:
-  - extremen ophalen via `ddlpy` met `ProcesType` `astronomisch`, `Grootheid.Code` `WATHTE`, `Groepering.Code` `GETETBRKD2` en `Hoedanigheid.Code` `NAP`;
+  - extremen ophalen rechtstreeks via de Rijkswaterstaat DDAPI20 met `httpx` (besluit Lars, 15 oktober 2026: geen `ddlpy`, want die doet requests zonder timeout en trekt pandas binnen) met `ProcesType` `astronomisch`, `Grootheid.Code` `WATHTE`, `Groepering.Code` `GETETBRKD2` en `Hoedanigheid.Code` `NAP`;
   - omrekenen naar cm en UTC;
   - het type extreem (hoog of laag) bepalen. De planner verifieert hoe dat in de reeks is gecodeerd.
 - Een stationslijst ophalen.
@@ -423,7 +423,7 @@ Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen t
   - doet een upsert en ruimt `at < now - 48h` op;
   - een station dat faalt stopt de andere stations niet.
 - CLI: `shakka tides fetch [--force]` en `shakka tides stations`. De laatste toont code, naam, lat en lon van stations met astronomische extremen.
-- Fixture: een vastgelegde echte ddlpy-respons. De ddlpy-aanroep is in tests te vervangen.
+- Fixture: een vastgelegde echte DDAPI20-respons. De fetch is in tests te vervangen.
 **Buiten scope:** getij in de evaluatie (WP-05), het kiezen van stations per spot (spotdata van Lars).
 **Contracten:**
 - `shakka.domain.tide`: `TideExtreme(station: str, at: datetime, kind: Literal["high", "low"], level_cm: int)` en `estimate_tide_level(extremes: Sequence[TideExtreme], at: datetime) -> int | None`.
@@ -872,7 +872,7 @@ Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen t
 **Doel:** Een installeerbare SvelteKit-PWA op Cloudflare Pages met magic-link-login, layout, bronvermelding op elke pagina en een CI-guard die client-side Open-Meteo-calls onmogelijk maakt.
 **In scope:**
 - `/web`:
-  - SvelteKit met `@sveltejs/adapter-static` in SPA-fallbackmodus, strikt TypeScript;
+  - SvelteKit 3 (besluit Lars, 15 oktober 2026; `#lib`, config in `vite.config.ts`) met `@sveltejs/adapter-static` in SPA-fallbackmodus, strikt TypeScript;
   - vitest met Testing Library;
   - `svelte-check`;
   - scripts `dev`, `check`, `test` en `build`.
@@ -888,7 +888,7 @@ Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen t
   - KNMI, DWD, ECMWF, NOAA en Rijkswaterstaat.
 - PWA:
   - `manifest.webmanifest` met naam Shakka, iconen van 192 en 512 (ook maskable), `display: standalone` en `start_url /`;
-  - `src/service-worker.ts` die de app-shell precachet. API-responses van Supabase worden niet gecachet.
+  - `src/service-worker/index.ts` (SvelteKit 3) die de app-shell precachet. API-responses van Supabase worden niet gecachet.
 - Geen externe scripts of fonts van CDN's. Geen analytics.
 - `web/.env.example`.
 - CI-job `web` in `ci.yml`: `npm ci`, `check`, `test`, `build` en de guard.
@@ -896,7 +896,7 @@ Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen t
 - `docs/RUNBOOK.md`: Cloudflare Pages-setup en de Auth-URL's in Supabase.
 **Buiten scope:** spotdata tonen (WP-14), kaart (WP-15), profiel (WP-16), push (WP-18), privacypagina (WP-23).
 **Contracten:**
-- Omgeving: `PUBLIC_SUPABASE_URL` en `PUBLIC_SUPABASE_PUBLISHABLE_KEY` via `$env/static/public`.
+- Omgeving: `PUBLIC_SUPABASE_URL` en `PUBLIC_SUPABASE_PUBLISHABLE_KEY` via `$app/env/public` met `src/env.ts` (`defineEnvVars`, SvelteKit 3; `$env/static/public` is deprecated).
 - `web/src/lib/supabase.ts` exporteert `supabase` (supabase-js-client, alleen met de publishable key).
 - `web/src/lib/auth.ts` exporteert de store `session`, `signInWithMagicLink(email: string): Promise<{ error?: string }>` (met `emailRedirectTo` = huidige origin) en `signOut()`.
 - `web/src/lib/components/Attribution.svelte` met prop `compact?: boolean`. Die wordt hergebruikt in WP-14 en WP-21.
@@ -1098,7 +1098,7 @@ Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen t
   - `pushManager.subscribe({ userVisibleOnly: true, applicationServerKey })` met `PUBLIC_VAPID_PUBLIC_KEY`;
   - een insert in `push_subscriptions`;
   - uitzetten doet `subscription.unsubscribe()` en een delete van de rij.
-- In `service-worker.ts`:
+- In `src/service-worker/index.ts`:
   - een `push`-handler die `showNotification(title, { body, tag, data: { url } })` aanroept;
   - een `notificationclick`-handler die een bestaand venster focust of `clients.openWindow(url)` aanroept.
 - Op iOS buiten standalone-modus: een uitleg om de app eerst op het beginscherm te zetten (iOS 16.4+). Browsers zonder ondersteuning krijgen een melding.
@@ -1371,3 +1371,17 @@ Tabellen (schema `public`). Latere WP's mogen via een nieuwe migratie kolommen t
 | Start WP-20 of WP-22 | Eigen SMTP-dienst (gratis tier) | Uiterlijk vóór M4. Eerder als crewleden in M3 zelf moeten kunnen organiseren. |
 
 Niet opgenomen, omdat het buiten de huidige scope valt: stille uren voor meldingen 's nachts. Een alert kan dus ook om 03:00 binnenkomen. Wil je dit wel, dan is het een scopewijziging via het plan.
+
+## Bevestigde beslissingen (Lars, 15 oktober 2026)
+
+Genomen tijdens de nachtrun van 14 oktober en door Lars bevestigd. Latere planners bouwen hierop.
+
+| WP | Beslissing | Gevolg |
+|---|---|---|
+| WP-03 | **Vlagen een uur terugschuiven** (A14): `gust_kn` op `valid_at = T` is het maximum over [T, T+1h); het laatste uur van een respons heeft `gust_kn = None`. | WP-05 en WP-07: een ontbrekende vlaag is "onbekend", nooit 0. Tijdsemantiek is consistent met "uurwaarden horen bij het uur dat begint op `valid_at`". |
+| WP-03 | `cell_selection=sea` bij Open-Meteo. | Kustspots krijgen het zeerasterpunt. Bij meren met grove modellen kan dat minder passen; per spot te herzien in WP-22. |
+| WP-04 | `httpx` rechtstreeks naar DDAPI20 in plaats van `ddlpy`. | Geen extra dependencies; timeout via `make_client`. Stackregel in PROJECT_PLAN aangepast. |
+| WP-04 | Agger: `laagwater 1` en `laagwater 2` zijn beide `low`; topagger wordt niet opgeslagen. | WP-05: getijvoorkeur werkt op het geschatte niveau (`estimate_tide_level`), niet op strikte afwisseling hoog/laag. |
+| WP-13 | SvelteKit 3 (niet 2). | `#lib`, `$app/env/public` via `src/env.ts`, `src/service-worker/index.ts`, config in `vite.config.ts`. Contractregels van WP-13 en WP-18 zijn aangepast. |
+| WP-13 | `shouldCreateUser: false` bij de magic link, tot WP-22. | Nieuwe gebruikers maakt Lars aan in het Dashboard. Open aanmelden komt pas met eigen SMTP. |
+| WP-13 | Node 24.22.0 op Cloudflare Pages; placeholder-icoon tot er een echt icoon is. | `NODE_VERSION=24.22.0` als Pages-variabele. |

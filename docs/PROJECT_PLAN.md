@@ -54,7 +54,7 @@ Cloudflare Pages: PWA (SvelteKit, static) ◄─────────┘ (sup
 
 | Laag | Keuze | Waarom |
 |---|---|---|
-| Ingest en logica | Python 3.12, `uv`, `httpx`, `pydantic`, `astral` (zon op/onder), `ddlpy` (Rijkswaterstaat), `pywebpush` | Lars is Python-native. Alle domeinlogica zit hier, goed testbaar. |
+| Ingest en logica | Python 3.12, `uv`, `httpx`, `pydantic`, `astral` (zon op/onder), Rijkswaterstaat DDAPI20 rechtstreeks via `httpx` (geen `ddlpy`; besluit 15 oktober 2026), `pywebpush` | Lars is Python-native. Alle domeinlogica zit hier, goed testbaar. |
 | Scheduler | GitHub Actions cron (elk uur) | Gratis, geen server. |
 | Database en auth | Supabase (Postgres, magic link login, Row Level Security) | Gratis tier ruim genoeg. |
 | Frontend | SvelteKit met static adapter, TypeScript, PWA (manifest + service worker) | Licht, snel, geen server nodig. |
