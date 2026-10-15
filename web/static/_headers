@@ -1,0 +1,12 @@
+# Cloudflare Pages response headers (WP-23). This file is a template: `npm run build` runs
+# scripts/write-headers.mjs, which writes build/_headers with the two placeholders (Supabase origin,
+# inline script hashes) filled in. Never put secrets here. Checked by test/headers.test.ts and verify-build.
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' {{SCRIPT_HASHES}}; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://api.maptiler.com; font-src 'self'; connect-src 'self' {{SUPABASE_ORIGIN}} https://api.maptiler.com; worker-src 'self'; manifest-src 'self'; frame-src 'none'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'
+  Referrer-Policy: strict-origin-when-cross-origin
+  X-Content-Type-Options: nosniff
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+/_app/immutable/*
+  Cache-Control: public, max-age=31536000, immutable
+/s/*
+  X-Robots-Tag: noindex

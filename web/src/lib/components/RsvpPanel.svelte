@@ -1,11 +1,7 @@
 <script lang="ts">
 	import { createRsvp, deleteRsvp, getPublicSession, updateRsvp } from '#lib/rsvp.js';
-	import {
-		browserStorage,
-		clearStoredRsvp,
-		readStoredRsvp,
-		writeStoredRsvp
-	} from '#lib/rsvp-storage.js';
+	import { browserStorage } from '#lib/browser-storage.js';
+	import { clearStoredRsvp, readStoredRsvp, writeStoredRsvp } from '#lib/rsvp-storage.js';
 	import {
 		SESSION_RETENTION_DAYS,
 		type PublicRsvp,
@@ -187,7 +183,7 @@
 			<p class="hint" id="rsvp-privacy">
 				Alleen je voornaam en je vervoerskeuze worden opgeslagen, tot {SESSION_RETENTION_DAYS} dagen na
 				de sessie. Iedereen met deze link kan ze zien. Wijzigen of afmelden kan later alleen in deze
-				browser op dit apparaat.
+				browser op dit apparaat. <a href="/privacy">Meer over privacy</a>
 			</p>
 		{/if}
 		{#if notice}<p class="notice-ok" role="status">{notice}</p>{/if}

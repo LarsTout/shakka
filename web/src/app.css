@@ -275,3 +275,11 @@ fieldset label {
 .rsvp-panel button + button { margin-left: 0.5rem; }
 .notice-ok { color: #1b7f3b; }
 .session-hours h3 { font-size: 1rem; margin: 1rem 0 0.25rem; }
+
+/* WP-23: accessibility and account deletion */
+.skip-link { position: absolute; left: -9999px; top: 0; }
+.skip-link:focus { left: 1rem; top: 0.5rem; z-index: 10; padding: 0.5rem 0.75rem; background: #fff; color: #1a1a1a; }
+main:focus:not(:focus-visible) { outline: none; }
+.delete-account { margin-top: 2rem; padding-top: 0.75rem; border-top: 1px solid #ddd; }
+.delete-account h2 { font-size: 1.1rem; margin: 0 0 0.25rem; }
+.danger { background: #a4161a; color: #fff; border: 1px solid #a4161a; padding: 0.25rem 0.75rem; border-radius: 0.25rem; }

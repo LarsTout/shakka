@@ -6,7 +6,7 @@
 	import Attribution from '#lib/components/Attribution.svelte';
 	import { session, initAuth, signOut, initialAuthRedirectError } from '#lib/auth.js';
 	import { browserStorage } from '#lib/browser-storage.js';
-	import { takeReturnTo } from '#lib/local-prefs.js';
+	import { pruneReturnTo, takeReturnTo } from '#lib/local-prefs.js';
 	import { registerServiceWorker } from '#lib/sw-register.js';
 
 	let { children }: { children: Snippet } = $props();
@@ -32,6 +32,7 @@
 	});
 
 	onMount(() => {
+		pruneReturnTo(browserStorage(), Date.now());
 		redirectError = initialAuthRedirectError();
 		const stop = initAuth();
 		void registerServiceWorker(navigator, import.meta.env.PROD);
@@ -39,6 +40,7 @@
 	});
 </script>
 
+<a class="skip-link" href="#main">Naar de inhoud</a>
 <header class="site-header">
 	<a class="brand" href="/">Shakka</a>
 	<nav aria-label="Hoofdmenu">
@@ -61,8 +63,8 @@
 		<button type="button" onclick={() => (redirectError = null)}>Sluiten</button>
 	</div>
 {/if}
-<main>{@render children()}</main>
+<main id="main" tabindex="-1">{@render children()}</main>
 <footer class="site-footer">
 	<Attribution compact />
-	<p><a href="/over">Over Shakka en bronnen</a></p>
+	<p><a href="/over">Over Shakka en bronnen</a> · <a href="/privacy">Privacy</a></p>
 </footer>

@@ -268,3 +268,20 @@ Laatste activiteitscommit: 2026-10-15
    - Open `https://<project>.pages.dev/s/<slug>` op een telefoon zonder in te loggen, bijvoorbeeld via een link in WhatsApp. Meld je aan, wijzig je aanmelding (bijvoorbeeld naar "Ik kan mensen meenemen") en meld je af.
    - Controleer in de SQL-editor dat de RSVP weg is.
    - Ruim de testsessie op met `delete from public.sessions where slug = '<slug>';`.
+
+
+## 17. Privacy, CSP en performance (vanaf WP-23)
+1. `npm run build` schrijft `build/_headers` uit het sjabloon `web/static/_headers` (`scripts/write-headers.mjs`: Supabase-origin uit `PUBLIC_SUPABASE_URL`, hashes van de inline scripts in `index.html`). Een nieuwe externe origin (fetch, img, worker) vraagt een aanpassing van het sjabloon, van `checkHeaders` en van `docs/PRIVACY.md`.
+2. `node scripts/check-bundle-size.mjs` (vanuit `web/`, na een build; ook `npm run size`). Gemeten bij WP-23 (gzip, niveau 9): initiële JS 102,4 kB (budget 150 kB), precache 595,2 kB (budget 900 kB), MapLibre-chunk 279,5 kB.
+3. Supabase: Authentication → Audit Logs → "Write audit logs to the database" uit. Regio van het project controleren (EU).
+4. Cloudflare Pages: Web Analytics uit. Laat Rocket Loader, Email Address Obfuscation en vergelijkbare functies uit als er ooit een eigen domein komt: die voegen scripts in die de CSP blokkeert.
+5. Controle na deploy (AC-6), op een preview van `develop`:
+   - `curl -sI https://<preview>/ | grep -iE 'content-security-policy|referrer-policy'`;
+   - `curl -sI https://<preview>/s/AAAAAAAAAA | grep -i x-robots-tag`;
+   - `curl -sI https://<preview>/spot/x | grep -i content-security-policy` (SPA-fallback);
+   - in Chrome DevTools geen CSP-meldingen in de console bij: `/` laden, "Kaart", inloggen via de magic link, `/alerts` met meldingen aan/uit, `/s/<slug>` met aanmelden en afmelden, en `/profiel`;
+   - Lighthouse (DevTools, Mobile, Navigation) op `/` en een spotpagina: toegankelijkheid ≥ 90, performance ≥ 80;
+   - Application → Manifest → Installability zonder fouten;
+   - account verwijderen met een testaccount (in het dashboard aangemaakt): daarna geen rij meer in `auth.users`, en de pagina toont de melding.
+6. Terugdraaien bij een CSP-probleem in productie: verwijder de regel `Content-Security-Policy` uit `web/static/_headers` (en de check in `checkHeaders` tijdelijk), push en deploy. Andere headers blijven staan.
+7. Na de merge: `supabase db push` voor de migratie `20261016090000_delete_my_account.sql`.

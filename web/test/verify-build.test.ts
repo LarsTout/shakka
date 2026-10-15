@@ -4,12 +4,14 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import {
+	checkBuiltHeaders,
 	checkLazyMapLibre,
 	checkManifest,
 	findExternalScripts,
 	findTrackerRefs,
 	pngSize
 } from '../scripts/verify-build.mjs';
+import { inlineScriptHashes, renderHeaders } from '../scripts/write-headers.mjs';
 
 const manifest = () => JSON.parse(readFileSync(new URL('../static/manifest.webmanifest', import.meta.url), 'utf8'));
 
@@ -98,5 +100,48 @@ describe('checkLazyMapLibre', () => {
 		);
 		expect(problems).toHaveLength(1);
 		expect(problems[0]).toContain('no lazily loaded maplibre chunk');
+	});
+});
+
+describe('checkBuiltHeaders', () => {
+	const ORIGIN = 'https://abc.supabase.co';
+	const HTML = '<html><script>boot()</script></html>';
+	const TEMPLATE = readFileSync(new URL('../static/_headers', import.meta.url), 'utf8');
+	const dirs: string[] = [];
+	afterEach(() => {
+		for (const dir of dirs.splice(0)) rmSync(dir, { recursive: true });
+	});
+	function build(opts: { headers?: string | null; html?: string; js?: string } = {}): string {
+		const dir = mkdtempSync(join(tmpdir(), 'shakka-built-'));
+		dirs.push(dir);
+		const html = opts.html ?? HTML;
+		writeFileSync(join(dir, 'index.html'), html);
+		mkdirSync(join(dir, '_app', 'immutable', 'chunks'), { recursive: true });
+		writeFileSync(join(dir, '_app', 'immutable', 'chunks', 'a.js'), opts.js ?? `const u="${ORIGIN}";`);
+		const headers =
+			opts.headers === undefined
+				? renderHeaders(TEMPLATE, { supabaseOrigin: ORIGIN, scriptHashes: inlineScriptHashes(html) })
+				: opts.headers;
+		if (headers !== null) writeFileSync(join(dir, '_headers'), headers);
+		return dir;
+	}
+
+	it('accepts a rendered _headers file', () => {
+		expect(checkBuiltHeaders(build())).toEqual([]);
+	});
+	it('flags a missing _headers', () => {
+		expect(checkBuiltHeaders(build({ headers: null })).join()).toContain('_headers is missing');
+	});
+	it('flags a leftover placeholder', () => {
+		expect(checkBuiltHeaders(build({ headers: TEMPLATE })).join()).toContain('placeholder');
+	});
+	it('flags an inline script whose hash is not in script-src', () => {
+		const headers = renderHeaders(TEMPLATE, { supabaseOrigin: ORIGIN, scriptHashes: inlineScriptHashes('<script>other()</script>') });
+		expect(checkBuiltHeaders(build({ headers })).join()).toContain('is not in script-src');
+	});
+	it('flags a Supabase origin that is not in the built JavaScript', () => {
+		expect(checkBuiltHeaders(build({ js: 'const u="https://other.supabase.co";' })).join()).toContain(
+			'does not occur in the built JavaScript'
+		);
 	});
 });

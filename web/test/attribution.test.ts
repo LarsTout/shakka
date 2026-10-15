@@ -21,3 +21,10 @@ describe.each([false, true])('Attribution compact=%s', (compact) => {
 		for (const a of screen.getAllByRole('link')) expect(a.getAttribute('rel')).toContain('noopener');
 	});
 });
+
+describe('Attribution wave models (A18)', () => {
+	it('the full variant names the wave models', () => {
+		const { container } = render(Attribution, { compact: false });
+		expect(container.textContent?.replace(/\s+/g, ' ')).toContain('golfmodellen van DWD en ECMWF');
+	});
+});

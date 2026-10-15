@@ -2,6 +2,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { dirname, extname, join, relative } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { checkHeaders, inlineScriptHashes, parseCsp, parseHeaders } from './write-headers.mjs';
 
 const WEB_ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const TRACKER_MARKERS = ['googletagmanager', 'google-analytics', 'plausible', 'fonts.googleapis', 'cdn.'];
@@ -88,6 +89,45 @@ export function checkLazyMapLibre(buildDir) {
 	return problems;
 }
 
+/**
+ * build/_headers exists, checkHeaders(text, { template: false }) is empty, every inline script of build/index.html
+ * has its hash in script-src, and the connect-src origin that is not api.maptiler.com occurs literally in at
+ * least one .js file under build/_app/immutable (the same Supabase URL as in the bundle).
+ * @param {string} buildDir @returns {string[]} problems
+ */
+export function checkBuiltHeaders(buildDir) {
+	const headersPath = join(buildDir, '_headers');
+	if (!existsSync(headersPath)) return ['build/_headers is missing (run npm run build)'];
+	/** @type {string[]} */
+	const problems = [];
+	const text = readFileSync(headersPath, 'utf8');
+	problems.push(...checkHeaders(text, { template: false }).map((p) => `_headers: ${p}`));
+
+	const root = parseHeaders(text).find((r) => r.pattern === '/*');
+	const cspValue = root?.headers.find(([n]) => n.toLowerCase() === 'content-security-policy')?.[1];
+	if (!cspValue) return problems;
+	const csp = parseCsp(cspValue);
+
+	const indexPath = join(buildDir, 'index.html');
+	if (existsSync(indexPath)) {
+		const scriptSrc = csp.get('script-src') ?? [];
+		for (const hash of inlineScriptHashes(readFileSync(indexPath, 'utf8'))) {
+			if (!scriptSrc.includes(hash)) problems.push(`_headers: inline script hash ${hash} is not in script-src`);
+		}
+	}
+
+	const origin = (csp.get('connect-src') ?? []).find(
+		(s) => /^https?:\/\//.test(s) && s !== 'https://api.maptiler.com'
+	);
+	if (origin) {
+		const found = listFiles(join(buildDir, '_app', 'immutable')).some(
+			(file) => extname(file) === '.js' && readFileSync(file, 'utf8').includes(origin)
+		);
+		if (!found) problems.push('_headers: the Supabase origin of connect-src does not occur in the built JavaScript');
+	}
+	return problems;
+}
+
 function main() {
 	/** @type {string[]} */
 	const problems = [];
@@ -124,6 +164,7 @@ function main() {
 
 	if (!existsSync(join(build, 'service-worker.js'))) problems.push('build/service-worker.js is missing');
 	problems.push(...checkLazyMapLibre(build));
+	problems.push(...checkBuiltHeaders(build));
 
 	if (existsSync(indexPath)) {
 		for (const tag of findExternalScripts(readFileSync(indexPath, 'utf8'))) {

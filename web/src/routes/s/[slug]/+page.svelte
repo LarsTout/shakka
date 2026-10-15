@@ -6,7 +6,8 @@
 	import HourVerdict from '#lib/components/HourVerdict.svelte';
 	import RsvpPanel from '#lib/components/RsvpPanel.svelte';
 	import SessionParticipants from '#lib/components/SessionParticipants.svelte';
-	import { browserStorage, clearStoredRsvp, readStoredRsvp } from '#lib/rsvp-storage.js';
+	import { browserStorage } from '#lib/browser-storage.js';
+	import { clearStoredRsvp, readStoredRsvp } from '#lib/rsvp-storage.js';
 	import { SESSION_RETENTION_DAYS, type PublicSession, type StoredRsvp } from '#lib/rsvp-types.js';
 	import { isSessionClosed, optionalText, sessionWindowText, tikkieLink } from '#lib/session-view.js';
 	import { formatDateKey } from '#lib/time.js';

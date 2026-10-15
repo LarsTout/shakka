@@ -84,6 +84,7 @@
 			<p role="alert" class="error">{error}</p>
 		{/if}
 	</form>
+	<p class="hint">Shakka gebruikt je e-mailadres alleen om je in te loggen. <a href="/privacy">Privacy</a></p>
 {/if}
 
 {#if $session === null && standalone}

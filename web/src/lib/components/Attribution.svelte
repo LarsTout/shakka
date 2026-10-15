@@ -27,7 +27,9 @@
 			Weermodellen van {@render link('https://www.knmi.nl/', 'KNMI')},
 			{@render link('https://www.dwd.de/', 'DWD')},
 			{@render link('https://www.ecmwf.int/', 'ECMWF')} en
-			{@render link('https://www.noaa.gov/', 'NOAA')}, via Open-Meteo.
+			{@render link('https://www.noaa.gov/', 'NOAA')}, en golfmodellen van
+			{@render link('https://www.dwd.de/', 'DWD')} en
+			{@render link('https://www.ecmwf.int/', 'ECMWF')}, via Open-Meteo.
 		</p>
 		<p>
 			Getijdata: {@render link('https://rijkswaterstaatdata.nl/waterdata/', 'Rijkswaterstaat')} (CC0).
