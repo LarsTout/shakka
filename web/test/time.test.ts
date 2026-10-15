@@ -4,7 +4,11 @@ import {
 	floorHour,
 	formatDateKey,
 	formatLocal,
+	formatWindowLocal,
+	isSpotSlug,
 	localDateKey,
+	localWallTimeCandidates,
+	localWallTimeToUtc,
 	parseGoParams,
 	startOfLocalDay
 } from '../src/lib/time.js';
@@ -108,5 +112,81 @@ describe('parseGoParams (AC-5)', () => {
 	it('first value wins, extras ignored', () => {
 		const r = parseGoParams(u(`spot=a&spot=b&x=1&start=${S}&end=${E}`));
 		expect(r?.spot).toBe('a');
+	});
+});
+
+describe('localWallTimeCandidates (WP-20)', () => {
+	const iso = (ds: Date[]) => ds.map((x) => x.toISOString());
+	it('normal summer time', () => {
+		expect(iso(localWallTimeCandidates('2026-07-18', '14:00'))).toEqual(['2026-07-18T12:00:00.000Z']);
+	});
+	it('autumn overlap has two candidates', () => {
+		expect(iso(localWallTimeCandidates('2026-10-25', '02:30'))).toEqual([
+			'2026-10-25T00:30:00.000Z',
+			'2026-10-25T01:30:00.000Z'
+		]);
+	});
+	it('spring gap has none', () => {
+		expect(localWallTimeCandidates('2026-03-29', '02:30')).toEqual([]);
+		expect(iso(localWallTimeCandidates('2026-03-29', '03:00'))).toEqual(['2026-03-29T01:00:00.000Z']);
+	});
+	it('next spring switch (2027-03-28)', () => {
+		expect(localWallTimeCandidates('2027-03-28', '02:30')).toEqual([]);
+		expect(iso(localWallTimeCandidates('2027-03-28', '03:00'))).toEqual(['2027-03-28T01:00:00.000Z']);
+	});
+	it('malformed input throws RangeError', () => {
+		expect(() => localWallTimeCandidates('2026-02-30', '12:00')).toThrow(RangeError);
+		expect(() => localWallTimeCandidates('2026-07-18', '24:00')).toThrow(RangeError);
+	});
+});
+
+describe('localWallTimeToUtc (WP-20)', () => {
+	it('preferred candidate wins', () => {
+		expect(localWallTimeToUtc('2026-10-25', '02:00', d('2026-10-25T01:00:00Z'))?.toISOString()).toBe(
+			'2026-10-25T01:00:00.000Z'
+		);
+	});
+	it('earliest without preferred or with a non-candidate', () => {
+		expect(localWallTimeToUtc('2026-10-25', '02:00')?.toISOString()).toBe('2026-10-25T00:00:00.000Z');
+		expect(localWallTimeToUtc('2026-10-25', '02:00', d('2026-10-25T05:00:00Z'))?.toISOString()).toBe(
+			'2026-10-25T00:00:00.000Z'
+		);
+	});
+	it('null in the gap', () => {
+		expect(localWallTimeToUtc('2026-03-29', '02:30')).toBeNull();
+	});
+});
+
+describe('formatWindowLocal (WP-20)', () => {
+	it('same day', () => {
+		expect(formatWindowLocal(d('2026-07-18T12:00:00Z'), d('2026-07-18T16:00:00Z'))).toBe(
+			'za 18 jul 14:00–18:00'
+		);
+		expect(formatWindowLocal(d('2026-10-25T00:00:00Z'), d('2026-10-25T02:00:00Z'))).toBe(
+			'zo 25 okt 02:00–03:00'
+		);
+	});
+	it('across local midnight', () => {
+		expect(formatWindowLocal(d('2026-07-18T20:00:00Z'), d('2026-07-19T00:00:00Z'))).toBe(
+			'za 18 jul 22:00 – zo 19 jul 02:00'
+		);
+	});
+	it('ending exactly at local midnight stays on one day', () => {
+		expect(formatWindowLocal(d('2026-07-18T20:00:00Z'), d('2026-07-18T22:00:00Z'))).toBe(
+			'za 18 jul 22:00–00:00'
+		);
+	});
+	it('throws when start >= end', () => {
+		expect(() => formatWindowLocal(d('2026-07-18T12:00:00Z'), d('2026-07-18T12:00:00Z'))).toThrow(
+			RangeError
+		);
+	});
+});
+
+describe('isSpotSlug (WP-20)', () => {
+	it('accepts and rejects', () => {
+		expect(isSpotSlug('test-strand')).toBe(true);
+		expect(isSpotSlug('Test')).toBe(false);
+		expect(isSpotSlug('a'.repeat(101))).toBe(false);
 	});
 });
