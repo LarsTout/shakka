@@ -33,10 +33,10 @@ Alles wat zonder Lars te toetsen is, is PASS. AC-7 (Cloudflare Pages, Supabase U
 De diff bevat alle bestanden uit de tabel "Bestanden"; `docs/STATUS.md` is de orchestrator (zoals de blueprint zegt). Geen bestanden buiten scope. `vite.config.ts` is gelijk aan de blueprint plus `version.pollInterval` (N-3); `supabase/config.toml` precies de twee regels; CI-job en hygiene-test volgens blueprint. Afwijkingen staan in `deviations.md` (Node-versie lokaal, N-3, N-9 `shouldCreateUser: false` met `otp_disabled`-mapping, `resolve()` vervangen door `new URL(path, self.registration.scope).pathname`, kleine extra's) en zijn geen fail. SvelteKit 3 in plaats van 2 is door de reviewer als beslispunt voor Lars aangemerkt (N-1) en is geen fail.
 
 ## NEEDS_LARS (AC-7)
-Stappen uit `docs/RUNBOOK.md` sectie 9:
-1. 9.3: Cloudflare Pages-project koppelen aan `LarsTout/shakka` (production branch `main`, preset None, build `npm run build`, output `build`, root `web`, previews voor alle andere branches). Environment variables voor Production en Preview: `PUBLIC_SUPABASE_URL`, `PUBLIC_SUPABASE_PUBLISHABLE_KEY` (publishable key, nooit de secret key) en `NODE_VERSION=24.22.0`.
-2. 9.4: in Supabase Auth, URL Configuration: Site URL en Redirect URLs (Pages-URL, `*.pages.dev`-previews en `http://localhost:5173`, met en zonder `/**`).
-3. 9.2: jezelf eenmalig aanmaken via Dashboard, Authentication, Users, Add user (nodig door `shouldCreateUser: false`).
+Stappen uit `docs/RUNBOOK.md` sectie 11:
+1. 11.3: Cloudflare Pages-project koppelen aan `LarsTout/shakka` (production branch `main`, preset None, build `npm run build`, output `build`, root `web`, previews voor alle andere branches). Environment variables voor Production en Preview: `PUBLIC_SUPABASE_URL`, `PUBLIC_SUPABASE_PUBLISHABLE_KEY` (publishable key, nooit de secret key) en `NODE_VERSION=24.22.0`.
+2. 11.4: in Supabase Auth, URL Configuration: Site URL en Redirect URLs (Pages-URL, `*.pages.dev`-previews en `http://localhost:5173`, met en zonder `/**`).
+3. 11.2: jezelf eenmalig aanmaken via Dashboard, Authentication, Users, Add user (nodig door `shouldCreateUser: false`).
 4. Handmatig: Pages-URL laadt; de app is te installeren (Chrome of Safari "Zet op beginscherm"); magic-link-login met Lars' e-mailadres werkt end-to-end.
 5. Beslispunten: akkoord op SvelteKit 3 (A1/N-1), placeholder-icoon (A3), en de drie contractregels in `docs/WORK_PACKAGES.md` bijwerken (`src/service-worker.ts`, `$env/static/public`, WP-18-verwijzing).
 
