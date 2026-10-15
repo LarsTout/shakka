@@ -30,6 +30,8 @@ from shakka.jobs.forecast import FetchForecast, run_forecast_ingest
 from shakka.jobs.inputs import db_error_summary, require_aware, short_error
 from shakka.jobs.tides import TideFetcher, run_tide_ingest
 from shakka.logsetup import configure_logging, github_annotation, redact, secret_values
+from shakka.notify.base import Notifier
+from shakka.notify.webpush import notifiers_from_settings
 from shakka.spots.loader import load_spots
 from shakka.spots.sync import sync_spots
 
@@ -49,6 +51,9 @@ MAX_ANNOTATIONS: Final = 10
 # Read from the module at every step_tides call (never as a default argument), so a test can
 # monkeypatch it.
 TIDE_STEP_BUDGET_S: Final = 240.0
+PUSH_DISABLED_WARNING: Final = (
+    "push disabled: VAPID secrets not set; alerts are stored but not delivered"
+)
 STEP_NAMES: Final = ("spots_sync", "forecast", "tides", "evaluate", "alerts")
 
 _monotonic: Callable[[], float] = time.monotonic  # looked up at call time; tests monkeypatch it
@@ -111,6 +116,7 @@ class PipelineContext:
     tide_fetch: TideFetcher
     secrets: tuple[str, ...] = ()
     reports: list[StepReport] = field(default_factory=list)
+    notifiers: Mapping[str, Notifier] | None = None  # None: build from Settings in step_alerts
 
     def report(self, name: str) -> StepReport | None:
         return next((r for r in self.reports if r.name == name), None)
@@ -213,20 +219,51 @@ def alert_counts(result: AlertJobResult) -> dict[str, Any]:
         "skipped": result.skipped,
         "write_errors": result.write_errors,
         "deleted": result.deleted,
+        "sent": result.sent,
+        "failed": result.failed,
+        "no_target": result.no_target,
+        "deferred": result.deferred,
+        "removed": result.removed,
+        "push_enabled": result.push_enabled,
+        "push_failures": dict(result.push_failures),
         **kinds,
         "errors": list(result.errors),
     }
 
 
+def deferred_warning(deferred: int) -> str:
+    return (
+        f"{deferred} favorite(s) deferred: no push delivery succeeded; "
+        "retried next run (see push_failures in ingest_runs)"
+    )
+
+
 def step_alerts(ctx: PipelineContext) -> StepOutcome:
+    # A configuration error must stand out, also in a run where alerts are skipped as stale
+    # (review N-4): building the notifiers has no side effects, so it comes first.
+    notifiers = (
+        ctx.notifiers if ctx.notifiers is not None else notifiers_from_settings(ctx.settings)
+    )
     forecast = ctx.report("forecast")
     if forecast is not None and forecast.status != "ok":
         newest = newest_forecast_fetch(ctx.db)
         if newest is None or newest < ctx.now - STALE_FORECAST_AGE:
             raise StepSkipped(STALE_FORECAST)
-    result = run_alerts(ctx.db, now=ctx.now, base_url=ctx.settings.app_base_url)
-    partial = bool(result.skipped or result.write_errors)
-    return StepOutcome("partial" if partial else "ok", alert_counts(result))
+    warnings: list[str] = []
+    if not notifiers:
+        logger.warning(
+            "alerts: push disabled (no VAPID configuration); alert state is stored without delivery"
+        )
+        warnings.append(PUSH_DISABLED_WARNING)
+    result = run_alerts(
+        ctx.db, now=ctx.now, base_url=ctx.settings.app_base_url, notifiers=notifiers
+    )
+    if result.deferred:
+        warnings.append(deferred_warning(result.deferred))
+    partial = bool(result.skipped or result.write_errors or result.deferred)
+    return StepOutcome(
+        "partial" if partial else "ok", alert_counts(result), warnings=tuple(warnings)
+    )
 
 
 STEPS: Final[tuple[Step, ...]] = (
@@ -363,6 +400,7 @@ def run_hourly(
     forecast_fetch: FetchForecast | None = None,
     tide_fetch: TideFetcher | None = None,
     clock: Callable[[], datetime] | None = None,
+    notifiers: Mapping[str, Notifier] | None = None,
 ) -> RunReport:
     require_aware(now)
     own_db = db is None
@@ -373,7 +411,9 @@ def run_hourly(
         if http is None:
             http = runtime.open_http()
         try:
-            return _run(settings, now, db, http, steps, forecast_fetch, tide_fetch, clock)
+            return _run(
+                settings, now, db, http, steps, forecast_fetch, tide_fetch, clock, notifiers
+            )
         finally:
             if own_http:
                 http.close()
@@ -391,6 +431,7 @@ def _run(
     forecast_fetch: FetchForecast | None,
     tide_fetch: TideFetcher | None,
     clock: Callable[[], datetime] | None,
+    notifiers: Mapping[str, Notifier] | None = None,
 ) -> RunReport:
     _close_abandoned(db, now)
     try:
@@ -422,6 +463,7 @@ def _run(
         forecast_fetch or om_forecast.fetch_forecast,
         tide_fetch or functools.partial(rws.fetch_tide_extremes, http=http),
         secrets=secret_values(settings),
+        notifiers=notifiers,
     )
     by_id = {"id": f"eq.{run_id}"}
     progress_warned = False

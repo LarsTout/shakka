@@ -18,6 +18,7 @@ from pipeline_fixtures import (
 )
 from shakka.cli import cli
 from shakka.jobs.alerts import run_alerts
+from shakka.logsetup import QUIET_LOGGERS
 from shakka.pipeline import RunReport, run_hourly_cli
 from shakka.spots.loader import load_spots
 from shakka.spots.sync import sync_spots
@@ -29,7 +30,7 @@ SECRET = "sb_secret_TESTVALUE"
 def restore_logging():
     root = logging.getLogger()
     handlers, level = list(root.handlers), root.level
-    quiet = {n: logging.getLogger(n).level for n in ("httpx", "httpcore")}
+    quiet = {n: logging.getLogger(n).level for n in QUIET_LOGGERS}
     yield
     root.handlers[:] = handlers
     root.setLevel(level)
@@ -94,7 +95,7 @@ def test_budget_warning_on_stdout(monkeypatch, tmp_path, capsys, restore_logging
     code = run_hourly_cli(echo=print)
     out = capsys.readouterr().out
     assert code == 0
-    assert any(line.startswith("::warning::") for line in out.splitlines())
+    assert any(line.startswith("::warning::forecast:") for line in out.splitlines())
 
 
 def test_no_user_ids_or_message_texts_in_output(

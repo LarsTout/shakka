@@ -6,6 +6,7 @@ from datetime import timedelta
 from typing import Any, Literal
 
 import pytest
+import pywebpush
 
 import shakka.pipeline as pipeline
 from evaluation_fixtures import make_spot
@@ -21,6 +22,7 @@ from pipeline_fixtures import (
     seed_user,
     write_spots_yaml,
 )
+from push_fixtures import DOWN, KEYS, SUBJECT, FakeNotifier, seed_subs
 from shakka.config import Settings
 from shakka.db import DatabaseError
 from shakka.pipeline import (
@@ -530,6 +532,7 @@ def test_alert_counts_shape():
     assert set(counts) == {
         "users", "events", "favorites", "ineligible", "disabled", "skipped", "write_errors",
         "deleted", "new", "improved", "worsened", "cancelled", "errors",
+        "sent", "failed", "no_target", "deferred", "removed", "push_enabled", "push_failures",
     }  # fmt: skip
     assert "messages" not in counts
 
@@ -554,3 +557,155 @@ def test_alerts_errors_only_in_ingest_runs(tmp_path, caplog, capsys):
     assert any("spot test-strand:" in e for e in alerts.counts["errors"])
     out = capsys.readouterr()
     assert "spot test-strand:" not in caplog.text + out.out + out.err
+
+
+# -- push (WP-17) -----------------------------------------------------------------------------
+
+PUSH_SECRETS = ("ENDPOINT-SECRET-123", "P256DH-SECRET-456", "AUTH-SECRET-789")
+
+
+def vapid_settings(tmp_path, **overrides):
+    values = {
+        "vapid_public_key": KEYS.public_key,
+        "vapid_private_key": KEYS.private_key,
+        "vapid_subject": SUBJECT,
+    }
+    return make_settings(write_spots_yaml(tmp_path, (PIPELINE_SPOT,)), **{**values, **overrides})
+
+
+def test_hourly_without_vapid(tmp_path, caplog):
+    db = FakeSupabase()
+    seed_user(db)
+    with caplog.at_level(logging.INFO):
+        report = run_real(tmp_path, db)
+    alerts = step(report, "alerts")
+    assert alerts.status == "ok"
+    counts = alerts.counts
+    assert counts["events"] == 1 and counts["new"] == 1
+    assert counts["sent"] == counts["failed"] == counts["no_target"] == 0
+    assert counts["deferred"] == counts["removed"] == 0
+    assert counts["push_enabled"] is False
+    assert any(
+        r.levelno == logging.WARNING and "push disabled" in r.getMessage() for r in caplog.records
+    )
+    assert any(a.startswith("::warning::alerts: push disabled") for a in report.annotations)
+    (row,) = db.rows("alert_state")
+    assert (row["status"], row["last_event"], row["last_notified_at"]) == ("active", "new", None)
+
+
+def test_hourly_incomplete_vapid(tmp_path, caplog):
+    db = FakeSupabase()
+    seed_user(db)
+    settings = make_settings(
+        write_spots_yaml(tmp_path, (PIPELINE_SPOT,)),
+        vapid_private_key=KEYS.private_key,
+        vapid_subject=SUBJECT,
+    )
+    with caplog.at_level(logging.DEBUG):
+        report = run_real(tmp_path, db, settings=settings)
+    alerts = step(report, "alerts")
+    assert alerts.status == "failed" and alerts.error_type == "ValueError"
+    assert report.status == "failed" and report.exit_code == 1
+    for text in (str(db.rows("ingest_runs")), caplog.text):
+        assert KEYS.private_key not in text
+        assert SUBJECT not in text
+
+
+def test_hourly_incomplete_vapid_fails_even_when_stale(tmp_path):
+    """Review N-4: a configuration error also fails a run in which alerts would be stale."""
+    db = FakeSupabase()
+    seed_user(db)
+    settings = make_settings(
+        write_spots_yaml(tmp_path, (PIPELINE_SPOT,)), vapid_private_key=KEYS.private_key
+    )
+    report = run_real(
+        tmp_path,
+        db,
+        settings=settings,
+        forecast_fetch=failing_forecast_fetch(RuntimeError("down")),
+    )
+    assert step(report, "forecast").status == "failed"
+    assert step(report, "alerts").status == "failed"
+    stale = run_real(
+        tmp_path,
+        FakeSupabase(),
+        forecast_fetch=failing_forecast_fetch(RuntimeError("down")),
+    )
+    assert step(stale, "alerts").status == "skipped"
+
+
+def test_hourly_with_notifiers(tmp_path):
+    db = FakeSupabase()
+    seed_user(db)
+    seed_subs(db, USER_A, 1)
+    report = run_real(tmp_path, db, notifiers={"webpush": FakeNotifier()})
+    alerts = step(report, "alerts")
+    assert alerts.counts["sent"] == 1 and alerts.counts["push_enabled"] is True
+    assert not any("push disabled" in a for a in report.annotations)
+
+
+def test_hourly_push_failure_leaks_nothing(tmp_path, caplog, capsys, monkeypatch):
+    from shakka.logsetup import configure_logging, secret_values
+
+    ep = "https://push.example.test/send/ENDPOINT-SECRET-123"
+
+    def failing(**kwargs):
+        raise Exception(f"{ep} P256DH-SECRET-456 AUTH-SECRET-789 {KEYS.private_key}")
+
+    monkeypatch.setattr(pywebpush, "webpush", failing)
+    root = logging.getLogger()
+    handlers, level = list(root.handlers), root.level
+    try:
+        settings = vapid_settings(tmp_path)
+        configure_logging(secrets=secret_values(settings))
+        db = FakeSupabase()
+        seed_user(db)
+        db.seed(
+            "push_subscriptions",
+            [
+                {
+                    "user_id": USER_A,
+                    "endpoint": ep,
+                    "p256dh": PUSH_SECRETS[1],
+                    "auth": PUSH_SECRETS[2],
+                }
+            ],
+        )
+        with caplog.at_level(logging.DEBUG):
+            report = run_real(tmp_path, db, settings=settings)
+    finally:
+        root.handlers[:] = handlers
+        root.setLevel(level)
+    out = capsys.readouterr()
+    haystacks = [
+        caplog.text,
+        out.out,
+        out.err,
+        "\n".join(report.annotations),
+        str(db.rows("ingest_runs")),
+    ]
+    for text in haystacks:
+        for secret in (*PUSH_SECRETS, KEYS.private_key, SUBJECT, USER_A):
+            assert secret not in text
+    alerts = step(report, "alerts")
+    assert alerts.counts["push_failures"] == {"Exception": 1}
+    assert alerts.status == "partial" and alerts.counts["deferred"] == 1
+
+
+def test_hourly_deferred_warning(tmp_path):
+    db = FakeSupabase()
+    seed_user(db)
+    (ep,) = seed_subs(db, USER_A, 1)
+    report = run_real(tmp_path, db, notifiers={"webpush": FakeNotifier({ep: DOWN})})
+    alerts = step(report, "alerts")
+    assert alerts.status == "partial" and report.exit_code == 0
+    assert alerts.warnings == (pipeline.deferred_warning(1),)
+    assert (
+        "::warning::alerts: 1 favorite(s) deferred: no push delivery succeeded; "
+        "retried next run (see push_failures in ingest_runs)"
+    ) in report.annotations
+    ok_db = FakeSupabase()
+    seed_user(ok_db)
+    seed_subs(ok_db, USER_A, 1)
+    ok_report = run_real(tmp_path, ok_db, notifiers={"webpush": FakeNotifier()})
+    assert not any(a.startswith("::warning::alerts:") for a in ok_report.annotations)
