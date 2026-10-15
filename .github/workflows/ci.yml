@@ -61,4 +61,5 @@ jobs:
       - run: npm test
       - run: npm run build
       - run: npm run verify:build
+      - run: node scripts/check-bundle-size.mjs
       - run: bash ../scripts/check-no-client-openmeteo.sh
