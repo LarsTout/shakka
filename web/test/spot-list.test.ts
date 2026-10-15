@@ -1,6 +1,8 @@
 import { render, screen } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { favoritesState, toggleFavoriteMock } from './helpers/fake-favorites.js';
+import { USER_ID } from './helpers/fake-session.js';
 import type { SummaryRow } from '../src/lib/types.js';
 import { EVALUATED_AT, NOW_FRESH, SPOT_UNVERIFIED, SPOT_VERIFIED } from './fixtures/spot-data.js';
 
@@ -9,6 +11,8 @@ vi.mock('$app/navigation', () => ({ refreshAll: nav.refreshAll }));
 vi.mock('#lib/supabase.js', () => {
 	throw new Error('page tests must not import the Supabase client');
 });
+
+vi.mock('#lib/favorites.js', async () => (await import('./helpers/fake-favorites.js')).favoritesModule);
 
 import Page from '../src/routes/+page.svelte';
 import { summarizeSpots } from '../src/lib/view.js';
@@ -36,6 +40,7 @@ const summaries = (el: HTMLElement) => [...el.querySelectorAll('p.day-summary')]
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	favoritesState.set({ status: 'signed_out' });
 });
 
 describe('spot list (AC-4)', () => {
@@ -85,5 +90,24 @@ describe('spot list (AC-4)', () => {
 		const old = { ...S, latest_evaluated_at: '2026-07-15T08:00:00+00:00' };
 		render(Page, props({ ...ok, summaries: { 'test-meer': old } }));
 		expect(screen.getByRole('alert')).toHaveTextContent('ouder dan 3 uur');
+	});
+});
+
+describe('favorite stars on the list (WP-16)', () => {
+	const ok = { kind: 'ok', now: NOW_FRESH, spots: [SPOT_UNVERIFIED, SPOT_VERIFIED], summaries: {} };
+
+	it('signed out: no star', () => {
+		render(Page, props(ok));
+		expect(screen.queryByRole('button', { name: /^Favoriet:/ })).toBeNull();
+	});
+
+	it('ready: pressed state per spot and a click toggles', async () => {
+		favoritesState.set({ status: 'ready', userId: USER_ID, ids: new Set(['test-meer']) });
+		render(Page, props(ok));
+		expect(screen.getByRole('button', { name: 'Favoriet: Testmeer' })).toHaveAttribute('aria-pressed', 'true');
+		const strand = screen.getByRole('button', { name: 'Favoriet: Teststrand' });
+		expect(strand).toHaveAttribute('aria-pressed', 'false');
+		await userEvent.click(strand);
+		expect(toggleFavoriteMock).toHaveBeenCalledWith('test-strand');
 	});
 });

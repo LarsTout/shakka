@@ -1,6 +1,8 @@
 import { render, screen, within } from '@testing-library/svelte';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { favoritesState, toggleFavoriteMock } from './helpers/fake-favorites.js';
+import { USER_ID } from './helpers/fake-session.js';
 import { NOW_FRESH, NOW_STALE, SPOT_VERIFIED, pageData } from './fixtures/spot-data.js';
 
 const nav = vi.hoisted(() => ({ refreshAll: vi.fn() }));
@@ -10,6 +12,8 @@ vi.mock('#lib/supabase.js', () => {
 	throw new Error('page tests must not import the Supabase client');
 });
 
+vi.mock('#lib/favorites.js', async () => (await import('./helpers/fake-favorites.js')).favoritesModule);
+
 import Page from '../src/routes/spot/[id]/+page.svelte';
 
 const props = (data: unknown) => ({ data }) as never;
@@ -18,6 +22,7 @@ const hourOf = (time: string): HTMLElement =>
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	favoritesState.set({ status: 'signed_out' });
 });
 
 describe('spot page (AC-3)', () => {
@@ -126,5 +131,24 @@ describe('spot page (AC-3)', () => {
 			fire();
 			expect(nav.refreshAll).not.toHaveBeenCalled();
 		});
+	});
+});
+
+describe('favorite star on the spot page (WP-16)', () => {
+	it('signed out: no star', () => {
+		render(Page, props(pageData()));
+		expect(screen.queryByRole('button', { name: /^Favoriet:/ })).toBeNull();
+	});
+
+	it('ready: the star sits in .title-row next to the h1', async () => {
+		favoritesState.set({ status: 'ready', userId: USER_ID, ids: new Set() });
+		render(Page, props(pageData()));
+		const star = screen.getByRole('button', { name: 'Favoriet: Teststrand' });
+		expect(star).toHaveAttribute('aria-pressed', 'false');
+		const row = star.closest('.title-row') as HTMLElement;
+		expect(row).not.toBeNull();
+		expect(within(row).getByRole('heading', { level: 1 })).toHaveTextContent('Teststrand');
+		await userEvent.click(star);
+		expect(toggleFavoriteMock).toHaveBeenCalledWith('test-strand');
 	});
 });
