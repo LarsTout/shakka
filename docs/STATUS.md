@@ -11,7 +11,7 @@ Opdeling: goedgekeurd.
 | WP-04 | Getij-ingest (Rijkswaterstaat) | done | |
 | WP-05 | Evaluatie-engine (puur) | done | drempelwaarden toetsen in M1-testweek (blueprint 'Drempelwaarden', open punt O1) |
 | WP-06 | Kite-advies (puur) | done | AC-2 open: Lars toetst kite_examples.yaml en zet checked_by_lars: true |
-| WP-07 | Alertregels en windows (puur) | blueprint | |
+| WP-07 | Alertregels en windows (puur) | in_review | |
 | WP-08 | Alert-deduplicatie en berichtopbouw (puur) | todo | |
 | WP-09 | Telegram-kanaal | todo | |
 | WP-10 | Evaluatie- en alertjobs plus beheer-CLI | todo | |
