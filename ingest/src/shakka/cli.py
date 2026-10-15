@@ -365,5 +365,24 @@ def admin_alerts_preview(user_id) -> None:
     raise SystemExit(ops.run_admin("alerts preview", action, echo=click.echo))
 
 
+@cli.command("run-hourly")
+def run_hourly_cmd() -> None:
+    """Run all hourly steps (spots sync, forecast, tides, evaluate, alerts) and record the run."""
+    from shakka.pipeline import run_hourly_cli
+
+    raise SystemExit(run_hourly_cli(echo=click.echo))
+
+
+@cli.command("check-activity")
+@click.option(
+    "--last-commit-at", default="", help="ISO date of the last commit on the default branch."
+)
+def check_activity_cmd(last_commit_at: str) -> None:
+    """Warn before GitHub disables the hourly schedule (60 days without activity)."""
+    from shakka.activity import run_check_activity_cli
+
+    raise SystemExit(run_check_activity_cli(last_commit_at, echo=click.echo))
+
+
 def main() -> None:
     cli()
