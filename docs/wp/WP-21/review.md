@@ -1,51 +1,46 @@
-# Review WP-21, ronde 2
-Oordeel: CHANGES_REQUIRED
+# Review WP-21, ronde 3
+Oordeel: APPROVED
 
-Beoordeeld: blueprint revisie 2. Eerst de punten uit ronde 1:
-- **B-1 (ronde 1) is opgelost.** WP-21 maakt geen enkel bestand aan dat ook in de tabel "Bestanden" van WP-20 (revisie 2) staat. Het gaat om `session-page-data.ts`, `session-model.ts`, `session-form.ts`, `sessions.ts`, `browser-storage.ts`, `local-prefs.ts`, `fixtures/session-data.ts`, `SessionForm.svelte` en de routes `sessie/…`, `go/…` en `mijn-sessies`. WP-20 belooft van zijn kant niets onder `routes/s/` aan te maken, en geen bestand met `rsvp`, `public-session` of `session-view` in de naam. De echte overlap staat goed in R3 en stap 9: `user-tables.test.ts` en `RUNBOOK.md`. Stap 8 controleert de drie verboden namen.
-- **N-1 is correct opgelost.** `now` is een overschrijfbare `$derived`. De klok-`$effect` hangt af van `session` en `closed`, gaat 1 s na `ends_at` af, en draait daarna niet opnieuw zodra `closed` waar is. `serverClosed` reageert op `session_closed` van zowel `rsvp_create` als `rsvp_update`. De tests zijn (j), (18) en (19).
-- **N-6 is correct opgelost.** De prefix `https://tikkie.me/` sluit al uit: hoofdletters, een poort, een gebruikersnaam, een subdomein, `www.` en `tikkie.me.evil…`. Daarna volgen nog de controles `new URL` en `hostname`. E38 en de tests dekken alle varianten.
-- **N-8 klopt met de bron.** `abortSignal(signal): this` zet `this.signal`, en dat gaat mee naar `fetch`. `AbortSignal.timeout` breekt af met een `TimeoutError`. Een fetch die daardoor faalt, wordt bij `shouldThrowOnError === false` opgevangen en resolvet met `status: 0`, `data: null` en een `error`. Dat wordt dus `network`. De `typeof`-terugval en de aanpassing van `fake-rpc` zijn in orde.
-- **N-2 t/m N-5, N-7 en N-9 t/m N-12** zijn verwerkt zoals beschreven.
+Beoordeeld: blueprint revisie 3. Dit is een gerichte review op de punten uit ronde 2 en op wat er in revisie 3 nieuw is.
+
+**(a) B-1 uit ronde 2 is opgelost.**
+- In het Testplan staat een nieuwe alinea "Vaste klok in de pagina- en flowtests". Die zet `vi.useFakeTimers({ toFake: ['Date'] })` en `vi.setSystemTime(new Date(NOW))` in `beforeEach` van alle drie de bestanden: `rsvp-flow.test.ts`, `public-session-page.test.ts` en `public-session-page-integration.test.ts`. Elke tabelcel verwijst naar die alinea.
+- Alleen `Date` wordt nep gemaakt. `setTimeout` en de microtaken blijven echt, dus `userEvent`, `findBy*` en `waitFor` werken ongewijzigd. Testing Library herkent hier geen Jest-fake-timers en gebruikt dus de echte timers.
+- Met `Date.now()` op `NOW` (09:00Z) ligt `ends_at` 7 uur later. De klok-timer gaat dus niet af binnen een test, en `applyRefresh` houdt de sessie open. Dat dekt (1), (3), (5), (6) en (13).
+- (b) `NOW_ENDED`, (e) `NOW_STALE` en (i) rekenen met `data.now` of relatief aan `Date.now()`, en blijven dus kloppen.
+- `afterEach` doet al `vi.useRealTimers()`.
+
+**N-1 uit ronde 1 is niet teruggedraaid.** A5 is ongewijzigd: `applyRefresh` zet `now = new Date()`, en de klok-`$effect` gaat 1 s na `ends_at` af. De nieuwe alinea verbiedt de builder ook uitdrukkelijk om dit weg te halen als oplossing.
+
+**Test (j) blijft correct.** De test doet eerst `vi.useRealTimers()` en zet daarna eigen fake timers voor `setTimeout`, `clearTimeout` en `Date`, plus een eigen systeemtijd van 15:59Z. Daarna volgen `advanceTimersByTime(61_000)` en de check met `getTimerCount` na `unmount`. `await tick()` van Svelte gebruikt microtaken, en die zijn niet nep, dus dat werkt.
+
+**(b) N-1 uit ronde 2 is opgelost.** Ik heb dit vergeleken met WP-20 revisie 2. Alle namen en vormen kloppen:
+- `session-model.ts`: `SESSION_SLUG_RE` (r. 191), `isValidSessionSlug` (r. 193) en `countCodePoints` (r. 199);
+- `safeTikkieLink(url): { href; host } | null` (r. 208);
+- `formatWindowLocal(start: Date, end: Date)` in `time.ts` (r. 265);
+- `browser-storage.ts` met `StorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>` en `browserStorage(): StorageLike | undefined` (r. 296–309).
+
+Wat stap 9 nu doet:
+- **9a** gebruikt `export { … } from './session-model.js'` met daarnaast een lokale `import { countCodePoints }`. Dat is geldige TS, en de importeurs van `session-view.js` hoeven niet te veranderen.
+- **9d** gebruikt `import type` plus `export type { StorageLike } from './browser-storage.js'`. Ook dat is geldig.
+- `browserStorage` blijft de eigen versie (`null`), en het opruimpunt staat bij "Gevolgen".
+- `git ls-tree` controleert `web/src/lib/session-model.ts` en `web/src/lib/browser-storage.ts`.
+- A20 beschrijft het WP-20-gedrag nu correct (`undefined`).
+
+**9c (optioneel)** levert dezelfde uitkomst voor alle Tikkie-testgevallen van WP-21. De regex van WP-20 is hoofdlettergevoelig en eist minstens één teken na `tikkie.me/` (`\S+`). Daarnaast sluit `isTikkieUrl` een gebruikersnaam, een wachtwoord en een poort uit.
+
+**(c) Revisie 3 introduceert niets dat blokkeert.**
 
 ## Blokkerend
-B-1: De flow- en paginatests draaien met de echte klok, maar de fixtures liggen in het verleden. Daardoor falen de AC-3-tests zoals ze nu beschreven staan. Waar: Testplan, `rsvp-flow.test.ts` (1), (3), (5) en (6), plus `public-session-page.test.ts` en `public-session-page-integration.test.ts`. Waarom: dit probleem ontstaat door de revisie voor N-1.
-- `applyRefresh` zet `now = new Date()`.
-- De klok-`$effect` rekent met `Date.parse(ends_at) - Date.now()`.
-- Alleen test (j) zet de klok vast. In `rsvp-flow.test.ts` loopt de echte datum (vanaf 15-10-2026), terwijl de fixturesessie op 18-07-2026 eindigt.
-
-De gevolgen:
-- Na de eerste verversing is `closed` waar. In (1) staat er na de create dan geen `Wijzigen`. In (3), na het afmelden, en in (6), na `invalid_token`, komt het veld `Voornaam` niet terug, terwijl de test dat verwacht. Die tests falen dus altijd.
-- Daarnaast gaat de klok-timer bij elke render met een fixturesessie na 1 seconde echte tijd af (`Math.max(0, negatief) + 1000`). Daarna verdwijnen het formulier en `Wijzigen` midden in een test. Dat maakt vooral (2) en (5) (userEvent-reeksen) en de paginatests (a)–(h) wisselvallig.
-- Een builder moet dan zelf kiezen hoe hij dit oplost. De verleidelijkste verkeerde keuze is `now = new Date()` uit `applyRefresh` halen, en dan valt N-1 terug.
-
-Voorstel: zet in `beforeEach` van `rsvp-flow.test.ts`, `public-session-page.test.ts` en `public-session-page-integration.test.ts` deze twee regels:
-- `vi.useFakeTimers({ toFake: ['Date'] })`;
-- `vi.setSystemTime(new Date(NOW))`.
-
-Dit is hetzelfde patroon als WP-20. `afterEach` heeft `vi.useRealTimers()` al. Test (j) zet zijn eigen tijd en timers (eerst `vi.useRealTimers()`, of direct opnieuw `useFakeTimers` met zijn eigen `toFake`). Test (i) rekent al relatief aan `Date.now()`, dus die blijft werken. Met `Date` op NOW (09:00Z) ligt `ends_at` 7 uur verder. De timer gaat dan niet af binnen een test, en `applyRefresh` houdt de sessie open. Omdat `setTimeout` echt blijft, werken `userEvent` en `findBy*` ongewijzigd.
+Geen.
 
 ## Niet-blokkerend
-N-1: De WP-20-namen in A20, "Consistentie" (WP-20) en stap 9 kloppen niet met de WP-20-blueprint revisie 2. De bewering "Gecontroleerd in de WP-20-blueprint" is daarom onjuist. Wat WP-20 echt levert:
-- `SESSION_SLUG_RE`, `isValidSessionSlug(slug)` en `countCodePoints(s)` in `#lib/session-model.ts`, met precies dezelfde namen als in WP-21 (WP-20 r. 100, 191–199, A17);
-- `StorageLike` en `browserStorage(): StorageLike | undefined` in een eigen module `#lib/browser-storage.ts` (WP-20 r. 296–309). Dus niet `KeyValueStorage`, niet in `local-prefs.ts`, en de functie geeft `undefined` en niet `null`.
+N-1: De tabel "Ronde 1 (revisie 2)", rij N-9, zegt nog dat `browserStorage` "nu `null` geeft zoals in WP-20" en dat stap 9 `browserStorage` vervangt. Dat is historisch en staat al gemarkeerd met de "Let op"-zin boven die tabel. Toch kan een builder die alleen die rij leest, op het verkeerde been gezet worden. Overweeg om er "(achterhaald, zie A20)" achter te zetten.
 
-`formatWindowLocal(start: Date, end: Date)` in `time.ts` klopt wel. Stap 9 zoals het er nu staat:
-- importeert `SESSION_SLUG_PATTERN`, `isSessionSlug`, `codePointLength` en `KeyValueStorage`, en die bestaan niet. `npm run check` faalt dan. Volgens het R10-criterium draait de builder dat terug, en de dubbele helpers blijven staan. Dat is veilig, dus niet blokkerend, maar het mist het doel.
-- Correcter is in `session-view.ts`: `export { SESSION_SLUG_RE, isValidSessionSlug, countCodePoints } from './session-model.js';` en de eigen definities verwijderen.
-- Laat `browserStorage` in `rsvp-storage.ts` staan. WP-20 geeft `undefined`, en de bestaande WP-21-test eist `null`. Die test mag volgens het criterium niet veranderen. Noteer het als opruimpunt.
-- Laat de `git ls-tree`-controle `web/src/lib/browser-storage.ts` noemen in plaats van `local-prefs.ts`. Werk ook A20 bij: "`browserStorage()` geeft `null` en niet `undefined`" is het omgekeerde van WP-20.
-
-N-2: De WP-20-blueprint (Consistentie r. 674 en 678) beschrijft WP-21 nog als revisie 1: `safeHttpsLink`, en `sessionWindowText` voluit ("zaterdag 18 juli, 14:00–18:00"). Dat moet de orchestrator in WP-20 bijwerken; het is geen fout in WP-21. Optioneel voor stap 9: `tikkieLink` vervangen door `safeTikkieLink(url)?.href ?? null` uit `session-model.ts`. De regels verschillen alleen in `\S+` en de grens van 200 tekens. De DB-CHECK verbiedt witruimte en lengte boven 200 al, dus het zichtbare gedrag is gelijk.
-
-N-3: In `rsvp-flow.test.ts` (13) slaagt `rerender` met een nieuwe `data` alleen als de klok niet verder loopt (zie B-1). Met de klok op NOW is dat in orde. Ik noem het alleen zodat de builder (13) na de fix van B-1 niet als apart probleem ziet.
+N-2: Bij 9a staat de tekst "Gebruikt `session-view.ts` zelf ook `SESSION_SLUG_RE` of `isValidSessionSlug`, neem die dan ook in de lokale `import` op". Dat is correct, maar `npm run check` vangt dit toch al af. Geen actie nodig.
 
 ## Gecontroleerde bronnen
-- https://raw.githubusercontent.com/supabase/supabase-js/master/packages/core/postgrest-js/src/PostgrestTransformBuilder.ts: `abortSignal(signal: AbortSignal): this { this.signal = signal; return this }`. De docs noemen expliciet "You can use this to set a timeout for the request."
-- https://raw.githubusercontent.com/supabase/supabase-js/master/packages/core/postgrest-js/src/PostgrestBuilder.ts: bij `!this.shouldThrowOnError` doet `res.catch(fetchError => …)` de afhandeling, met `status: 0`, `data: null` en een `error` met `code` en `hint`. Een `AbortError` krijgt alleen een andere hint. `signal: this.signal` gaat mee naar `fetch`. De builder is thenable.
-- https://developer.mozilla.org/en-US/docs/Web/API/AbortSignal/timeout_static: "Baseline 2024" (newly available sinds april 2024). Het signaal breekt af met een `TimeoutError`-`DOMException`. E48 en de `typeof`-controle kloppen.
+- https://vitest.dev/api/vi.html: de opties `vi.useFakeTimers` en `toFake`, en `vi.setSystemTime`. De docs zeggen: "If fake timers are not enabled, this method will only mock `Date.*`". Het patroon `toFake: ['Date']` is hetzelfde als in WP-20 (Testplan, r. 753).
 - Lokaal gecontroleerd:
-  - `.claude/worktrees/WP-20/docs/wp/WP-20/blueprint.md` (revisie 2): tabel "Bestanden", `session-model.ts`, `browser-storage.ts`, `time.ts` (`formatWindowLocal`), Testplan (`session-tables`, `user-tables`, `browser-storage`, `time.test`) en R1;
-  - `supabase/migrations/20261015200000_sessions.sql`: regexen, `using message`-codes per functie, `>= 30`, `between 0 and 8`, `between 1 and 30` en `interval '7 days'`. Er zijn geen latere migraties, dus driftcheck (0) is nu groen;
-  - `web/src/lib/time.ts`: `formatLocal` `day`/`dateTime` geven `za 18 jul` en `za 18 jul 22:00`. De verwachtingen voor DST en middernacht in de `sessionWindowText`-tests kloppen. 18-07-2026 is een zaterdag en 25-10-2026 een zondag;
-  - `web/src/routes/+layout.ts` (`ssr = false`, `prerender = false`), `web/vite.config.ts` (fallback `index.html`) en `web/test/user-tables.test.ts`.
+  - `.claude/worktrees/WP-20/docs/wp/WP-20/blueprint.md` (revisie 2, APPROVED): r. 50–55, 100, 104, 185–208, 255–265, 296–313 en 753;
+  - `.claude/worktrees/WP-21/docs/wp/WP-21/blueprint.md` (revisie 3): A5, A20, Interfaces (`session-view.ts`, `rsvp-storage.ts`), "Consistentie" (WP-20), "Gevolgen", de Testplan-alinea "Vaste klok", de testcellen (j), (i), (13), stap 9 en "Verwerking review" ronde 2.

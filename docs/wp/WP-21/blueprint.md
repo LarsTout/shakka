@@ -1,5 +1,5 @@
 # Blueprint WP-21: Publieke sessiepagina en RSVP zonder account
-Status: DRAFT
+Status: APPROVED
 Revisie: 3
 
 ## Doel
