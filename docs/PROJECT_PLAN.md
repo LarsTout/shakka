@@ -28,7 +28,7 @@ Eigen weermodel, session tracking, open carpoolmarkt tussen vreemden, gear-markt
 | **Open-Meteo free tier** (niet-commercieel, max 10.000 calls/dag, 300.000/maand) | Forecasts worden server-side per spot opgehaald en gecachet. Clients roepen Open-Meteo nooit direct aan. Budgetbewaking in de ingest-job. |
 | **CC BY 4.0** (Open-Meteo, KNMI) | Bronvermelding zichtbaar in de app (footer en spotpagina). |
 | **Supabase free** (500 MB, pauzeert na 7 dagen inactiviteit) | Oude forecastdata wordt opgeruimd (bewaar max 48 uur historie). De uurlijkse job houdt het project actief. |
-| **MapTiler free** (5.000 map sessions/maand, niet-commercieel) | Kaart lazy laden. Lijstweergave als fallback. |
+| **MapTiler free** (met MapLibre: 100.000 API-requests/maand, alleen tiles tellen; niet-commercieel) | Kaart lazy laden. Lijstweergave als fallback. |
 | **Geen scraping** van Windguru, Windfinder, KiteGids, Hanglos of Marktplaats | Spotdata wordt handmatig samengesteld en door Lars geverifieerd. |
 | **Privacy** | Minimale persoonsgegevens: e-mail voor login, optioneel een voornaam bij RSVP. Geen locatietracking. |
 
