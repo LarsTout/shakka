@@ -24,7 +24,7 @@ from pipeline_fixtures import (
     seed_user,
     write_spots_yaml,
 )
-from push_fixtures import DOWN, KEYS, SUBJECT, FakeNotifier, seed_subs
+from push_fixtures import DOWN, KEYS, SUBJECT, FakeNotifier, seed_subs, sub_row
 from shakka.config import Settings
 from shakka.db import DatabaseError, iso_utc
 from shakka.pipeline import (
@@ -304,6 +304,7 @@ def step(report: RunReport, name: str) -> StepReport:
 def test_steps_contract_order():
     assert [n for n, _ in pipeline.STEPS] == [
         "spots_sync", "forecast", "marine", "tides", "evaluate", "alerts", "sessions_cleanup",
+        "usage_report",
     ]  # fmt: skip
     assert [n for n, _ in pipeline.STEPS] == list(pipeline.STEP_NAMES)
 
@@ -324,9 +325,12 @@ def test_all_steps_ok_records_run(tmp_path):
     assert db.writes[:first_insert] == [("update", "ingest_runs")]
     alerts = next(s for s in row["steps"] if s["name"] == "alerts")
     assert alerts["counts"]["events"] == 1 and alerts["counts"]["new"] == 1
+    cleanup = row["steps"][-2]
+    assert cleanup["name"] == "sessions_cleanup" and cleanup["status"] == "ok"
+    assert cleanup["counts"] == {"deleted": 0}
     last = row["steps"][-1]
-    assert last["name"] == "sessions_cleanup" and last["status"] == "ok"
-    assert last["counts"] == {"deleted": 0}
+    assert last["name"] == "usage_report" and last["status"] == "ok"
+    assert last["counts"]["due"] is False
 
 
 def test_sessions_cleanup_deletes_expired(tmp_path):
@@ -559,7 +563,7 @@ def test_spots_sync_failure_continues(tmp_path):
     report = run_real(tmp_path, db, settings=settings)
     sync = step(report, "spots_sync")
     assert sync.status == "failed" and sync.error_type == "SpotValidationError"
-    assert len(report.steps) == 7
+    assert len(report.steps) == 8
     assert all(s.status == "ok" for s in report.steps[1:])
     assert report.status == "partial" and report.exit_code == 0
 
@@ -655,6 +659,7 @@ def test_alert_counts_shape():
         "users", "events", "favorites", "ineligible", "disabled", "skipped", "write_errors",
         "deleted", "new", "improved", "worsened", "cancelled", "errors",
         "sent", "failed", "no_target", "deferred", "removed", "push_enabled", "push_failures",
+        "blocked_targets", "push_non_retryable",
     }  # fmt: skip
     assert "messages" not in counts
 
@@ -769,7 +774,7 @@ def test_hourly_with_notifiers(tmp_path):
 def test_hourly_push_failure_leaks_nothing(tmp_path, caplog, capsys, monkeypatch):
     from shakka.logsetup import configure_logging, secret_values
 
-    ep = "https://push.example.test/send/ENDPOINT-SECRET-123"
+    ep = "https://fcm.googleapis.com/fcm/send/ENDPOINT-SECRET-123"
 
     def failing(**kwargs):
         raise Exception(f"{ep} P256DH-SECRET-456 AUTH-SECRET-789 {KEYS.private_key}")
@@ -811,7 +816,7 @@ def test_hourly_push_failure_leaks_nothing(tmp_path, caplog, capsys, monkeypatch
             assert secret not in text
     alerts = step(report, "alerts")
     assert alerts.counts["push_failures"] == {"Exception": 1}
-    assert alerts.status == "partial" and alerts.counts["deferred"] == 1
+    assert alerts.status == "partial" and alerts.counts["push_non_retryable"] == 1
 
 
 def test_hourly_deferred_warning(tmp_path):
@@ -831,3 +836,103 @@ def test_hourly_deferred_warning(tmp_path):
     seed_subs(ok_db, USER_A, 1)
     ok_report = run_real(tmp_path, ok_db, notifiers={"webpush": FakeNotifier()})
     assert not any(a.startswith("::warning::alerts:") for a in ok_report.annotations)
+
+
+def test_non_retryable_push_is_partial_with_warning(tmp_path):
+    from shakka.notify.base import DeliveryResult
+
+    db = FakeSupabase()
+    seed_user(db)
+    (ep,) = seed_subs(db, USER_A, 1)
+    forbidden = DeliveryResult(False, False, "HTTP 403", retryable=False)
+    report = run_real(tmp_path, db, notifiers={"webpush": FakeNotifier({ep: forbidden})})
+    alerts = step(report, "alerts")
+    assert alerts.status == "partial"
+    assert alerts.counts["push_non_retryable"] == 1
+    assert alerts.counts["push_failures"] == {"HTTP 403": 1}
+    assert alerts.counts["deferred"] == 0
+    assert (
+        "::warning::alerts: 1 push delivery(ies) failed without retry; the alert is lost for "
+        "that device (see push_failures in ingest_runs)"
+    ) in report.annotations
+    assert report.exit_code == 0
+
+
+def test_blocked_target_warning(tmp_path):
+    db = FakeSupabase()
+    seed_user(db)
+    db.seed(
+        "push_subscriptions",
+        [{**sub_row(USER_A, 1), "endpoint": "https://evil.example.test/x"}],
+    )
+    report = run_real(tmp_path, db, notifiers={"webpush": FakeNotifier()})
+    alerts = step(report, "alerts")
+    assert alerts.counts["blocked_targets"] == 1
+    assert (
+        "::warning::alerts: 1 push subscription(s) skipped: push service host not allowed"
+    ) in report.annotations
+
+
+def test_per_spot_staleness_with_two_spots(tmp_path):
+    other = {**PIPELINE_SPOT, "id": "oud-strand", "name": "Oud strand"}
+    db = FakeSupabase()
+    seed_user(db)
+    old = NOW - timedelta(hours=4)
+    db.seed(
+        "forecast_hours",
+        [
+            {
+                "spot_id": "oud-strand",
+                "model": "knmi",
+                "valid_at": NOW.replace(minute=0, second=0, microsecond=0) + timedelta(hours=2),
+                "wind_kn": 15.0,
+                "gust_kn": 18.0,
+                "dir_deg": 270,
+                "fetched_at": old,
+            }
+        ],
+    )
+
+    def only_first(http, locations, **kw):
+        return fake_forecast_fetch(http, [loc for loc in locations if loc.spot_id == "test-strand"])
+
+    report = run_real(tmp_path, db, spots=(PIPELINE_SPOT, other), forecast_fetch=only_first)
+    spots = {r["spot_id"] for r in db.rows("evaluations")}
+    assert spots == {"test-strand"}
+    assert step(report, "evaluate").status in ("ok", "partial")
+    assert step(report, "alerts").status in ("ok", "partial")
+
+
+def test_run_time_budget_skips_remaining_steps(monkeypatch):
+    clock = [0.0]
+    monkeypatch.setattr(pipeline, "_monotonic", lambda: clock[0])
+
+    def evaluate(ctx):
+        return pipeline.StepOutcome("ok", {})
+
+    def slow(ctx):
+        clock[0] += 601.0
+        return pipeline.StepOutcome("ok", {})
+
+    def never(ctx):
+        raise AssertionError("must be skipped")
+
+    db = FakeSupabase()
+    steps = [
+        ("evaluate", evaluate),
+        ("slow", slow),
+        ("alerts", never),
+        ("sessions_cleanup", never),
+        ("usage_report", never),
+    ]
+    report = run_hourly(SETTINGS, now=NOW, db=db, http=blocked_http(), steps=steps)
+    by_name = {s.name: s for s in report.steps}
+    assert by_name["slow"].status == "ok"
+    for name in ("alerts", "sessions_cleanup", "usage_report"):
+        assert by_name[name].status == "skipped"
+        assert by_name[name].reason == "run_time_budget"
+    assert report.status == "partial"
+    assert report.exit_code == 1
+    errors = [a for a in report.annotations if a.startswith("::error::")]
+    assert len(errors) == 3
+    assert "step alerts skipped: run time budget of 600 s reached" in errors[0]

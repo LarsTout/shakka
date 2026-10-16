@@ -43,14 +43,15 @@ const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 /** Sends a magic link. emailRedirectTo is window.location.origin. Never throws.
  *  Returns {} on success or { error } with one of AUTH_MESSAGES.
- *  shouldCreateUser is false until WP-22: unknown addresses must not get a row in auth.users. */
+ *  New addresses get an account (WP-22). Whether sign-up is open is a server setting
+ *  ("Allow new users to sign up"); when it is off, GoTrue answers signup_disabled. */
 export async function signInWithMagicLink(email: string): Promise<{ error?: string }> {
 	const address = email.trim();
 	if (!EMAIL_PATTERN.test(address)) return { error: AUTH_MESSAGES.invalidEmail };
 	try {
 		const { error } = await supabase.auth.signInWithOtp({
 			email: address,
-			options: { emailRedirectTo: window.location.origin, shouldCreateUser: false }
+			options: { emailRedirectTo: window.location.origin, shouldCreateUser: true }
 		});
 		return error ? { error: authErrorMessage(error) } : {};
 	} catch {
@@ -86,8 +87,12 @@ export function authErrorMessage(error: unknown): string {
 	) {
 		return AUTH_MESSAGES.rateLimited;
 	}
-	// otp_disabled: sign-up is closed (shouldCreateUser false) and the address is unknown.
-	if (code === 'email_address_not_authorized' || code === 'otp_disabled') {
+	// signup_disabled / otp_disabled: sign-up is closed on the server and the address is unknown.
+	if (
+		code === 'email_address_not_authorized' ||
+		code === 'otp_disabled' ||
+		code === 'signup_disabled'
+	) {
 		return AUTH_MESSAGES.notAuthorized;
 	}
 	if (code === 'email_address_invalid' || code === 'validation_failed') {

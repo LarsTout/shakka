@@ -65,3 +65,12 @@ def test_security_definer_functions_pin_search_path():
             definers += 1
             assert "set search_path = ''" in header, header[:80]
     assert definers >= 5
+
+
+def test_db_usage_counts_every_table():
+    sql = (REPO_ROOT / "supabase" / "migrations" / "20261015220100_hardening.sql").read_text(
+        encoding="utf-8"
+    )
+    pairs = re.findall(r"'(\w+)', \(select count\(\*\) from public\.(\w+)\)", sql)
+    assert pairs and all(name == table for name, table in pairs)
+    assert {name for name, _ in pairs} == set(TABLE_KEYS)

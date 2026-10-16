@@ -9,7 +9,7 @@ favorite spots only, and a favorite is a user preference.
 
 import logging
 from collections.abc import Collection
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from typing import Final
 
@@ -24,6 +24,7 @@ FORECAST_LOOKBACK: Final = timedelta(hours=1)
 FORECAST_HORIZON: Final = timedelta(days=8)
 TIDE_MARGIN: Final = timedelta(hours=12)
 STALE_FETCH_AGE: Final = timedelta(hours=3)
+MAX_FETCH_AGE: Final = timedelta(hours=3)  # absolute: rows older than this are dropped (WP-22)
 FORECAST_COLUMNS: Final = "spot_id,model,valid_at,wind_kn,gust_kn,dir_deg,fetched_at"
 TIDE_COLUMNS: Final = "station,at,kind,level_cm"
 MAX_ERROR_TEXT: Final = 200
@@ -42,6 +43,7 @@ class InputsLoad:
     invalid: list[str]  # spot ids skipped because of a ValueError, sorted
     without_coords: list[str]  # sorted
     errors: list[str]  # "spot <id>: <ExcType>: <short message>"
+    stale: list[str] = field(default_factory=list)  # spots whose rows were all too old, sorted
 
 
 def require_aware(now: datetime) -> None:
@@ -76,9 +78,17 @@ def _parse_ts(value: str) -> datetime:
 
 
 def load_inputs_checked(
-    db: SupabaseRest, *, now: datetime, spot_ids: Collection[str] | None = None
+    db: SupabaseRest,
+    *,
+    now: datetime,
+    spot_ids: Collection[str] | None = None,
+    max_fetch_age: timedelta | None = None,
 ) -> InputsLoad:
-    """Load inputs per spot with coordinates. DatabaseError goes to the caller."""
+    """Load inputs per spot with coordinates. DatabaseError goes to the caller.
+
+    With `max_fetch_age`, rows fetched before `now - max_fetch_age` are dropped first (exactly
+    on the boundary a row stays); the relative stale rule applies to what is left. A spot that
+    had rows but none left is listed in `stale` and loaded with `forecasts == []`."""
     require_aware(now)
     if spot_ids is not None and not spot_ids:
         return InputsLoad({}, [], [], [])
@@ -92,6 +102,7 @@ def load_inputs_checked(
     invalid: list[str] = []
     without_coords: list[str] = []
     errors: list[str] = []
+    stale: list[str] = []
 
     for row in rows:
         if row.get("lat") is None or row.get("lon") is None:
@@ -108,6 +119,12 @@ def load_inputs_checked(
                 },
             )
             forecasts: list[ForecastHour] = []
+            if fc_rows and max_fetch_age is not None:
+                oldest_allowed = now - max_fetch_age
+                fresh = [r for r in fc_rows if _parse_ts(r["fetched_at"]) >= oldest_allowed]
+                if not fresh:
+                    stale.append(spot.id)
+                fc_rows = fresh
             if fc_rows:
                 newest = max(_parse_ts(r["fetched_at"]) for r in fc_rows)
                 kept = [
@@ -149,16 +166,21 @@ def load_inputs_checked(
 
     invalid.sort()
     without_coords.sort()
-    args = (len(rows), len(inputs), len(invalid), len(without_coords))
-    text = "inputs: spots=%d loaded=%d invalid=%d without_coords=%d"
+    stale.sort()
+    args = (len(rows), len(inputs), len(invalid), len(without_coords), len(stale))
+    text = "inputs: spots=%d loaded=%d invalid=%d without_coords=%d stale=%d"
     if invalid:
         logger.warning(text, *args)
     else:
         logger.info(text, *args)
-    return InputsLoad(inputs, invalid, without_coords, errors)
+    return InputsLoad(inputs, invalid, without_coords, errors, stale)
 
 
 def load_inputs(
-    db: SupabaseRest, *, now: datetime, spot_ids: Collection[str] | None = None
+    db: SupabaseRest,
+    *,
+    now: datetime,
+    spot_ids: Collection[str] | None = None,
+    max_fetch_age: timedelta | None = None,
 ) -> dict[str, SpotInputs]:
-    return load_inputs_checked(db, now=now, spot_ids=spot_ids).inputs
+    return load_inputs_checked(db, now=now, spot_ids=spot_ids, max_fetch_age=max_fetch_age).inputs

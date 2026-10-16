@@ -33,6 +33,7 @@ from shakka.db import (
     validate_table,
 )
 from shakka.jobs.sessions import PURGE_RPC, SESSION_RETENTION
+from shakka.jobs.usage import DB_USAGE_RPC
 
 _TIMESTAMP = re.compile(r"\d{4}-\d{2}-\d{2}T")
 _UPDATED_AT_TABLES = frozenset({"spots", "profiles", "alert_rules", "alert_state"})
@@ -105,6 +106,7 @@ class FakeSupabase:
         self.upserts: list[tuple[str, str]] = []
         self.rpc_calls: list[tuple[str, dict[str, Any]]] = []
         self._rpcs: dict[str, Callable[[dict[str, Any]], Any]] = {}
+        self.database_bytes = 50 * 1024 * 1024  # what the built-in db_usage reports
 
     # -- helpers for tests -------------------------------------------------------------------
 
@@ -375,7 +377,14 @@ class FakeSupabase:
         return handler(payload)
 
     def _builtin_rpcs(self) -> dict[str, Callable[[dict[str, Any]], Any]]:
-        return {PURGE_RPC: self._purge_expired_sessions}
+        return {PURGE_RPC: self._purge_expired_sessions, DB_USAGE_RPC: self._db_usage}
+
+    def _db_usage(self, args: dict[str, Any]) -> dict[str, Any]:
+        """Same shape as the SQL function: database size and an exact row count per table."""
+        return {
+            "database_bytes": self.database_bytes,
+            "tables": {table: len(rows) for table, rows in self._tables.items()},
+        }
 
     def _purge_expired_sessions(self, args: dict[str, Any]) -> int:
         """Same rule as the SQL function: ends_at < p_now - 7 days, RSVPs go with the session."""

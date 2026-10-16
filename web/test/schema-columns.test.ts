@@ -17,6 +17,9 @@ const MIGRATIONS = new URL('../../supabase/migrations/', import.meta.url);
 const m1 = readFileSync(new URL('20261015090000_m1_schema.sql', MIGRATIONS), 'utf8');
 const m1Security = readFileSync(new URL('20261015090100_m1_security.sql', MIGRATIONS), 'utf8');
 
+// WP-22 drops the unused legacy profiles column; that migration is the one allowed exception.
+const DROP_LEGACY_MIGRATION = '20261015220000_drop_profiles_telegram_chat_id.sql';
+
 function columns(table: string): string[] {
 	const lines = m1.split('\n');
 	const start = lines.findIndex((l) => l.startsWith(`create table public.${table} (`));
@@ -73,9 +76,17 @@ describe('schema columns (A1)', () => {
 	it('no later migration alters the app tables (update types.ts and this test)', () => {
 		const re =
 			/alter\s+table\s+(only\s+)?public\.(spots|evaluations|tide_extremes|profiles|favorites|alert_rules)\b[^;]*\b(add|drop|rename)\s+column\b/i;
-		for (const f of readdirSync(MIGRATIONS).filter((n) => n.endsWith('.sql'))) {
+		for (const f of readdirSync(MIGRATIONS).filter(
+			(n) => n.endsWith('.sql') && n !== DROP_LEGACY_MIGRATION
+		)) {
 			const sql = readFileSync(new URL(f, MIGRATIONS), 'utf8');
 			expect(re.test(sql), `${f}: update types.ts and this test`).toBe(false);
 		}
+	});
+
+	it('the WP-22 migration drops exactly the legacy profiles column', () => {
+		const sql = readFileSync(new URL(DROP_LEGACY_MIGRATION, MIGRATIONS), 'utf8');
+		const legacy = ['telegram', 'chat_id'].join('_');
+		expect(sql).toContain('drop column if exists ' + legacy);
 	});
 });

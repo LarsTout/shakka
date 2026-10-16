@@ -2,7 +2,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(55);
+select plan(54);
 
 select table_privs_are('public'::name, 'spots'::name, 'anon'::name, array['SELECT']::name[], 'anon privileges on spots');
 select table_privs_are('public'::name, 'spots'::name, 'authenticated'::name, array['SELECT']::name[], 'authenticated privileges on spots');
@@ -49,7 +49,6 @@ select column_privs_are('public'::name, 'profiles'::name, 'level'::name, 'authen
 select column_privs_are('public'::name, 'profiles'::name, 'quiver_m2'::name, 'authenticated'::name, array['SELECT', 'UPDATE']::name[], 'authenticated may select and update profiles.quiver_m2');
 select column_privs_are('public'::name, 'profiles'::name, 'default_min_kn'::name, 'authenticated'::name, array['SELECT', 'UPDATE']::name[], 'authenticated may select and update profiles.default_min_kn');
 select column_privs_are('public'::name, 'profiles'::name, 'default_max_kn'::name, 'authenticated'::name, array['SELECT', 'UPDATE']::name[], 'authenticated may select and update profiles.default_max_kn');
-select column_privs_are('public'::name, 'profiles'::name, 'telegram_chat_id'::name, 'authenticated'::name, array['SELECT']::name[], 'authenticated may only select profiles.telegram_chat_id');
 select column_privs_are('public'::name, 'profiles'::name, 'user_id'::name, 'authenticated'::name, array['SELECT']::name[], 'authenticated may only select profiles.user_id');
 select column_privs_are('public'::name, 'profiles'::name, 'created_at'::name, 'authenticated'::name, array['SELECT']::name[], 'authenticated may only select profiles.created_at');
 select column_privs_are('public'::name, 'profiles'::name, 'updated_at'::name, 'authenticated'::name, array['SELECT']::name[], 'authenticated may only select profiles.updated_at');

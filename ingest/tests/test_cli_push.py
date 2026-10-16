@@ -76,7 +76,7 @@ def test_alerts_run_push_enabled(setup, monkeypatch):
     patch_webpush(monkeypatch, rec)
     code, lines, output = run("alerts", "run")
     assert code == 0
-    assert "push: sent=1 failed=0 no_target=0 deferred=0 removed=0" in lines
+    assert "push: sent=1 failed=0 no_target=0 deferred=0 non_retryable=0 removed=0" in lines
     assert len(rec.calls) == 1
     assert eps[0] not in output
     assert USER_A not in output
@@ -92,7 +92,7 @@ def test_alerts_run_deferred_exit_1(setup, monkeypatch):
     )
     code, lines, _ = run("alerts", "run")
     assert code == 1
-    assert "push: sent=0 failed=1 no_target=0 deferred=1 removed=0" in lines
+    assert "push: sent=0 failed=1 no_target=0 deferred=1 non_retryable=0 removed=0" in lines
     assert lines[-1] == "alerts: failed"
     assert db.rows("alert_state") == []
 
@@ -193,3 +193,18 @@ def test_help_lists_push_commands():
     assert code == 0
     for name in ("run", "test-push", "vapid-keys"):
         assert name in output
+
+
+def test_alerts_run_non_retryable_exit_1(setup, monkeypatch):
+    vapid_env(monkeypatch)
+    db, _ = push_db()
+    setup(db)
+    patch_webpush(
+        monkeypatch,
+        RecordingWebpush(raises=WebPushException("x", response=FakeResponse(403))),
+    )
+    code, lines, _ = run("alerts", "run")
+    assert code == 1
+    assert "push: sent=0 failed=1 no_target=0 deferred=0 non_retryable=1 removed=0" in lines
+    assert lines[-1] == "alerts: failed"
+    assert len(db.rows("alert_state")) >= 1  # state stored, the event is lost for the device

@@ -54,7 +54,7 @@ describe('login page', () => {
 		await userEvent.click(screen.getByRole('button', { name: 'Stuur inloglink' }));
 		expect(auth.signInWithOtp).toHaveBeenCalledWith({
 			email: 'lars@example.com',
-			options: { emailRedirectTo: window.location.origin, shouldCreateUser: false }
+			options: { emailRedirectTo: window.location.origin, shouldCreateUser: true }
 		});
 		expect(await screen.findByText('Check je mail')).toBeInTheDocument();
 		expect(screen.getByText(/lars@example\.com/)).toHaveTextContent('Open de link op dit apparaat');

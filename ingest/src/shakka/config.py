@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     vapid_public_key: str | None = None
     vapid_private_key: SecretStr | None = None
     vapid_subject: str | None = None
+    operator_user_id: str | None = None  # Supabase user id of the operator; not validated here
     spots_path: Path = DEFAULT_SPOTS_PATH
 
     @field_validator("supabase_url")

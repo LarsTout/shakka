@@ -126,7 +126,7 @@ Aantallen: M1 11 (plus het vervallen WP-09), M2 7, M3 3, M4 2. Totaal 23 actieve
 | `SUPABASE_SECRET_KEY` | `.env`, GitHub Secret | ingest | WP-00 |
 | `APP_BASE_URL` | `.env`, GitHub Actions variable | ingest: "ik ga"-links in berichten | WP-14 |
 | `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT` | `.env`, GitHub Secrets | ingest | WP-17 |
-| `OPERATOR_USER_ID` (voorstel, de planner van WP-22 bevestigt) | `.env`, GitHub Secret | ingest: push-abonnementen van Lars vinden voor het gebruiksrapport | WP-22 |
+| `OPERATOR_USER_ID` (bevestigd in WP-22) | `.env`, GitHub Secret | ingest: push-abonnementen van Lars vinden voor het gebruiksrapport | WP-22 |
 | `HOURLY_ENABLED` | GitHub Actions-variable (geen secret) | ingest: de geplande run draait alleen als deze op `true` staat; Lars zet hem aan na de eerste promotie van `develop` naar `main` | WP-11 |
 | `PUBLIC_SUPABASE_URL`, `PUBLIC_SUPABASE_PUBLISHABLE_KEY` | `web/.env`, Cloudflare Pages | web | WP-13 |
 | `PUBLIC_MAPTILER_KEY` | `web/.env`, Cloudflare Pages | web | WP-15 |

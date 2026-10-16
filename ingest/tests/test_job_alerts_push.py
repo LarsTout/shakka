@@ -31,6 +31,7 @@ from push_fixtures import (
 )
 from shakka.db import DatabaseError
 from shakka.jobs.alerts import run_alerts
+from shakka.notify.base import DeliveryResult
 from shakka.notify.webpush import WebPushNotifier
 from test_job_alerts import make_db
 
@@ -330,4 +331,55 @@ def test_no_endpoints_keys_or_user_ids_in_logs(caplog, capsys):
     for text in haystacks:
         for secret in secrets:
             assert secret not in text
-    assert result.deferred == 1
+    assert result.deferred == 0 and result.push_non_retryable == 1
+
+
+def test_non_retryable_4xx_is_stored():
+    db, eps, _ = setup()
+    n = FakeNotifier({eps[0]: DeliveryResult(False, False, "HTTP 403", retryable=False)})
+    result = run(db, n)
+    assert (result.sent, result.failed, result.deferred) == (0, 1, 0)
+    assert result.push_non_retryable == 1
+    assert len(alert_rows(db)) == 1  # the state is stored, no retry
+    assert len(db.rows("push_subscriptions")) == 1  # the subscription stays
+
+
+def test_blocked_host_is_no_target():
+    db, _, n = setup(subs=0)
+    db.seed(
+        "push_subscriptions",
+        [
+            {
+                "user_id": USER_A,
+                "endpoint": "https://evil.example.test/x",
+                "p256dh": "P",
+                "auth": "A",
+            }
+        ],
+    )
+    result = run(db, n)
+    assert result.blocked_targets == 1
+    assert result.no_target == 1
+    assert n.calls == []
+    assert len(alert_rows(db)) == 1
+
+
+def test_deliver_plan_passes_non_retryable_when_deferred():
+    from shakka.jobs.alerts import assign_new_ids, deliver_plan, load_alert_context, plan_favorite
+    from shakka.notify.base import PushTarget
+
+    db, eps, _ = setup(subs=2)
+    ctx = load_alert_context(db, now=NOW)
+    fav = ctx.favorites[0]
+    plan = assign_new_ids(plan_favorite(fav, ctx.inputs.get(fav.spot_id), now=NOW, base_url=None))
+    targets = [PushTarget(f"s{i}", ep, "P", "A") for i, ep in enumerate(eps, start=1)]
+    two = targets + [PushTarget("s9", endpoint(USER_A, 9), "P", "A")]
+    n = FakeNotifier(
+        {
+            two[0].endpoint: DeliveryResult(False, False, "HTTP 403", retryable=False),
+            two[2].endpoint: DOWN,
+        }
+    )
+    d = deliver_plan(plan, n, [two[0], two[2]], now=NOW)
+    assert d.deferred is True
+    assert d.non_retryable == 1

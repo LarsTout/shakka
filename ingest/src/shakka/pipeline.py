@@ -1,6 +1,8 @@
 """Hourly orchestration: run all steps in a fixed order and record the run.
 
-Steps: spots_sync, forecast, marine, tides, evaluate, alerts, sessions_cleanup (retention).
+Steps: spots_sync, forecast, marine, tides, evaluate, alerts, sessions_cleanup (retention),
+usage_report (weekly usage push and threshold warnings for the operator).
+Before each step the run time budget is checked (RUN_TIME_BUDGET_S).
 
 Every run is a row in `ingest_runs`. A step that raises never stops the others. Stdout and
 logs carry counts and statuses only (the Actions logs are public); error texts and lists
@@ -34,8 +36,9 @@ from shakka.jobs.inputs import db_error_summary, require_aware, short_error
 from shakka.jobs.marine import FetchMarine, run_marine_ingest
 from shakka.jobs.sessions import purge_expired_sessions
 from shakka.jobs.tides import TideFetcher, run_tide_ingest
+from shakka.jobs.usage import UsageReportResult, run_usage_report, usage_stats_json
 from shakka.logsetup import configure_logging, github_annotation, redact, secret_values
-from shakka.notify.base import Notifier
+from shakka.notify.base import WEBPUSH_CHANNEL, Notifier
 from shakka.notify.webpush import notifiers_from_settings
 from shakka.spots.loader import load_spots
 from shakka.spots.sync import sync_spots
@@ -56,6 +59,10 @@ MAX_ANNOTATIONS: Final = 10
 # Read from the module at every step_tides call (never as a default argument), so a test can
 # monkeypatch it.
 TIDE_STEP_BUDGET_S: Final = 240.0
+# Budget for the whole run, checked before each step (read from the module at run time). The
+# job timeout is 900 s; this way a slow run is recorded instead of killed halfway.
+RUN_TIME_BUDGET_S: Final = 600.0
+RUN_TIME_BUDGET: Final = "run_time_budget"
 PUSH_DISABLED_WARNING: Final = (
     "push disabled: VAPID secrets not set; alerts are stored but not delivered"
 )
@@ -68,6 +75,7 @@ STEP_NAMES: Final = (
     "evaluate",
     "alerts",
     "sessions_cleanup",
+    "usage_report",
 )
 
 _monotonic: Callable[[], float] = time.monotonic  # looked up at call time; tests monkeypatch it
@@ -246,6 +254,8 @@ def alert_counts(result: AlertJobResult) -> dict[str, Any]:
         "failed": result.failed,
         "no_target": result.no_target,
         "deferred": result.deferred,
+        "blocked_targets": result.blocked_targets,
+        "push_non_retryable": result.push_non_retryable,
         "removed": result.removed,
         "push_enabled": result.push_enabled,
         "push_failures": dict(result.push_failures),
@@ -258,6 +268,13 @@ def deferred_warning(deferred: int) -> str:
     return (
         f"{deferred} favorite(s) deferred: no push delivery succeeded; "
         "retried next run (see push_failures in ingest_runs)"
+    )
+
+
+def non_retryable_warning(count: int) -> str:
+    return (
+        f"{count} push delivery(ies) failed without retry; the alert is lost for that "
+        "device (see push_failures in ingest_runs)"
     )
 
 
@@ -283,7 +300,15 @@ def step_alerts(ctx: PipelineContext) -> StepOutcome:
     )
     if result.deferred:
         warnings.append(deferred_warning(result.deferred))
-    partial = bool(result.skipped or result.write_errors or result.deferred)
+    if result.push_non_retryable:
+        warnings.append(non_retryable_warning(result.push_non_retryable))
+    if result.blocked_targets:
+        warnings.append(
+            f"{result.blocked_targets} push subscription(s) skipped: push service host not allowed"
+        )
+    partial = bool(
+        result.skipped or result.write_errors or result.deferred or result.push_non_retryable
+    )
     return StepOutcome(
         "partial" if partial else "ok", alert_counts(result), warnings=tuple(warnings)
     )
@@ -294,6 +319,51 @@ def step_sessions_cleanup(ctx: PipelineContext) -> StepOutcome:
     return StepOutcome("ok", {"deleted": deleted})
 
 
+def usage_counts(result: UsageReportResult) -> dict[str, Any]:
+    """Counts of the usage step. `report` holds the full text (ingest_runs only, no secrets)."""
+    stats = result.stats
+    delivery = result.delivery
+
+    def rounded(value: float | None) -> float | None:
+        return None if value is None else round(value, 2)
+
+    return {
+        "due": result.report_due,
+        "report_done": result.report_done,
+        "warning_notified": result.warning_notified,
+        "database_bytes": stats.database_bytes,
+        "open_meteo_today": rounded(stats.open_meteo_today),
+        "open_meteo_month": rounded(stats.open_meteo_month),
+        "warnings": list(result.warnings),
+        "delivery": None if delivery is None else delivery.status,
+        "sent": 0 if delivery is None else delivery.sent,
+        "failed": 0 if delivery is None else delivery.failed,
+        "removed": 0 if delivery is None else delivery.removed,
+        "push_failures": {} if delivery is None else dict(delivery.push_failures),
+        "runs_deleted": result.runs_deleted,
+        "report": result.report,
+        "stats": usage_stats_json(stats) if result.report_due else None,
+        "errors": list(result.errors),
+    }
+
+
+def step_usage_report(ctx: PipelineContext) -> StepOutcome:
+    def notifier_factory() -> Notifier | None:
+        notifiers = (
+            ctx.notifiers if ctx.notifiers is not None else notifiers_from_settings(ctx.settings)
+        )
+        return notifiers.get(WEBPUSH_CHANNEL)
+
+    result = run_usage_report(
+        ctx.db,
+        now=ctx.now,
+        operator_user_id=ctx.settings.operator_user_id,
+        notifier_factory=notifier_factory,
+    )
+    warnings = tuple(f"usage threshold: {w}" for w in result.warnings) + result.notes
+    return StepOutcome(result.status, usage_counts(result), warnings)
+
+
 STEPS: Final[tuple[Step, ...]] = (
     ("spots_sync", step_spots_sync),
     ("forecast", step_forecast),
@@ -302,6 +372,7 @@ STEPS: Final[tuple[Step, ...]] = (
     ("evaluate", step_evaluate),
     ("alerts", step_alerts),
     ("sessions_cleanup", step_sessions_cleanup),
+    ("usage_report", step_usage_report),
 )
 
 
@@ -348,7 +419,8 @@ def exit_code_for(status: RunStatus, reports: Sequence[StepReport]) -> int:
     stale = any(
         r.name == "alerts" and r.status == "skipped" and r.reason == STALE_FORECAST for r in reports
     )
-    return 1 if stale else 0
+    over_budget = any(r.status == "skipped" and r.reason == RUN_TIME_BUDGET for r in reports)
+    return 1 if stale or over_budget else 0
 
 
 def error_summary(reports: Sequence[StepReport]) -> str | None:
@@ -381,6 +453,13 @@ def build_annotations(reports: Sequence[StepReport], *, run_id: int | None) -> t
                     "error",
                     "alerts skipped (stale_forecast): the newest forecast is older than "
                     "3 hours; no alerts this run",
+                )
+            )
+        elif r.status == "skipped" and r.reason == RUN_TIME_BUDGET:
+            lines.append(
+                github_annotation(
+                    "error",
+                    f"step {r.name} skipped: run time budget of {RUN_TIME_BUDGET_S:.0f} s reached",
                 )
             )
         for warning in r.warnings:
@@ -511,7 +590,10 @@ def _run(
     progress_warned = False
     started = _monotonic()
     for name, fn in steps:
-        report = run_step(name, fn, ctx)
+        if _monotonic() - started >= RUN_TIME_BUDGET_S:
+            report = StepReport(name, "skipped", 0, {}, reason=RUN_TIME_BUDGET)
+        else:
+            report = run_step(name, fn, ctx)
         ctx.reports.append(report)
         logger.log(_LEVELS.get(report.status, logging.ERROR), _step_log_line(report))
         try:

@@ -22,6 +22,7 @@ def test_defaults(monkeypatch):
     assert s.vapid_public_key is None
     assert s.vapid_private_key is None
     assert s.vapid_subject is None
+    assert s.operator_user_id is None
     assert s.spots_path == REPO_ROOT / "data" / "spots.yaml"
     assert s.spots_path == DEFAULT_SPOTS_PATH
 
@@ -110,3 +111,9 @@ def test_old_telegram_env_is_ignored(monkeypatch, tmp_path):
     s = get_settings()
     assert s.supabase_url == "https://aaaa.supabase.co"
     assert not hasattr(s, "telegram_bot_token")
+
+
+def test_operator_user_id_read_from_env(monkeypatch):
+    _required(monkeypatch)
+    monkeypatch.setenv("OPERATOR_USER_ID", "not validated here")
+    assert get_settings().operator_user_id == "not validated here"

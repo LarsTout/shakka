@@ -29,11 +29,12 @@ from shakka.jobs.push import (
     EventDelivery,
     deliver_event,
     load_all_targets,
+    load_all_targets_checked,
     load_targets,
     send_test_push,
     update_subscriptions,
 )
-from shakka.notify.base import PushTarget
+from shakka.notify.base import DeliveryResult, PushTarget
 from shakka.notify.webpush import WebPushNotifier
 
 MESSAGE = AlertMessage(spot_id="s", kind=AlertEventKind.NEW, title="Go: S", body="b", go_url=None)
@@ -107,7 +108,7 @@ def test_deliver_event_notifier_raises(caplog):
     warnings = [r for r in caplog.records if r.levelno == logging.WARNING]
     assert len(warnings) == 1
     assert "RuntimeError" in caplog.text
-    assert "push.example.test" not in caplog.text
+    assert "fcm.googleapis.com" not in caplog.text
 
 
 def test_update_subscriptions():
@@ -186,3 +187,31 @@ def test_send_test_push():
     assert ids[eps[2]] not in rows
     assert rows[ids[eps[0]]]["last_success_at"] is not None
     assert rows[ids[eps[1]]].get("last_success_at") is None
+
+
+def test_load_all_targets_checked_blocks_and_does_not_log_endpoint(caplog):
+    caplog.set_level(logging.DEBUG)
+    db = FakeSupabase()
+    seed_subs(db, USER_A, 1)
+    db.seed(
+        "push_subscriptions",
+        [{**sub_row(USER_A, 2), "endpoint": "https://evil.example.test/SECRET"}],
+    )
+    loaded = load_all_targets_checked(db)
+    assert loaded.blocked == 1
+    assert [len(v) for v in loaded.targets.values()] == [1]
+    assert "evil.example.test" not in caplog.text and "SECRET" not in caplog.text
+    assert "1 subscription(s) skipped" in caplog.text
+    assert [t.endpoint for t in load_targets(db, USER_A)] == [endpoint(USER_A, 1)]
+
+
+NO_RETRY = DeliveryResult(False, False, "HTTP 403", retryable=False)
+
+
+def test_deliver_event_non_retryable_counts():
+    d = deliver_event(notifier([NO_RETRY]), targets(1), MESSAGE, tag="t")
+    assert d.retryable is False and d.non_retryable == 1
+    d = deliver_event(notifier([DOWN]), targets(1), MESSAGE, tag="t")
+    assert d.retryable is True and d.non_retryable == 0
+    d = deliver_event(notifier([NO_RETRY, DOWN]), targets(2), MESSAGE, tag="t")
+    assert d.retryable is True and d.non_retryable == 1

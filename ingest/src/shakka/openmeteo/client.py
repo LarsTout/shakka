@@ -7,6 +7,8 @@ from typing import Any, Final
 
 import httpx
 
+from shakka.http import TransientError, with_retries
+
 RETRY_ATTEMPTS: Final = 3
 RETRY_BASE_DELAY_S: Final = 1.0  # delay before attempt n (n >= 2): base * 2 ** (n - 2)
 RETRY_MAX_DELAY_S: Final = 30.0  # cap for Retry-After
@@ -50,36 +52,43 @@ def request_json(
     """GET url with params and return the parsed JSON.
     Retries on 429, 5xx and httpx.HTTPError; other statuses and invalid JSON fail at once.
     Raises OpenMeteoRequestError. Messages never contain the URL."""
-    failure = "no attempt made"
-    for attempt in range(1, attempts + 1):
-        delay = base_delay * 2 ** (attempt - 1)
+
+    def attempt() -> Any:
         try:
             response = http.get(url, params=dict(params))
         except httpx.HTTPError as exc:
-            failure = type(exc).__name__
-        else:
-            status = response.status_code
-            if 200 <= status < 300:
-                try:
-                    return response.json()
-                except ValueError:
-                    raise OpenMeteoRequestError("invalid JSON response", status=status) from None
-            if status != 429 and status < 500:
-                reason = _reason(response)
-                message = f"HTTP {status}: {reason}" if reason else f"HTTP {status}"
-                raise OpenMeteoRequestError(message, status=status)
-            failure = f"HTTP {status}"
-            if status == 429:
-                retry_after = _retry_after(response)
-                if retry_after is not None:
-                    delay = retry_after
-        if attempt < attempts:
-            logger.warning(
-                "open-meteo request attempt %d/%d failed: %s; retrying in %.1fs",
-                attempt,
-                attempts,
-                failure,
-                delay,
-            )
-            sleep(delay)
-    raise OpenMeteoRequestError(f"failed after {attempts} attempts: {failure}")
+            raise TransientError(type(exc).__name__) from None
+        status = response.status_code
+        if 200 <= status < 300:
+            try:
+                return response.json()
+            except ValueError:
+                raise OpenMeteoRequestError("invalid JSON response", status=status) from None
+        if status != 429 and status < 500:
+            reason = _reason(response)
+            message = f"HTTP {status}: {reason}" if reason else f"HTTP {status}"
+            raise OpenMeteoRequestError(message, status=status)
+        raise TransientError(
+            f"HTTP {status}", retry_after=_retry_after(response) if status == 429 else None
+        )
+
+    def log(attempt_no: int, exc: BaseException, delay: float) -> None:
+        logger.warning(
+            "open-meteo request attempt %d/%d failed: %s; retrying in %.1fs",
+            attempt_no,
+            attempts,
+            exc,
+            delay,
+        )
+
+    try:
+        return with_retries(
+            attempt,
+            attempts=attempts,
+            backoff=base_delay,
+            retry_if=lambda e: isinstance(e, TransientError),
+            sleep=sleep,
+            on_retry=log,
+        )
+    except TransientError as exc:
+        raise OpenMeteoRequestError(f"failed after {attempts} attempts: {exc}") from None

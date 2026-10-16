@@ -1,5 +1,6 @@
 """Secret hygiene and repo contract checks."""
 
+import re
 import subprocess
 
 from shakka.config import REPO_ROOT
@@ -15,6 +16,7 @@ ENV_KEYS = [
     "VAPID_PUBLIC_KEY",
     "VAPID_PRIVATE_KEY",
     "VAPID_SUBJECT",
+    "OPERATOR_USER_ID",
 ]
 
 
@@ -102,3 +104,14 @@ def test_supabase_config_disables_auto_expose():
             break
         section.append(line)
     assert "auto_expose_new_tables = false" in section
+
+
+def test_actions_pinned_to_commit_sha():
+    pattern = re.compile(r"^[\w.-]+/[\w.-]+@[0-9a-f]{40}$")
+    uses = []
+    for path in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")):
+        for match in re.finditer(r"^\s*-?\s*uses:\s*(\S+)", path.read_text(encoding="utf-8"), re.M):
+            uses.append((path.name, match.group(1)))
+    assert uses
+    unpinned = [f"{name}: {ref}" for name, ref in uses if not pattern.fullmatch(ref)]
+    assert unpinned == []

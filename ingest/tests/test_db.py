@@ -10,6 +10,7 @@ import httpx
 import pytest
 
 import shakka.db
+import shakka.http
 from shakka.db import (
     DatabaseError,
     SupabaseRest,
@@ -444,3 +445,101 @@ def test_close_leaves_injected_client_open():
         pass
     assert not client.is_closed
     client.close()
+
+
+# -- retries (WP-22) ---------------------------------------------------------------------------
+
+
+def _sequence(*answers):
+    queue = list(answers)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        item = queue.pop(0) if len(queue) > 1 else queue[0]
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+    return handler
+
+
+def test_retry_statuses():
+    assert set(shakka.db.DB_RETRY_STATUSES) == {429, 502, 503, 504, 520, 521, 522, 523, 524}
+    assert 500 not in shakka.db.DB_RETRY_STATUSES
+
+
+def test_select_retried_with_backoff(monkeypatch):
+    waits: list[float] = []
+    monkeypatch.setattr(shakka.http, "_sleep", waits.append)
+    page = ok_json([{"id": "a"}])
+    db, seen = make_db(_sequence(httpx.Response(503), httpx.Response(503), page, ok_json([])))
+    assert db.select("spots") == [{"id": "a"}]
+    assert len(seen) == 4  # two failures, the page and the empty closing page
+    assert waits == [0.5, 1.0]
+
+
+def test_cloudflare_status_retried():
+    db, seen = make_db(_sequence(httpx.Response(522), ok_json([])))
+    assert db.select("spots") == []
+    assert len(seen) == 2
+
+
+def test_insert_and_rpc_not_retried():
+    db, seen = make_db(_sequence(httpx.Response(503)))
+    with pytest.raises(DatabaseError) as info:
+        db.insert("ingest_runs", [{"status": "running"}])
+    assert info.value.status == 503
+    assert len(seen) == 1
+    with pytest.raises(DatabaseError):
+        db.rpc("db_usage")
+    assert len(seen) == 2
+
+
+@pytest.mark.parametrize("status", [500, 409])
+def test_non_retryable_status_single_request(status):
+    db, seen = make_db(_sequence(httpx.Response(status)))
+    with pytest.raises(DatabaseError):
+        db.select("spots")
+    assert len(seen) == 1
+
+
+@pytest.mark.parametrize("op", ["update", "delete", "upsert"])
+def test_idempotent_writes_retried(op):
+    db, seen = make_db(_sequence(httpx.Response(503), ok_json([])))
+    if op == "update":
+        db.update("spots", {"name": "x"}, filters={"id": "eq.a"})
+    elif op == "delete":
+        db.delete("spots", filters={"id": "eq.a"})
+    else:
+        db.upsert("spots", [{"id": "a"}], on_conflict="id")
+    assert len(seen) == 2
+
+
+def test_circuit_breaker_after_exhaustion():
+    db, seen = make_db(_sequence(httpx.ConnectError("x")))
+    assert db.retries_disabled is False
+    with pytest.raises(DatabaseError):
+        db.select("spots")
+    assert len(seen) == 3
+    assert db.retries_disabled is True
+    with pytest.raises(DatabaseError):
+        db.select("spots")
+    assert len(seen) == 4
+
+
+def test_attempts_one_disables_retries():
+    client = httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(503)))
+    db = SupabaseRest(URL, SECRET, client=client, attempts=1)
+    with pytest.raises(DatabaseError):
+        db.select("spots")
+    with pytest.raises(ValueError):
+        SupabaseRest(URL, SECRET, client=client, attempts=0)
+
+
+def test_retry_log_has_no_filter_values(caplog):
+    caplog.set_level("WARNING", logger="shakka.db")
+    user = "11111111-2222-3333-4444-555555555555"
+    db, _ = make_db(_sequence(httpx.Response(503), ok_json([])))
+    db.select("favorites", filters={"user_id": f"eq.{user}"})
+    text = caplog.text
+    assert "db: select favorites attempt 1/3 failed (HTTP 503); retrying in 0.5s" in text
+    assert user not in text and SECRET not in text

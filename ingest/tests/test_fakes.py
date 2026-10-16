@@ -8,7 +8,7 @@ import pytest
 
 from fake_cases import FILTER_CASES, PARITY_ROWS, FilterCase
 from fakes import FakeSupabase
-from shakka.db import DatabaseError, SupabaseRest, iso_utc
+from shakka.db import TABLE_KEYS, DatabaseError, SupabaseRest, iso_utc
 
 T0 = datetime(2026, 1, 1, tzinfo=UTC)
 HOUR = "2026-10-14T12:00:00Z"
@@ -363,3 +363,13 @@ def test_signatures_match_client(method: str):
         ]
 
     assert shape(getattr(FakeSupabase, method)) == shape(getattr(SupabaseRest, method))
+
+
+def test_builtin_db_usage():
+    fake = FakeSupabase()
+    fake.seed("spots", [{"id": "a", "name": "A"}, {"id": "b", "name": "B"}])
+    fake.database_bytes = 123
+    result = fake.rpc("db_usage")
+    assert result["database_bytes"] == 123
+    assert set(result["tables"]) == set(TABLE_KEYS)
+    assert result["tables"]["spots"] == 2 and result["tables"]["rsvps"] == 0

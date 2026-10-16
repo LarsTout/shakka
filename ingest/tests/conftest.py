@@ -2,6 +2,7 @@ import pytest
 import pywebpush
 
 import shakka.config
+import shakka.http
 
 
 def _blocked_webpush(*args, **kwargs):
@@ -21,3 +22,9 @@ def _isolated_env(monkeypatch: pytest.MonkeyPatch, tmp_path):
 def _no_real_webpush(monkeypatch: pytest.MonkeyPatch):
     """Make a real network push impossible in any test."""
     monkeypatch.setattr(pywebpush, "webpush", _blocked_webpush)
+
+
+@pytest.fixture(autouse=True)
+def _no_retry_sleep(monkeypatch: pytest.MonkeyPatch):
+    """Retries never really wait in tests."""
+    monkeypatch.setattr(shakka.http, "_sleep", lambda s: None)

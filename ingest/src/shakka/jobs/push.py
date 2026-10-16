@@ -25,6 +25,7 @@ from shakka.notify.base import (
     DeliveryTarget,
     Notifier,
     PushTarget,
+    endpoint_allowed,
 )
 from shakka.notify.webpush import WebPushNotifier, generate_vapid_keys, notifiers_from_settings
 
@@ -47,7 +48,8 @@ def _target_or_none(row: dict) -> PushTarget | None:
 
 
 def load_targets(db: SupabaseRest, user_id: str) -> list[DeliveryTarget]:
-    """The newest `MAX_TARGETS_PER_USER` subscriptions of one user (local use: CLI, WP-22)."""
+    """The newest `MAX_TARGETS_PER_USER` subscriptions of one user (local use: CLI, WP-22).
+    Subscriptions on a host outside the push-service allowlist are dropped."""
     rows = db.select(
         "push_subscriptions",
         columns=SUBSCRIPTION_COLUMNS,
@@ -55,23 +57,40 @@ def load_targets(db: SupabaseRest, user_id: str) -> list[DeliveryTarget]:
         order="created_at.desc",
         limit=MAX_TARGETS_PER_USER,
     )
-    return [t for t in map(_target_or_none, rows) if t is not None]
+    targets = [t for t in map(_target_or_none, rows) if t is not None]
+    return [t for t in targets if endpoint_allowed(t.endpoint)]
 
 
-def load_all_targets(db: SupabaseRest) -> dict[str, list[DeliveryTarget]]:
+@dataclass(frozen=True, slots=True)
+class TargetsLoad:
+    targets: dict[str, list[DeliveryTarget]]  # by user_id, at most MAX_TARGETS_PER_USER each
+    blocked: int  # valid rows skipped because endpoint_allowed() is False
+
+
+def load_all_targets_checked(db: SupabaseRest) -> TargetsLoad:
     """All subscriptions in one select without a filter, so no user id is put in a URL."""
     rows = db.select(
         "push_subscriptions", columns=SUBSCRIPTION_COLUMNS, order="user_id,created_at.desc"
     )
     grouped: dict[str, list[DeliveryTarget]] = defaultdict(list)
+    blocked = 0
     for row in rows:
         target = _target_or_none(row)
         user_id = row.get("user_id")
         if target is None or not isinstance(user_id, str):
             continue
+        if not endpoint_allowed(target.endpoint):
+            blocked += 1
+            continue
         if len(grouped[user_id]) < MAX_TARGETS_PER_USER:
             grouped[user_id].append(target)
-    return dict(grouped)
+    if blocked:
+        logger.warning("push: %d subscription(s) skipped: push service host not allowed", blocked)
+    return TargetsLoad(targets=dict(grouped), blocked=blocked)
+
+
+def load_all_targets(db: SupabaseRest) -> dict[str, list[DeliveryTarget]]:
+    return load_all_targets_checked(db).targets
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +101,7 @@ class EventDelivery:
     ok_ids: frozenset[str]
     gone_ids: frozenset[str]  # permanent failure (404/410)
     failures: tuple[str, ...]  # DeliveryResult.detail of every failed delivery
+    non_retryable: int = 0  # failed, not permanent, not worth a retry (e.g. HTTP 403)
 
 
 def deliver_event(
@@ -91,6 +111,7 @@ def deliver_event(
     gone_ids: set[str] = set()
     failures: list[str] = []
     transient = 0
+    non_retryable = 0
     for target in targets:
         try:
             result = notifier.send(target, message, tag=tag)
@@ -103,8 +124,10 @@ def deliver_event(
         failures.append(result.detail)
         if result.permanent_failure:
             gone_ids.add(target.subscription_id)
-        else:
+        elif result.retryable:
             transient += 1
+        else:
+            non_retryable += 1
     sent = len(ok_ids)
     return EventDelivery(
         sent=sent,
@@ -113,6 +136,7 @@ def deliver_event(
         ok_ids=frozenset(ok_ids),
         gone_ids=frozenset(gone_ids),
         failures=tuple(failures),
+        non_retryable=non_retryable,
     )
 
 

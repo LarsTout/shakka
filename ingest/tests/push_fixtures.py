@@ -10,6 +10,7 @@ from urllib.parse import urlsplit
 from fakes import FakeSupabase
 from job_fixtures import NOW
 from shakka.domain.messages import AlertMessage
+from shakka.domain.push import PushPayload
 from shakka.notify.base import DeliveryResult, PushTarget
 from shakka.notify.webpush import generate_vapid_keys
 
@@ -21,7 +22,7 @@ DOWN = DeliveryResult(False, False, "HTTP 503")
 
 
 def endpoint(user_id: str, n: int) -> str:
-    return f"https://push.example.test/send/{user_id[:8]}-{n}"
+    return f"https://fcm.googleapis.com/fcm/send/{user_id[:8]}-{n}"
 
 
 def sub_row(user_id: str, n: int, *, created_at: datetime | None = None) -> dict[str, Any]:
@@ -70,6 +71,7 @@ class FakeNotifier:
         }
         self._raises = raises
         self.calls: list[Sent] = []
+        self.payload_calls: list[tuple[PushTarget, PushPayload]] = []
 
     def set_result(self, endpoint_: str, result: DeliveryResult | list[DeliveryResult]) -> None:
         self._results[endpoint_] = list(result) if isinstance(result, list) else [result]
@@ -80,6 +82,15 @@ class FakeNotifier:
         )
         if self._raises is not None:
             raise self._raises
+        return self._next(target)
+
+    def send_payload(self, target: PushTarget, payload: PushPayload) -> DeliveryResult:
+        self.payload_calls.append((target, payload))
+        if self._raises is not None:
+            raise self._raises
+        return self._next(target)
+
+    def _next(self, target: PushTarget) -> DeliveryResult:
         queue = self._results.get(target.endpoint)
         if not queue:
             return OK
@@ -91,7 +102,7 @@ class FakeResponse:
 
     def __init__(self, status_code: int) -> None:
         self.status_code = status_code
-        self.text = "body with endpoint https://push.example.test/send/ENDPOINT-SECRET-123"
+        self.text = "body with endpoint https://fcm.googleapis.com/fcm/send/ENDPOINT-SECRET-123"
         self.headers: dict[str, str] = {}
 
 

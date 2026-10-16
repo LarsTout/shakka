@@ -114,3 +114,25 @@ def test_github_annotation_escapes():
     assert github_annotation("warning", "83% of\r\nthe guard") == "::warning::83%25 of  the guard"
     assert escape_command_data("%0A") == "%250A"
     assert github_annotation("error", "x") == "::error::x"
+
+
+OPERATOR = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+
+
+def _with_operator(value):
+    return Settings(
+        supabase_url="http://127.0.0.1:54321", supabase_secret_key=SECRET, operator_user_id=value
+    )
+
+
+def test_secret_values_operator_user_id():
+    assert secret_values(_with_operator(f" {OPERATOR} ")) == (SECRET, OPERATOR)
+    assert secret_values(_with_operator(None)) == (SECRET,)
+    assert secret_values(_with_operator("  ")) == (SECRET,)
+    assert secret_values(_with_operator("not-a-uuid-12345")) == (SECRET, "not-a-uuid-12345")
+
+
+def test_secret_values_operator_canonical_form():
+    values = secret_values(_with_operator("{AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA}"))
+    assert values == (SECRET, "{AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA}", OPERATOR)
+    assert redact(f"user {OPERATOR} here", values) == "user *** here"

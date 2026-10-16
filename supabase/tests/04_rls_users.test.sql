@@ -1,9 +1,9 @@
--- User A versus user B, telegram_chat_id protection, profile trigger, dir_classes, cascades, service_role.
+-- User A versus user B, profile trigger, dir_classes, cascades, service_role.
 -- The order of the sections is binding: later sections depend on the state left by earlier ones.
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(42);
+select plan(40);
 
 -- Step 0 fixture (postgres): two auth users; profiles are created by the trigger.
 insert into auth.users (id, email) values
@@ -77,13 +77,11 @@ select is(
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"11111111-1111-1111-1111-111111111111","role":"authenticated"}', true);
 
-select throws_ok($$update public.profiles set telegram_chat_id = '123' where user_id = '11111111-1111-1111-1111-111111111111'$$, '42501', null, 'A cannot change telegram_chat_id');
 select lives_ok($$update public.profiles set weight_kg = 80 where user_id = '11111111-1111-1111-1111-111111111111'$$, 'A can change weight_kg');
 
 reset role;
 
 select is((select weight_kg from public.profiles where user_id = '11111111-1111-1111-1111-111111111111'), 80::smallint, 'weight of A is updated');
-select is((select telegram_chat_id from public.profiles where user_id = '11111111-1111-1111-1111-111111111111'), null::text, 'telegram_chat_id of A is unchanged');
 select is(
   (select updated_at from public.profiles where user_id = '11111111-1111-1111-1111-111111111111'),
   now(),

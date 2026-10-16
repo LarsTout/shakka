@@ -43,7 +43,7 @@ describe('signInWithMagicLink', () => {
 		expect(auth.signInWithOtp).toHaveBeenCalledTimes(1);
 		expect(auth.signInWithOtp).toHaveBeenCalledWith({
 			email: 'lars@example.com',
-			options: { emailRedirectTo: window.location.origin, shouldCreateUser: false }
+			options: { emailRedirectTo: window.location.origin, shouldCreateUser: true }
 		});
 	});
 
@@ -75,6 +75,7 @@ describe('authErrorMessage', () => {
 			AUTH_MESSAGES.notAuthorized
 		);
 		expect(authErrorMessage({ code: 'otp_disabled' })).toBe(AUTH_MESSAGES.notAuthorized);
+		expect(authErrorMessage({ code: 'signup_disabled' })).toBe(AUTH_MESSAGES.notAuthorized);
 	});
 	it('maps invalid addresses', () => {
 		expect(authErrorMessage({ code: 'email_address_invalid' })).toBe(AUTH_MESSAGES.invalidEmail);
