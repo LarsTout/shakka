@@ -1,79 +1,234 @@
 # Shakka spot profiles. Field guide: docs/SPOT_DATA.md
 # After editing run: cd ingest && uv run shakka spots validate
 # Never guess facts: leave a field out when unsure and keep verified: false.
+#
+# Research pass 2026-10-16 (verified: true only where Lars confirmed it):
+# - lat/lon: nearest point on the OpenStreetMap shoreline to the place (Nominatim), not a confirmed launch spot.
+# - shore_normal_deg: computed from ~1 km of OSM shoreline (coastline: water on the right; lakes: point-in-water test).
+# - rws_station: nearest station from `shakka tides stations`.
+# - status/level/season/hazards/notes: only where a source was found; sources in the comment above each spot.
 spots:
+  # src: geen officiele bron gevonden; locatie The Hangout niet in OSM, punt = strand bij het dorp
   - id: wijk-aan-zee
-    name: Wijk aan Zee
+    name: Wijk aan Zee (The Hangout)
+    region: Noord-Holland
+    lat: 52.4959
+    lon: 4.5853
+    shore_normal_deg: 289
+    rws_station: ijmuiden.buitenhaven
+    notes: Kitespot bij strandpaviljoen en kiteschool The Hangout.
     verified: false
+  # src: zwemindex.nl (zwakke bron, zones en regels niet bevestigd)
   - id: ijmuiden
     name: IJmuiden
+    region: Noord-Holland
+    lat: 52.4496
+    lon: 4.5581
+    shore_normal_deg: 259
+    rws_station: ijmuiden.buitenhaven
+    notes: Kennemerstrand, tussen de zuidpier en Bloemendaal aan Zee.
     verified: false
+  # src: zandvoort-holland.com (kitesurfing-zones, kitesurfing-faqs); zonebeleid lokaleregelgeving.overheid.nl CVDR654036
   - id: zandvoort
     name: Zandvoort
+    region: Noord-Holland
+    lat: 52.3735
+    lon: 4.5235
+    shore_normal_deg: 291
+    rws_station: ijgeul.1
+    status: limited
+    hazards: Op zomerdagen en feestdagen erg druk; zones kunnen bij zonnig weer met weinig wind dicht zijn.
+    notes: Kiten alleen in de aangewezen zones. Centraal bij de Noordelijke reddingspost (bij het station) en zuid bij de Zuidelijke reddingspost (parkeren De Zuid). Controleer vooraf of de zones open zijn.
     verified: false
+  # src: geen bruikbare bron
   - id: bloemendaal
     name: Bloemendaal
+    region: Noord-Holland
+    lat: 52.4032
+    lon: 4.5431
+    shore_normal_deg: 292
+    rws_station: ijmuiden.buitenhaven
     verified: false
+  # src: noordwijk.info (activities/sportive-active)
   - id: noordwijk
     name: Noordwijk
+    region: Zuid-Holland
+    lat: 52.2494
+    lon: 4.4308
+    shore_normal_deg: 298
+    rws_station: noordwijk.meetpost
+    status: limited
+    notes: KSN-zone tussen strandopgang 2 en 4 (alleen KSN-leden); lesgebied bij opgang 21 (alleen lessen). De vrije kitezone ligt bij Langevelderslag.
     verified: false
+  # src: noordwijk.info (activities/sportive-active)
   - id: langevelderslag
     name: Langevelderslag
+    region: Zuid-Holland
+    lat: 52.3101
+    lon: 4.4803
+    shore_normal_deg: 294
+    rws_station: noordwijk.meetpost
+    status: allowed
+    notes: Vrije kitezone van Noordwijk bij de Nora-zender, strandpalen 75,500 tot 75,250.
     verified: false
+  # src: alleen een gebruikersforum, niet overgenomen
   - id: katwijk
     name: Katwijk
+    region: Zuid-Holland
+    lat: 52.2067
+    lon: 4.3913
+    shore_normal_deg: 298
+    rws_station: noordwijk.meetpost
     verified: false
+  # src: kiteboardschool.nl (?p=4082)
   - id: scheveningen
     name: Scheveningen
+    region: Zuid-Holland
+    lat: 52.1088
+    lon: 4.2703
+    shore_normal_deg: 312
+    rws_station: scheveningen
+    level: advanced
     verified: false
+  # src: denhaag.com (node/1579), kiteboardschool.nl (?p=4080)
   - id: kijkduin
     name: Kijkduin
+    region: Zuid-Holland
+    lat: 52.0709
+    lon: 4.2186
+    shore_normal_deg: 315
+    rws_station: scheveningen
+    level: beginner
+    hazards: Ondiep water.
+    notes: Kitelocatie bij de Zandmotor aan het eind van het strand van Kijkduin. Vlak water zonder golfslag.
     verified: false
+  # src: niets gevonden; Oostvoornse Meer of Noordzeestrand niet vastgesteld
   - id: oostvoorne
     name: Oostvoorne
+    region: Zuid-Holland
     verified: false
+  # src: kiteboarding-club.com/brouwersdam; oud besluit Goeree-Overflakkee CVDR307403 is vervallen per 2023-07-19
   - id: brouwersdam
     name: Brouwersdam
+    region: Zeeland
+    notes: Kiten aan de Noordzeezijde van de dam. Een zandbank voor de kust dempt een deel van de deining.
     verified: false
+  # src: niets gevonden
   - id: neeltje-jans
     name: Neeltje Jans
+    region: Zeeland
     verified: false
+  # src: niets gevonden; Noordzee- of Veerse Meer-zijde niet vastgesteld
   - id: vrouwenpolder
     name: Vrouwenpolder
+    region: Zeeland
     verified: false
+  # src: geen bruikbare bron
   - id: domburg
     name: Domburg
+    region: Zeeland
+    lat: 51.5658
+    lon: 3.4935
+    shore_normal_deg: 326
+    rws_station: westkapelle
     verified: false
+  # src: waterlandvanfriesland.nl (kite-surfing), surf-magazin.de, zwemindex.nl; lat/lon = It Soal (Nominatim)
+  # shore_normal_deg weggelaten: berekening kwam uit op een haveninham
   - id: workum
     name: Workum
+    region: IJsselmeer
+    lat: 52.9666
+    lon: 5.4226
+    status: limited
+    level: beginner
+    hazards: Zandbanken; het water is soms erg ondiep.
+    notes: Ondiep water bij It Soal. Actuele regels staan op het bord bij It Soal; in de zomer geldt een aparte kitezone.
     verified: false
+  # src: friesland.nl (kitesurfing-spot-at-makkum); einddatum seizoen niet bevestigd
+  # lat/lon en shore_normal_deg weggelaten: berekening kwam uit bij de haven
   - id: makkum
     name: Makkum
+    region: IJsselmeer
+    status: limited
+    season: [{start: "05-01", end: "09-30", note: "Kiten alleen van oktober tot april (badgasten); exacte data verifiëren"}]
+    hazards: Druk strand met badgasten in de zomer.
+    notes: Ondiep water. Parkeren aan het water.
     verified: false
+  # src: waterlandvanfriesland.nl en friesland.nl (kitesurfing-spot-at-hindeloopen)
   - id: hindeloopen
     name: Hindeloopen
+    region: IJsselmeer
+    lat: 52.9442
+    lon: 5.3995
+    shore_normal_deg: 286
+    status: allowed
+    notes: Ondiep water achter de dijk, het hele jaar te kiten. Geen strand, starten kan lastig zijn. Parkeren aan het water.
     verified: false
+  # src: friesland.nl (kitesurfing-spot-at-lemmer)
+  # lat/lon en shore_normal_deg weggelaten: berekening kwam uit bij de haven
   - id: lemmer
     name: Lemmer
+    region: IJsselmeer
+    level: intermediate
+    hazards: Onstabiele wind. In de zomer druk met badgasten; kiten is dan niet altijd mogelijk.
+    notes: Ondiep water. Parkeren aan het water.
     verified: false
+  # src: niets gevonden
   - id: den-helder
     name: Den Helder
+    region: Noord-Holland
     verified: false
+  # src: geen bruikbare bron
   - id: callantsoog
     name: Callantsoog
+    region: Noord-Holland
+    lat: 52.8376
+    lon: 4.6904
+    shore_normal_deg: 285
+    rws_station: petten.zuid
     verified: false
+  # src: geen bruikbare bron
   - id: petten
     name: Petten
+    region: Noord-Holland
+    lat: 52.7706
+    lon: 4.6535
+    shore_normal_deg: 293
+    rws_station: petten.zuid
     verified: false
+  # src: geen bruikbare bron
   - id: camperduin
     name: Camperduin
+    region: Noord-Holland
+    lat: 52.7287
+    lon: 4.6365
+    shore_normal_deg: 277
+    rws_station: petten.zuid
     verified: false
+  # src: nhnieuws.nl (281085, 283119, 339314), kite-and-windsurfing-guide.com
   - id: schellinkhout
     name: Schellinkhout
-    verified: false
+    region: Markermeer
+    lat: 52.6328
+    lon: 5.1206
+    shore_normal_deg: 229
+    status: allowed
+    level: beginner
+    hazards: Houd de landingsruimte vrij van obstakels (eerder een ongeluk met een schuur).
+    notes: Kitelocatie op een deel van het strand aan de Zuiderdijk, aangewezen door Rijkswaterstaat (eind 2018). Alleen op de aangewezen plek. Staand diep tot ongeveer 400 m uit de kust.
+    verified: true
+  # src: niets over een kitezone bij Muiderberg gevonden (RWS-zone Muiderzand ligt in Almere)
   - id: muiderberg
     name: Muiderberg
+    region: IJmeer
+    lat: 52.3297
+    lon: 5.1174
+    shore_normal_deg: 10
     verified: false
+  # src: kite-and-windsurfing-guide.com (lauwersoog), natura2000.nl (gebiedendocument Lauwersmeer)
   - id: lauwersmeer
     name: Lauwersmeer
+    region: Lauwersmeer
+    status: limited
+    notes: Natura 2000-gebied. Geen officiële kitezone of seizoensregeling gevonden.
     verified: false
