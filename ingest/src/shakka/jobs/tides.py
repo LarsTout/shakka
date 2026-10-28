@@ -3,12 +3,16 @@
 import logging
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Final
 
-from shakka.db import SupabaseRest, in_filter, iso_utc
+from shakka.budget import SOURCE_RWS, BudgetGuard
+from shakka.db import DatabaseError, SupabaseRest, in_filter, iso_utc
 from shakka.domain.tide import TideExtreme
+from shakka.jobs.inputs import db_error_summary
 from shakka.rws.tides import STATION_CODE_RE, fetch_tide_extremes
+
+__all__ = ["SOURCE_RWS", "TideBudgetExhausted", "TideIngestResult", "run_tide_ingest"]
 
 logger = logging.getLogger(__name__)
 
@@ -19,6 +23,10 @@ TIDE_RETENTION: Final = timedelta(hours=48)
 MAX_ERROR_TEXT: Final = 200
 
 TideFetcher = Callable[[str, datetime, datetime], Sequence[TideExtreme]]
+
+
+class TideBudgetExhausted(TimeoutError):
+    """Raised by a bounded fetch before any request is sent. Not counted in api_usage."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,6 +42,18 @@ class TideIngestResult:
 def _require_aware(now: datetime) -> None:
     if now.tzinfo is None or now.utcoffset() is None:
         raise ValueError("now must be timezone-aware")
+
+
+def _parse_fetched_at(value: object) -> datetime | None:
+    """Aware datetime -> UTC; ISO string with offset -> UTC; anything else -> None."""
+    if isinstance(value, str):
+        try:
+            value = datetime.fromisoformat(value)
+        except ValueError:
+            return None
+    if not isinstance(value, datetime) or value.tzinfo is None or value.utcoffset() is None:
+        return None
+    return value.astimezone(UTC)
 
 
 def delete_old_tides(db: SupabaseRest, *, now: datetime) -> int:
@@ -63,7 +83,11 @@ def run_tide_ingest(
     force: bool = False,
     fetch: TideFetcher = fetch_tide_extremes,
 ) -> TideIngestResult:
-    """Fetch tide extremes for every station used by a spot (20-hour freshness rule)."""
+    """Fetch tide extremes for every station used by a spot (20-hour freshness rule).
+
+    Stations with the oldest data are fetched first, so a tight time budget refreshes those.
+    Every fetch call counts as one RWS request in api_usage (one booking per run).
+    """
     _require_aware(now)
     spots = db.select("spots", columns="id,rws_station")
     wanted = sorted(
@@ -83,27 +107,42 @@ def run_tide_ingest(
             logger.warning("tides: %s", text)
     stations = [c for c in wanted if STATION_CODE_RE.fullmatch(c)]
 
-    fresh: set[str] = set()
-    if stations and not force:
-        recent = db.select(
+    last: dict[str, datetime] = {}
+    if stations:
+        known = db.select(
             "tide_extremes",
-            columns="station",
-            filters={
-                "station": in_filter(stations),
-                "fetched_at": f"gt.{iso_utc(now - TIDE_REFRESH_AFTER)}",
-            },
+            columns="station,fetched_at",
+            filters={"station": in_filter(stations)},
         )
-        fresh = {r["station"] for r in recent}
-    skipped = sorted(fresh.intersection(stations))
+        for r in known:
+            at = _parse_fetched_at(r.get("fetched_at"))
+            if at is not None and (r["station"] not in last or at > last[r["station"]]):
+                last[r["station"]] = at
+    if force:
+        fresh: set[str] = set()
+    else:
+        fresh = {s for s in stations if s in last and last[s] > now - TIDE_REFRESH_AFTER}
+    skipped = sorted(fresh)
+    todo = sorted(
+        (s for s in stations if s not in fresh),
+        key=lambda s: (s in last, last.get(s, now), s),
+    )
 
     stations_ok = 0
     rows = 0
+    requests = 0
     start, end = now - TIDE_WINDOW_BEFORE, now + TIDE_WINDOW_AFTER
-    for station in stations:
-        if station in fresh:
-            continue
+    for station in todo:
         try:
-            deduped = _dedupe(list(fetch(station, start, end)), station)
+            try:
+                extremes = list(fetch(station, start, end))
+            except TideBudgetExhausted:
+                raise
+            except Exception:
+                requests += 1
+                raise
+            requests += 1
+            deduped = _dedupe(extremes, station)
             payload = [e.to_row() | {"fetched_at": now} for e in deduped]
             db.upsert("tide_extremes", payload, on_conflict="station,at")
             db.delete(
@@ -122,13 +161,21 @@ def run_tide_ingest(
             errors.append(text)
             logger.warning("tides: %s", text)
 
+    if requests > 0:
+        try:
+            BudgetGuard(db).record(SOURCE_RWS, float(requests), now=now, requests=requests)
+        except DatabaseError as exc:
+            errors.append(f"api_usage: {db_error_summary(exc)}")
+            logger.warning("tides: api_usage booking failed (%s)", db_error_summary(exc))
+
     deleted = delete_old_tides(db, now=now)
     logger.info(
-        "tides: fetched %d station(s), %d row(s), skipped %d, failed %d, deleted %d",
+        "tides: fetched %d station(s), %d row(s), skipped %d, failed %d, requests %d, deleted %d",
         stations_ok,
         rows,
         len(skipped),
         len(failed),
+        requests,
         deleted,
     )
     return TideIngestResult(stations_ok, rows, skipped, sorted(failed), errors, deleted)

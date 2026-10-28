@@ -55,6 +55,9 @@ class UsageStats:
     step_issues: Mapping[str, int] = field(default_factory=dict)  # step -> runs not ok
     push_sent: int | None = None  # sum of alerts.counts.sent in 7 days
     push_failed: int | None = None
+    rws_requests_7d: int | None = (
+        None  # sum of api_usage.requests, source rws, UTC days [today-6, today]
+    )
 
     def __post_init__(self) -> None:
         if self.now.tzinfo is None or self.now.utcoffset() is None:
@@ -68,6 +71,7 @@ class UsageStats:
             "runs_failed",
             "push_sent",
             "push_failed",
+            "rws_requests_7d",
         ):
             _check_number(name, getattr(self, name), integer=True)
         runs = (self.runs_ok, self.runs_partial, self.runs_failed)
@@ -138,6 +142,12 @@ def build_usage_report(stats: UsageStats) -> str:
             f"{_n(max_day)}, limiet {_n(OPEN_METEO_DAILY_LIMIT)} per dag; deze maand "
             f"{_n(month)}, limiet {_n(OPEN_METEO_MONTHLY_LIMIT)}"
         )
+
+    rws = stats.rws_requests_7d
+    if rws is None:
+        lines.append(f"Rijkswaterstaat ({REPORT_DAYS} dagen): {UNKNOWN}")
+    else:
+        lines.append(f"Rijkswaterstaat ({REPORT_DAYS} dagen): {_n(rws)} requests")
 
     if stats.database_bytes is None:
         lines.append(f"Database: {UNKNOWN}")

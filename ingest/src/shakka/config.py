@@ -11,6 +11,13 @@ REPO_ROOT: Final[Path] = Path(__file__).resolve().parents[3]
 ENV_FILE: Path = REPO_ROOT / ".env"  # read at call time so tests can redirect it
 DEFAULT_SPOTS_PATH: Final[Path] = REPO_ROOT / "data" / "spots.yaml"
 REQUIRED_ENV_VARS: Final[tuple[str, ...]] = ("SUPABASE_URL", "SUPABASE_SECRET_KEY")
+OPTIONAL_ENV_VARS: Final[tuple[str, ...]] = (
+    "APP_BASE_URL",
+    "VAPID_PUBLIC_KEY",
+    "VAPID_PRIVATE_KEY",
+    "VAPID_SUBJECT",
+    "OPERATOR_USER_ID",
+)
 
 _LOCAL_HOSTS: Final = frozenset({"localhost", "127.0.0.1", "::1"})
 URL_ERROR: Final = (
@@ -41,6 +48,8 @@ class Settings(BaseSettings):
     @field_validator("supabase_url")
     @classmethod
     def _validate_supabase_url(cls, value: str) -> str:
+        if not value.isascii() or any(c.isspace() or not c.isprintable() for c in value):
+            raise ValueError(URL_ERROR)
         try:
             parts = urlsplit(value)
             host = parts.hostname or ""

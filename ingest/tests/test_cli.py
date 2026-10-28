@@ -54,6 +54,19 @@ def doctor():
     return result.exit_code, result.output
 
 
+def doctor_result():
+    return CliRunner().invoke(cli, ["doctor"])
+
+
+OPTIONAL = (
+    "APP_BASE_URL",
+    "VAPID_PUBLIC_KEY",
+    "VAPID_PRIVATE_KEY",
+    "VAPID_SUBJECT",
+    "OPERATOR_USER_ID",
+)
+
+
 def test_help_lists_doctor():
     result = CliRunner().invoke(cli, ["--help"])
     assert result.exit_code == 0
@@ -228,3 +241,102 @@ def test_doctor_publishable_unset_is_optional(rec, monkeypatch):
     code, out = doctor()
     assert code == 0
     assert "unset   SUPABASE_PUBLISHABLE_KEY (optional)" in out
+
+
+def test_doctor_lists_optional_unset(rec, monkeypatch):
+    rec()
+    env(monkeypatch)
+    for name in OPTIONAL:
+        monkeypatch.delenv(name, raising=False)
+    code, out = doctor()
+    assert code == 0, out
+    for name in OPTIONAL:
+        assert f"unset   {name} (optional)" in out
+
+
+def test_doctor_optional_set_without_values(rec, monkeypatch):
+    rec()
+    env(
+        monkeypatch,
+        app_base_url="TESTAPPURL",
+        vapid_public_key="TESTVAPIDPUB",
+        vapid_private_key="TESTVAPIDPRIV",
+        vapid_subject="TESTSUBJECT",
+        operator_user_id="TESTOPERATOR",
+    )
+    code, out = doctor()
+    assert code == 0, out
+    for name in OPTIONAL:
+        assert f"set     {name} (optional)" in out
+    for value in ("TESTAPPURL", "TESTVAPIDPUB", "TESTVAPIDPRIV", "TESTSUBJECT", "TESTOPERATOR"):
+        assert value not in out
+
+
+def test_doctor_blank_optional_is_unset(rec, monkeypatch):
+    rec()
+    env(monkeypatch, vapid_subject="   ")
+    _, out = doctor()
+    assert "unset   VAPID_SUBJECT (optional)" in out
+
+
+@pytest.mark.parametrize("url", ["http://exa mple", "https://exa mple", "https://tëst.supabase.co"])
+def test_doctor_invalid_url_no_traceback(rec, monkeypatch, url):
+    r = rec()
+    env(monkeypatch, url=url)
+    result = doctor_result()
+    out = result.output
+    assert result.exit_code == 1
+    assert "invalid SUPABASE_URL" in out
+    assert isinstance(result.exception, SystemExit)
+    assert "Traceback" not in out
+    assert SECRET not in out
+    assert "exa mple" not in out
+    assert r.requests == []
+
+
+@pytest.mark.parametrize("secret", ["sb_secret_tëst", "sb_secret_x ", "sb_secret_x\n"])
+def test_doctor_secret_key_unusable_characters(rec, monkeypatch, secret):
+    r = rec()
+    env(monkeypatch, secret=secret)
+    result = doctor_result()
+    out = result.output
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert "invalid SUPABASE_SECRET_KEY: contains non-ASCII, whitespace or control" in out
+    assert "skip    Supabase REST check (configuration invalid)" in out
+    assert "sb_secret_" not in out.replace("sb_secret_...", "")
+    assert "Traceback" not in out
+    assert r.requests == []
+
+
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [
+        (httpx.InvalidURL("bad testref"), "Supabase REST check failed (InvalidURL)"),
+        (
+            UnicodeEncodeError("ascii", "x", 0, 1, "bad"),
+            "Supabase REST check failed (UnicodeEncodeError)",
+        ),
+    ],
+)
+def test_doctor_unexpected_client_error(rec, monkeypatch, error, expected):
+    rec(error=error)
+    env(monkeypatch)
+    result = doctor_result()
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert f"error   {expected}" in result.output
+    assert "testref" not in result.output
+
+
+def test_doctor_settings_read_error(rec, monkeypatch):
+    def raiser():
+        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "bad testref")
+
+    rec()
+    monkeypatch.setattr(shakka.doctor, "get_settings", raiser)
+    result = doctor_result()
+    assert result.exit_code == 1
+    assert isinstance(result.exception, SystemExit)
+    assert "error   could not read settings (UnicodeDecodeError)" in result.output
+    assert "testref" not in result.output

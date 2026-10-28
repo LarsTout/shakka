@@ -627,11 +627,39 @@ def test_tide_budget_stops_fetching(monkeypatch):
     assert outcome.counts["failed"] == ["station-a", "station-b"]
     assert outcome.counts["budget_skipped"] == 1
     assert any(
-        e.startswith("station-b: TimeoutError: tide step time budget")
+        e.startswith("station-b: TideBudgetExhausted: tide step time budget")
         for e in outcome.counts["errors"]
     )
     assert len(outcome.warnings) == 1
     assert outcome.warnings[0].startswith("time budget of 240 s reached; 1 station(s)")
+
+
+def test_tide_budget_fetches_oldest_first(monkeypatch):
+    db = FakeSupabase()
+    db.seed(
+        "spots",
+        [
+            make_spot(id="spot-a", rws_station="station-a").to_row(),
+            make_spot(id="spot-b", rws_station="station-b").to_row(),
+        ],
+    )
+    for station, age in (("station-a", 25), ("station-b", 30)):
+        db.seed(
+            "tide_extremes",
+            [
+                {
+                    "station": station,
+                    "at": NOW + timedelta(hours=2),
+                    "kind": "high",
+                    "level_cm": 1,
+                    "fetched_at": NOW - timedelta(hours=age),
+                }
+            ],
+        )
+    ctx, calls, clock = _tide_ctx(db)
+    monkeypatch.setattr(pipeline, "_monotonic", lambda: clock[0])
+    pipeline.step_tides(ctx)
+    assert calls == ["station-b"]
 
 
 def test_tide_budget_zero_still_runs_alerts(tmp_path, monkeypatch):

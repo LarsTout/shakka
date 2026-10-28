@@ -32,6 +32,10 @@ Let op: `SUPABASE_ANON_KEY` en `SUPABASE_SERVICE_ROLE_KEY` worden niet meer gele
 Wat `uv run shakka doctor` meldt:
 - `missing NAAM`: de variabele ontbreekt of is leeg.
 - `invalid SUPABASE_URL`: de URL is geen `https://<project-ref>.supabase.co` zonder pad (`http` mag alleen naar localhost).
+- `invalid SUPABASE_SECRET_KEY`: de sleutel bevat een niet-ASCII-teken, spatie of regeleinde (vaak een kopieerfout). Er volgt dan geen netwerkcheck.
+- `set NAAM (optional)` of `unset NAAM (optional)`: per optionele variabele (`APP_BASE_URL`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`, `OPERATOR_USER_ID`) of die gezet is. Een lege waarde telt als `unset`. De waarde zelf en of ze geldig is, toont `doctor` niet.
+- `error could not read settings (<type>)`: het `.env`-bestand is onleesbaar, bijvoorbeeld geen geldige UTF-8.
+- `error Supabase REST check failed (<type>)`: onverwachte fout in de HTTP-client; alleen de soort wordt getoond.
 - `warn ...`: de sleutel heeft een ander prefix dan verwacht. Legacy-sleutels werken tot eind 2026.
 - `error ... rejected the key (HTTP 401/403)`: verkeerde sleutel. `SUPABASE_SECRET_KEY` moet een secret key zijn.
 - `error ... returned HTTP 404`: verkeerde URL.
@@ -125,7 +129,7 @@ Pas daarna `CAPTURE_URL` en `CAPTURE_DATE` in `ingest/tests/test_openmeteo_forec
 
 ## 10. Getij (Rijkswaterstaat, vanaf WP-04)
 1. `cd ingest && uv run shakka tides stations --search hoek` toont stations met astronomische hoog- en laagwaters (code, naam, lat, lon). Zet de `code` als `rws_station` in `data/spots.yaml`. Neem het dichtstbijzijnde station aan dezelfde kust of hetzelfde zeegat. Dit commando heeft geen `.env` nodig.
-2. `uv run shakka tides fetch` haalt per station eens per 20 uur op; `--force` negeert die regel. Exitcode 1 betekent dat minstens één station faalde (zie de regels onder `failed`).
+2. `uv run shakka tides fetch` haalt per station eens per 20 uur op; `--force` negeert die regel. Stations met de oudste data (of nog zonder data) komen eerst, zodat bij een krap tijdsbudget in de uurlijkse run de oudste data worden ververst. Elke aanroep naar Rijkswaterstaat telt als een request en wordt per run geboekt in `api_usage` (bron `rws`, `requests` en `calls` zijn gelijk; retries tellen niet apart). Er is geen limiet of drempel. Een mislukte boeking komt als `api_usage: ...` in de fouten, zonder de getijdata te raken. Exitcode 1 betekent dat minstens één station faalde (zie de regels onder `failed`).
 3. Hoek van Holland kent een dubbel laagwater. Dat wordt opgeslagen als twee laagwaters; de topagger ertussen wordt niet opgeslagen.
 4. Een onbekend extreemtype (bijv. bij dubbel hoogwater) laat het station falen in plaats van iets te raden. Meld het dan als issue.
 5. Bron: Rijkswaterstaat WaterWebservices (DDAPI20), CC0. Geen uptimegarantie. Een storing van een paar dagen is geen probleem, want er staat 8 dagen vooruit in de database.
@@ -304,7 +308,7 @@ Laatste activiteitscommit: 2026-10-15
 Veldjes die Lars invult staan onderaan §18.6 en §18.9.
 
 1. **Gebruiksrapport en waarschuwingen.**
-   - De laatste stap van de uurlijkse run, `usage_report`, leest elk uur het Open-Meteo-verbruik (`api_usage`) en de databasegrootte (RPC `db_usage`). Het volledige rapport staat in `ingest_runs`, stap `usage_report`, `counts.report`.
+   - De laatste stap van de uurlijkse run, `usage_report`, leest elk uur het Open-Meteo-verbruik (`api_usage`) en de databasegrootte (RPC `db_usage`). Op maandag (en bij `shakka usage show`) komt ook het aantal RWS-requests van de laatste 7 UTC-dagen erbij, als regel `Rijkswaterstaat (7 dagen): <n> requests` direct onder de Open-Meteo-regel. Het volledige rapport staat in `ingest_runs`, stap `usage_report`, `counts.report`.
    - Elke maandag tussen 08:00 en 22:00 (Europe/Amsterdam) gaat een korte samenvatting als pushmelding naar de apparaten van Lars (`OPERATOR_USER_ID`), tot het één keer gelukt is. Valt de maandag weg, dan komt het rapport pas de volgende maandag.
    - Drempels: database boven 300 MB (1 MB = 1024 × 1024 bytes, zoals het dashboard), Open-Meteo boven 7.000 calls op de UTC-dag of boven 210.000 in de UTC-maand (70% van de echte limieten). Een waarschuwing staat elk uur als `::warning::usage_report: usage threshold: ...` in de Actions-log zolang de drempel overschreden is. De pushmelding gaat hoogstens één keer per lokale dag en alleen tussen 08:00 en 22:00. Op maandag bevat het weekrapport de waarschuwingen zelf.
    - De stap ruimt in de weekrapport-run ook `ingest_runs` op die ouder zijn dan 90 dagen.
