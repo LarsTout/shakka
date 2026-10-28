@@ -1,0 +1,51 @@
+# Dependabot version updates (WP-28): monthly, grouped, pull requests against develop.
+# Actions stay pinned to a full commit SHA with "# vX.Y.Z" on the same line; Dependabot
+# updates both. ingest/tests/test_repo_hygiene.py guards this file and the pins.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+    target-branch: develop
+    open-pull-requests-limit: 3
+    groups:
+      actions:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+  - package-ecosystem: npm
+    directory: /web
+    schedule:
+      interval: monthly
+    target-branch: develop
+    open-pull-requests-limit: 3
+    versioning-strategy: increase-if-necessary
+    groups:
+      web:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+    ignore:
+      # Types follow the Node major in engines and .nvmrc; bump them with a Node upgrade.
+      - dependency-name: "@types/node"
+        update-types:
+          - version-update:semver-major
+  - package-ecosystem: uv
+    directory: /ingest
+    schedule:
+      interval: monthly
+    target-branch: develop
+    open-pull-requests-limit: 3
+    versioning-strategy: increase-if-necessary
+    groups:
+      ingest:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
