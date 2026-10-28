@@ -375,16 +375,24 @@ Veldjes die Lars invult staan onderaan §18.6 en §18.9.
    | GitHub Actions | Actions-tab (publieke repo: minuten onbeperkt) | - | Schedule niet actief, of geen run in de laatste 2 uur |
    | Cloudflare Pages | Builds | 500 per maand | > 350 |
    | SMTP-dienst | Dashboard van de dienst | Resend 100 per dag en 3.000 per maand; Gmail 500 per dag | > 70% |
-   | Dependencies | `npm audit` en `pip-audit` (punt 10) | - | high of critical |
-   | Actions-pins | Releases van `actions/checkout` en `actions/setup-node` | - | Nieuwe release |
+   | Dependencies | Security, Dependabot alerts | - | Open alert (high of critical) zonder PR: punt 10, handmatig |
+   | Dependabot-PR's | Pull requests, filter `is:open author:app/dependabot` | - | Open PR: reviewen en mergen (punt 10) |
 
    MapTiler rekent Shakka in requests, omdat de kaart MapLibre GL JS gebruikt en niet de MapTiler-SDK; de grens van 5.000 map sessions uit het projectplan geldt alleen voor die SDK en is hier niet van toepassing. Vergelijk bij de eerste maandcheck ook de databasegrootte in het weekrapport met het dashboard.
+
+   Dependabot en Cloudflare: elke push naar een `dependabot/*`-branch (een nieuwe PR of een rebase) is een preview-build. Verwacht wordt hoogstens 15 per maand. Komt Builds boven 350, zet dan in Cloudflare Pages bij de automatische preview-deployments "Custom branches" met include `*` en exclude `dependabot/*`. CI bouwt de web-app toch al.
 9. **Open-Meteo-bevestiging.** Stuur een korte mail (Engels) aan info@open-meteo.com. Concept:
 
    > Hello, Shakka is a free public PWA for kitesurfers in the Netherlands, without ads or subscriptions. It reads Open-Meteo forecasts server-side only, caches them per spot, and makes about 40,000 API calls per month. Open-Meteo is credited in the app. We believe this falls under non-commercial use; could you confirm that this is fine?
 
    Open-Meteo-bevestiging: datum: nog in te vullen door Lars / uitkomst: nog in te vullen door Lars.
-10. **Dependency-audit** (maandelijks, met de hand; geen CI-stap, geen Dependabot).
-    - Web: `cd web && npm audit --omit=dev --audit-level=high`. Los een bevinding op met een minimale update (`npm update <pakket>` of `npm audit fix --omit=dev`, nooit `--force`) en draai daarna `npm run check && npm test && npm run build`.
-    - Ingest: `cd ingest && uv export --format requirements-txt --frozen --no-emit-project -o /tmp/shakka-req.txt && uvx pip-audit --require-hashes --disable-pip -r /tmp/shakka-req.txt`. Bij een bevinding: `uv lock --upgrade-package <pakket>` binnen de grenzen van `pyproject.toml`, dan de volledige test.
-    - GitHub Actions staan vastgezet op een commit-SHA (een test bewaakt dat). Bijwerken: zoek de SHA van de nieuwe release met `gh api repos/<eigenaar>/<repo>/git/ref/tags/<tag> --jq .object.sha` (is `object.type` "tag", dereferentieer dan met `gh api repos/<eigenaar>/<repo>/git/tags/<sha> --jq .object.sha`) en schrijf de versie als commentaar achter de SHA.
+10. **Dependency-updates en -audit** (Dependabot plus een handmatige terugval; geen CI-stap, niet automatisch mergen).
+    - `.github/dependabot.yml` kijkt op de eerste dag van de maand naar `github-actions` (`/`), `npm` (`/web`) en `uv` (`/ingest`). Minor- en patch-updates komen per ecosysteem als één PR naar `develop`; een major komt als losse PR (hoogstens 3 open PR's per ecosysteem). Een update binnen de grenzen van `package.json` of `pyproject.toml` wijzigt alleen de lockfile. Een PR die een grens in de manifest verruimt, verdient extra aandacht. Majors van `@types/node` worden overgeslagen; die horen bij een Node-upgrade.
+    - Aanzetten (eenmalig): Settings, Advanced Security: "Dependabot alerts" en "Dependabot security updates" op Enable. Security updates komen los en buiten de maandplanning, als PR naar `develop` (de default branch).
+    - Dependabot-PR's krijgen geen Actions-secrets en een `GITHUB_TOKEN` met alleen leesrechten. CI gebruikt geen secrets (§7) en draait dus gewoon. Een merge op `develop` komt pas in productie bij de promotie naar `main`.
+    - Reviewen: CI is groen; bij de `npm`-PR de preview kort openen (kaart, inloggen); bij een Actions-PR in de diff controleren dat elke `uses:` op een SHA van 40 tekens staat, met de nieuwe versie als `# vX.Y.Z` op dezelfde regel. Twee tests bewaken de SHA en de vorm van het commentaar, maar niet of het commentaar bij de SHA hoort.
+    - Een PR die CI breekt of die je niet wilt: niet mergen. Losse PR: `@dependabot ignore this major version` (of `minor version`, `this dependency`). Gegroepeerde PR: `@dependabot ignore <pakket> minor version` (of `major version`, of alleen `<pakket>`). Terugdraaien: `@dependabot unignore <pakket>`.
+    - Handmatig, als terugval of bij twijfel:
+      - Web: `cd web && npm audit --omit=dev --audit-level=high`. Los een bevinding op met een minimale update (`npm update <pakket>` of `npm audit fix --omit=dev`, nooit `--force`) en draai daarna `npm run check && npm test && npm run build`.
+      - Ingest: `cd ingest && uv export --format requirements-txt --frozen --no-emit-project -o /tmp/shakka-req.txt && uvx pip-audit --require-hashes --disable-pip -r /tmp/shakka-req.txt`. Bij een bevinding: `uv lock --upgrade-package <pakket>` binnen de grenzen van `pyproject.toml`, dan de volledige test.
+      - Een SHA-pin zelf bijwerken: zoek de SHA van de release met `gh api repos/<eigenaar>/<repo>/git/ref/tags/<tag> --jq .object.sha`. Is `object.type` "tag", dereferentieer dan met `gh api repos/<eigenaar>/<repo>/git/tags/<sha> --jq .object.sha`. Schrijf de versie als `# vX.Y.Z` op dezelfde regel achter de SHA.

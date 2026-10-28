@@ -3,10 +3,14 @@
 import re
 import subprocess
 
+import yaml
+
 from shakka.config import REPO_ROOT
 
 # The JWT fragment is concatenated so this file does not match its own pattern.
 PATTERN = r"sb_(secret|publishable)_[A-Za-z0-9_-]{20,}|" + "eyJhbGci" + "Oi"
+
+DEPENDABOT_UPDATES = {("github-actions", "/"), ("npm", "/web"), ("uv", "/ingest")}
 
 ENV_KEYS = [
     "SUPABASE_URL",
@@ -115,3 +119,36 @@ def test_actions_pinned_to_commit_sha():
     assert uses
     unpinned = [f"{name}: {ref}" for name, ref in uses if not pattern.fullmatch(ref)]
     assert unpinned == []
+
+
+def test_dependabot_config() -> None:
+    path = REPO_ROOT / ".github" / "dependabot.yml"
+    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    assert data["version"] == 2
+    updates = data["updates"]
+    assert len(updates) == 3
+    assert {(u["package-ecosystem"], u["directory"]) for u in updates} == DEPENDABOT_UPDATES
+    for u in updates:
+        assert u["schedule"]["interval"] == "monthly", u["package-ecosystem"]
+        assert u["target-branch"] == "develop", u["package-ecosystem"]
+        assert u["open-pull-requests-limit"] == 3, u["package-ecosystem"]
+        assert isinstance(u["groups"], dict) and u["groups"], u["package-ecosystem"]
+        for name, group in u["groups"].items():
+            assert group["patterns"] == ["*"], name
+
+
+def test_actions_pins_have_version_comment() -> None:
+    uses_line = re.compile(r"^\s*-?\s*uses:")
+    valid = re.compile(r"^\s*-?\s*uses:\s*[\w.-]+/[\w.-]+@[0-9a-f]{40} # v\d+(\.\d+){0,2}\s*$")
+    seen = 0
+    bad = []
+    for path in sorted((REPO_ROOT / ".github" / "workflows").glob("*.yml")):
+        lines = path.read_text(encoding="utf-8").splitlines()
+        for number, line in enumerate(lines, start=1):
+            if not uses_line.match(line):
+                continue
+            seen += 1
+            if not valid.fullmatch(line):
+                bad.append(f"{path.name}:{number}")
+    assert seen
+    assert bad == []
