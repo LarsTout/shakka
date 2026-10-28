@@ -3,7 +3,9 @@ import userEvent from '@testing-library/user-event';
 import { tick } from 'svelte';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { resetRsvpMemory } from '../src/lib/rsvp-storage.js';
+import { writeStoredRsvp } from '../src/lib/rsvp-storage.js';
 import { SESSION_RETENTION_DAYS } from '../src/lib/rsvp-types.js';
+import { RSVPS_CLOSED_MESSAGE } from '../src/lib/session-view.js';
 import {
 	EVA_ID,
 	NOOR_ID,
@@ -14,6 +16,7 @@ import {
 	SESSION_EVALS,
 	SESSION_INFO,
 	SLUG,
+	TOKEN,
 	TOM_ID,
 	publicSessionPageData
 } from './fixtures/public-session.js';
@@ -224,5 +227,30 @@ describe('public session page (AC-2)', () => {
 		expect(vi.getTimerCount()).toBeGreaterThan(base);
 		r2.unmount();
 		expect(vi.getTimerCount()).toBe(base);
+	});
+
+	it('(rsvps closed) notice and no form', async () => {
+		render(Page, props(publicSessionPageData({ session: { ...SESSION_INFO, rsvps_closed: true } })));
+		await tick();
+		expect(screen.getByText(RSVPS_CLOSED_MESSAGE)).toBeInTheDocument();
+		expect(screen.queryByLabelText('Voornaam')).toBeNull();
+		expect(screen.queryByRole('button', { name: 'Ik ook' })).toBeNull();
+	});
+
+	it('(rsvps closed) stored token keeps Afmelden and Wijzigen', async () => {
+		writeStoredRsvp(localStorage, SLUG, { rsvp_id: EVA_ID, edit_token: TOKEN });
+		render(Page, props(publicSessionPageData({ session: { ...SESSION_INFO, rsvps_closed: true } })));
+		expect(await screen.findByRole('button', { name: 'Wijzigen' })).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Afmelden' })).toBeInTheDocument();
+	});
+
+	it('(rsvps closed) cancelled wins', async () => {
+		render(
+			Page,
+			props(publicSessionPageData({ session: { ...SESSION_INFO, cancelled: true, rsvps_closed: true } }))
+		);
+		await tick();
+		expect(screen.getByRole('alert')).toHaveTextContent('Deze sessie is geannuleerd');
+		expect(screen.queryByText(RSVPS_CLOSED_MESSAGE)).toBeNull();
 	});
 });
