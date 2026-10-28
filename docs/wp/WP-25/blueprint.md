@@ -1,5 +1,5 @@
 # Blueprint WP-25: Moderatie voor organisatoren
-Status: DRAFT
+Status: APPROVED
 Revisie: 1
 
 ## Doel
