@@ -254,6 +254,7 @@ def alert_counts(result: AlertJobResult) -> dict[str, Any]:
         "failed": result.failed,
         "no_target": result.no_target,
         "deferred": result.deferred,
+        "quiet": result.quiet,
         "blocked_targets": result.blocked_targets,
         "push_non_retryable": result.push_non_retryable,
         "removed": result.removed,
