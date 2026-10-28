@@ -17,6 +17,6 @@ cd ingest && uv run shakka doctor
 - Afwijking A2: één boeking per run met de som i.p.v. per request; de totalen zijn gelijk.
 - Raakpunt met WP-26: alleen `docs/RUNBOOK.md` (andere secties).
 
-Tests: 1789 passed, 24 skipped (live-Supabase); ruff groen. Verificatie: PASS (`docs/wp/WP-27/verification.md`).
+Tests: 1795 passed, 24 skipped (live-Supabase); ruff groen. Verificatie: PASS (`docs/wp/WP-27/verification.md`).
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
