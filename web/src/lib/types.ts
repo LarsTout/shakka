@@ -174,6 +174,8 @@ export interface Profile {
 	default_max_kn: number | null;
 	created_at: string;
 	updated_at: string;
+	quiet_from: string | null; // 'HH:MM:SS', Dutch local time (WP-30)
+	quiet_until: string | null;
 }
 export const PROFILE_COLUMNS = [
 	'user_id',
@@ -183,7 +185,9 @@ export const PROFILE_COLUMNS = [
 	'default_min_kn',
 	'default_max_kn',
 	'created_at',
-	'updated_at'
+	'updated_at',
+	'quiet_from',
+	'quiet_until'
 ] as const;
 /** The only profile columns `authenticated` may update (column grant, WP-01). */
 export const PROFILE_EDITABLE_COLUMNS = [
@@ -195,6 +199,9 @@ export const PROFILE_EDITABLE_COLUMNS = [
 ] as const;
 export type ProfileEditableColumn = (typeof PROFILE_EDITABLE_COLUMNS)[number];
 export type ProfileUpdate = Pick<Profile, ProfileEditableColumn>;
+/** Columns `authenticated` may update for quiet hours (column grant, WP-30). */
+export const QUIET_HOURS_COLUMNS = ['quiet_from', 'quiet_until'] as const;
+export type QuietHoursUpdate = Pick<Profile, (typeof QUIET_HOURS_COLUMNS)[number]>;
 
 export const FAVORITE_COLUMNS = ['user_id', 'spot_id', 'created_at'] as const;
 

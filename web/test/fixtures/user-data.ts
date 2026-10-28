@@ -11,7 +11,9 @@ export const PROFILE_EMPTY: Profile = {
 	default_min_kn: null,
 	default_max_kn: null,
 	created_at: STAMP,
-	updated_at: STAMP
+	updated_at: STAMP,
+	quiet_from: null,
+	quiet_until: null
 };
 
 export const PROFILE_FULL: Profile = {
