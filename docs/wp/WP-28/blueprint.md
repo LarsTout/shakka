@@ -1,5 +1,5 @@
 # Blueprint WP-28: Dependabot
-Status: DRAFT
+Status: APPROVED
 Revisie: 1
 
 ## Doel
