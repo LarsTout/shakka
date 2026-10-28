@@ -9,7 +9,10 @@
 	import { browserStorage } from '#lib/browser-storage.js';
 	import { clearStoredRsvp, readStoredRsvp } from '#lib/rsvp-storage.js';
 	import { SESSION_RETENTION_DAYS, type PublicSession, type StoredRsvp } from '#lib/rsvp-types.js';
-	import { isSessionClosed, optionalText, sessionWindowText, tikkieLink } from '#lib/session-view.js';
+	import {
+		isSessionClosed,
+		optionalText,
+		RSVPS_CLOSED_MESSAGE, sessionWindowText, tikkieLink } from '#lib/session-view.js';
 	import { formatDateKey } from '#lib/time.js';
 	import { groupByLocalDay, latestEvaluatedAt, shouldRefreshOnResume } from '#lib/view.js';
 	import type { PageProps } from './$types';
@@ -121,6 +124,8 @@
 		</div>
 	{:else if ended}
 		<div class="banner" role="note"><p>Deze sessie is voorbij. Aanmelden kan niet meer.</p></div>
+	{:else if session.rsvps_closed}
+		<div class="banner" role="note"><p>{RSVPS_CLOSED_MESSAGE}</p></div>
 	{/if}
 	<p><a href="/spot/{encodeURIComponent(session.spot_id)}">Naar de spotpagina van {spotName}</a></p>
 	{#if note}
@@ -135,7 +140,7 @@
 
 	{#if storageReady}
 		{#key data.slug}
-			<RsvpPanel slug={data.slug} {rsvps} {closed} bind:stored onrefresh={applyRefresh} />
+			<RsvpPanel slug={data.slug} {rsvps} {closed} rsvpsClosed={session.rsvps_closed} bind:stored onrefresh={applyRefresh} />
 		{/key}
 	{/if}
 

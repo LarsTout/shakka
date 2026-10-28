@@ -27,7 +27,8 @@ export const SESSION_INFO: PublicSessionInfo = {
 	seats_free: 3,
 	departure_point: 'Utrecht CS',
 	tikkie_url: 'https://tikkie.me/pay/test',
-	cancelled: false
+	cancelled: false,
+	rsvps_closed: false
 };
 
 export const RSVP_EVA: PublicRsvp = {
