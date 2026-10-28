@@ -24,12 +24,14 @@
 		slug,
 		rsvps,
 		closed,
+		rsvpsClosed = false,
 		stored = $bindable(),
 		onrefresh
 	}: {
 		slug: string;
 		rsvps: PublicRsvp[];
 		closed: boolean;
+		rsvpsClosed?: boolean; // WP-25: the organizer closed sign-ups; hides only the sign-up form
 		stored: StoredRsvp | null;
 		onrefresh: (fresh: PublicSession | null) => void;
 	} = $props();
@@ -38,7 +40,9 @@
 	let busy = $state(false);
 	let error = $state<string | null>(null);
 	let notice = $state<string | null>(null);
-	let serverClosed = $state(false); // A5: the server said session_closed; never reset
+	// A5: the server said session_closed; never reset. After a refused sign-up while sign-ups were
+	// closed, the form therefore stays hidden after the organizer reopens, until the page is reloaded.
+	let serverClosed = $state(false);
 
 	const isClosed = $derived(closed || serverClosed);
 	const me = $derived(stored ? (rsvps.find((r) => r.id === stored!.rsvp_id) ?? null) : null);
@@ -146,8 +150,11 @@
 	}
 </script>
 
-{#if stored || !isClosed || notice || error}
-	<section class="rsvp-panel" aria-labelledby={stored || !isClosed ? 'rsvp-heading' : undefined}>
+{#if stored || (!isClosed && !rsvpsClosed) || notice || error}
+	<section
+		class="rsvp-panel"
+		aria-labelledby={stored || (!isClosed && !rsvpsClosed) ? 'rsvp-heading' : undefined}
+	>
 		{#if stored}
 			<h2 id="rsvp-heading">Jij gaat</h2>
 			{#if me}
@@ -176,7 +183,7 @@
 					>{/if}
 				<button type="button" disabled={busy} onclick={() => (mode = 'confirm_delete')}>Afmelden</button>
 			{/if}
-		{:else if !isClosed}
+		{:else if !isClosed && !rsvpsClosed}
 			<h2 id="rsvp-heading">Ga je mee?</h2>
 			<p>Tik "Ik ook" met alleen je voornaam. Je hebt geen account nodig.</p>
 			<RsvpForm mode="create" initial={emptyRsvpForm()} drivers={[]} {busy} onsubmit={create} />

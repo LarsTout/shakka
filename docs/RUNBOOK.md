@@ -32,6 +32,10 @@ Let op: `SUPABASE_ANON_KEY` en `SUPABASE_SERVICE_ROLE_KEY` worden niet meer gele
 Wat `uv run shakka doctor` meldt:
 - `missing NAAM`: de variabele ontbreekt of is leeg.
 - `invalid SUPABASE_URL`: de URL is geen `https://<project-ref>.supabase.co` zonder pad (`http` mag alleen naar localhost).
+- `invalid SUPABASE_SECRET_KEY`: de sleutel bevat een niet-ASCII-teken, spatie of regeleinde (vaak een kopieerfout). Er volgt dan geen netwerkcheck.
+- `set NAAM (optional)` of `unset NAAM (optional)`: per optionele variabele (`APP_BASE_URL`, `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, `VAPID_SUBJECT`, `OPERATOR_USER_ID`) of die gezet is. Een lege waarde telt als `unset`. De waarde zelf en of ze geldig is, toont `doctor` niet.
+- `error could not read settings (<type>)`: het `.env`-bestand is onleesbaar, bijvoorbeeld geen geldige UTF-8.
+- `error Supabase REST check failed (<type>)`: onverwachte fout in de HTTP-client; alleen de soort wordt getoond.
 - `warn ...`: de sleutel heeft een ander prefix dan verwacht. Legacy-sleutels werken tot eind 2026.
 - `error ... rejected the key (HTTP 401/403)`: verkeerde sleutel. `SUPABASE_SECRET_KEY` moet een secret key zijn.
 - `error ... returned HTTP 404`: verkeerde URL.
@@ -103,6 +107,8 @@ Elk uur haalt de ingest per spot met coördinaten de windverwachting op bij Open
 
 **Modellen en cel.** KNMI HARMONIE, DWD ICON, ECMWF IFS en GFS, met `cell_selection=sea` (zie blueprint WP-03, A1 en A2).
 
+**Horizon.** 8 dagen (`forecast_days=8`, 192 uur vanaf vandaag 00:00 UTC), zodat een alertregel met `days_ahead` 7 de hele lokale dag vandaag+7 heeft. Het gewicht is gelijk aan dat van 7 dagen. KNMI dekt ca. 2,5 dag en ICON 7,5 dag, dus aan het eind van dag 7 rekenen soms alleen ECMWF en GFS (lagere zekerheid).
+
 **Tijdsemantiek.** `gust_kn` op `valid_at` T is de maximale vlaag in [T, T+1h) (de ruwe Open-Meteo-waarde van T+1h); het laatste uur van een respons heeft geen vlaag (A14).
 
 **Lokale test met de stack**
@@ -116,14 +122,14 @@ Elk uur haalt de ingest per spot met coördinaten de windverwachting op bij Open
 
 ```
 curl -sS --fail -o ingest/tests/fixtures/openmeteo/forecast_2loc_4models.json \
- "https://api.open-meteo.com/v1/forecast?latitude=52.4700,52.1000&longitude=4.5700,4.2700&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m&models=knmi_harmonie_arome_netherlands,dwd_icon_seamless,ecmwf_ifs,ncep_gfs_seamless&wind_speed_unit=kn&timezone=GMT&timeformat=unixtime&forecast_days=7&cell_selection=sea"
+ "https://api.open-meteo.com/v1/forecast?latitude=52.4700,52.1000&longitude=4.5700,4.2700&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m&models=knmi_harmonie_arome_netherlands,dwd_icon_seamless,ecmwf_ifs,ncep_gfs_seamless&wind_speed_unit=kn&timezone=GMT&timeformat=unixtime&forecast_days=8&cell_selection=sea"
 ```
 
 Pas daarna `CAPTURE_URL` en `CAPTURE_DATE` in `ingest/tests/test_openmeteo_forecast.py` aan. `ingest/tests/fixtures/openmeteo/README.md` bevat de CC BY 4.0-vermelding van Open-Meteo; werk de opnamedatum (en URL) daar ook bij.
 
 ## 10. Getij (Rijkswaterstaat, vanaf WP-04)
 1. `cd ingest && uv run shakka tides stations --search hoek` toont stations met astronomische hoog- en laagwaters (code, naam, lat, lon). Zet de `code` als `rws_station` in `data/spots.yaml`. Neem het dichtstbijzijnde station aan dezelfde kust of hetzelfde zeegat. Dit commando heeft geen `.env` nodig.
-2. `uv run shakka tides fetch` haalt per station eens per 20 uur op; `--force` negeert die regel. Exitcode 1 betekent dat minstens één station faalde (zie de regels onder `failed`).
+2. `uv run shakka tides fetch` haalt per station eens per 20 uur op; `--force` negeert die regel. Stations met de oudste data (of nog zonder data) komen eerst, zodat bij een krap tijdsbudget in de uurlijkse run de oudste data worden ververst. Elke aanroep naar Rijkswaterstaat telt als een request en wordt per run geboekt in `api_usage` (bron `rws`, `requests` en `calls` zijn gelijk; retries tellen niet apart). Er is geen limiet of drempel. Een mislukte boeking komt als `api_usage: ...` in de fouten, zonder de getijdata te raken. Exitcode 1 betekent dat minstens één station faalde (zie de regels onder `failed`).
 3. Hoek van Holland kent een dubbel laagwater. Dat wordt opgeslagen als twee laagwaters; de topagger ertussen wordt niet opgeslagen.
 4. Een onbekend extreemtype (bijv. bij dubbel hoogwater) laat het station falen in plaats van iets te raden. Meld het dan als issue.
 5. Bron: Rijkswaterstaat WaterWebservices (DDAPI20), CC0. Geen uptimegarantie. Een storing van een paar dagen is geen probleem, want er staat 8 dagen vooruit in de database.
@@ -256,13 +262,13 @@ Laatste activiteitscommit: 2026-10-15
 2. Na de merge: `supabase db push` (§8.3), en wel vóór de promotie naar `main`, want de schedule draait de code van `main` (§13.1) en de stap `sessions_cleanup` faalt zolang de RPC ontbreekt (`PGRST202`, elk uur een `::error::`-annotatie, geen mail). Controleer eerst in de SQL-editor dat pgcrypto in het schema `extensions` staat: `select extnamespace::regnamespace from pg_extension where extname = 'pgcrypto';` moet `extensions` geven. De migratie zelf stopt met een fout als dat niet zo is; push dan niet verder en meld het, want `rsvp_create` gebruikt `extensions.gen_random_bytes`.
 3. Geeft een RPC direct na de push `PGRST202` (functie niet gevonden), voer dan in de SQL-editor `notify pgrst, 'reload schema';` uit.
 4. Limieten: hoogstens 30 RSVP's per sessie, hoogstens 10 nieuwe RSVP's per sessie per 10 minuten, hoogstens 10 nieuwe sessies per organisator per 24 uur. Er wordt geen IP-adres opgeslagen.
-5. Een sessie handmatig verwijderen (bijv. bij misbruik): in de SQL-editor `delete from public.sessions where slug = '<slug>';`. De RSVP's gaan mee. Eén RSVP verwijderen: `delete from public.rsvps where id = '<id>';`.
+5. Een aanmelding verwijderen doet de organisator zelf op `/sessie/<slug>/beheer` (vanaf WP-25). Terugvaloptie, of bij misbruik over meerdere sessies: de SQL-editor, met `delete from public.sessions where slug = '<slug>';` (de RSVP's gaan mee) of `delete from public.rsvps where id = '<id>';`.
 6. Geen enkele API-rol mag `rsvps` direct lezen, ook de ingest niet. Ook `sessions` is niet leesbaar voor `service_role` (bewust, zie §8.2). Kijken kan alleen via de SQL-editor (rol `postgres`).
 7. De edit-token van een RSVP gaat alleen in de body van een POST-verzoek (de standaard van supabase-js voor `rpc()`), nooit in een URL, querystring of link: URL's komen in logs van de gateway terecht. In de database staat alleen de sha256-hash. Log de token ook nergens anders.
 8. **Publieke sessiepagina (vanaf WP-21).**
    - `/s/<slug>` werkt zonder account. Je ziet de sessie, de deelnemers, de carpool en het oordeel per uur, en je meldt je aan met alleen een voornaam.
    - De edit-token staat alleen in de browser van de bezoeker (`localStorage`, sleutel `shakka:rsvp:<slug>`). Wie een andere browser of de in-app-browser van WhatsApp gebruikt, of de websitedata wist, kan zich daar niet meer afmelden.
-   - Een RSVP verwijderen voor iemand gaat via de SQL-editor (punt 5): zoek eerst de id met `select r.id, r.first_name from public.rsvps r join public.sessions s on s.id = r.session_id where s.slug = '<slug>';`.
+   - Een RSVP voor iemand verwijderen: de organisator via 'Mijn sessies' → 'Aanmeldingen beheren'. Anders punt 5.
    - De pagina heeft `noindex`. Zoekmachines nemen hem niet op, maar iedereen met de link kan de voornamen zien.
 9. **Controle (WP-21 AC-7).**
    - Zonder WP-20 maak je een testsessie in de SQL-editor:
@@ -274,6 +280,11 @@ Laatste activiteitscommit: 2026-10-15
    - Open `https://<project>.pages.dev/s/<slug>` op een telefoon zonder in te loggen, bijvoorbeeld via een link in WhatsApp. Meld je aan, wijzig je aanmelding (bijvoorbeeld naar "Ik kan mensen meenemen") en meld je af.
    - Controleer in de SQL-editor dat de RSVP weg is.
    - Ruim de testsessie op met `delete from public.sessions where slug = '<slug>';`.
+10. **Moderatie (vanaf WP-25).**
+   - De organisator kan op `/sessie/<slug>/beheer` (via 'Mijn sessies' → 'Aanmeldingen beheren') een aanmelding verwijderen en het aanmelden sluiten of weer openen. Sluiten blokkeert alleen nieuwe aanmeldingen; wie al aangemeld is, kan nog wijzigen en afmelden.
+   - Na de merge: `supabase db push` voor `20261028090000_organizer_moderation.sql`, vóór de promotie naar `main`. Tot die tijd geeft 'Verwijderen' een foutmelding en lukt sluiten niet; `/s/<slug>` blijft gewoon werken, want de pagina leest een ontbrekende `rsvps_closed` als open.
+   - Geeft een RPC direct na de push `PGRST202`: punt 3.
+   - Controle (AC-7, door Lars): maak een testsessie en meld je er op `/s/<slug>` twee keer aan, met verschillende voornamen. Open `/sessie/<slug>/beheer` ingelogd als organisator. Verwijder één aanmelding en controleer dat die ook op `/s/<slug>` weg is. Sluit het aanmelden en controleer dat `/s/<slug>` de melding toont en geen formulier, en dat een bestaande aanmelding nog kan wijzigen en afmelden. Open het aanmelden weer en controleer dat het formulier terugkomt. Een tweede account kan de beheerpagina van deze sessie niet gebruiken (toont 'Sessie niet gevonden'). Ruim de testsessie op (punt 5).
 
 
 ## 17. Privacy, CSP en performance (vanaf WP-23)
@@ -297,7 +308,7 @@ Laatste activiteitscommit: 2026-10-15
 Veldjes die Lars invult staan onderaan §18.6 en §18.9.
 
 1. **Gebruiksrapport en waarschuwingen.**
-   - De laatste stap van de uurlijkse run, `usage_report`, leest elk uur het Open-Meteo-verbruik (`api_usage`) en de databasegrootte (RPC `db_usage`). Het volledige rapport staat in `ingest_runs`, stap `usage_report`, `counts.report`.
+   - De laatste stap van de uurlijkse run, `usage_report`, leest elk uur het Open-Meteo-verbruik (`api_usage`) en de databasegrootte (RPC `db_usage`). Op maandag (en bij `shakka usage show`) komt ook het aantal RWS-requests van de laatste 7 UTC-dagen erbij, als regel `Rijkswaterstaat (7 dagen): <n> requests` direct onder de Open-Meteo-regel. Het volledige rapport staat in `ingest_runs`, stap `usage_report`, `counts.report`.
    - Elke maandag tussen 08:00 en 22:00 (Europe/Amsterdam) gaat een korte samenvatting als pushmelding naar de apparaten van Lars (`OPERATOR_USER_ID`), tot het één keer gelukt is. Valt de maandag weg, dan komt het rapport pas de volgende maandag.
    - Drempels: database boven 300 MB (1 MB = 1024 × 1024 bytes, zoals het dashboard), Open-Meteo boven 7.000 calls op de UTC-dag of boven 210.000 in de UTC-maand (70% van de echte limieten). Een waarschuwing staat elk uur als `::warning::usage_report: usage threshold: ...` in de Actions-log zolang de drempel overschreden is. De pushmelding gaat hoogstens één keer per lokale dag en alleen tussen 08:00 en 22:00. Op maandag bevat het weekrapport de waarschuwingen zelf.
    - De stap ruimt in de weekrapport-run ook `ingest_runs` op die ouder zijn dan 90 dagen.
@@ -375,16 +386,24 @@ Veldjes die Lars invult staan onderaan §18.6 en §18.9.
    | GitHub Actions | Actions-tab (publieke repo: minuten onbeperkt) | - | Schedule niet actief, of geen run in de laatste 2 uur |
    | Cloudflare Pages | Builds | 500 per maand | > 350 |
    | SMTP-dienst | Dashboard van de dienst | Resend 100 per dag en 3.000 per maand; Gmail 500 per dag | > 70% |
-   | Dependencies | `npm audit` en `pip-audit` (punt 10) | - | high of critical |
-   | Actions-pins | Releases van `actions/checkout` en `actions/setup-node` | - | Nieuwe release |
+   | Dependencies | Security, Dependabot alerts | - | Open alert (high of critical) zonder PR: punt 10, handmatig |
+   | Dependabot-PR's | Pull requests, filter `is:open author:app/dependabot` | - | Open PR: reviewen en mergen (punt 10) |
 
    MapTiler rekent Shakka in requests, omdat de kaart MapLibre GL JS gebruikt en niet de MapTiler-SDK; de grens van 5.000 map sessions uit het projectplan geldt alleen voor die SDK en is hier niet van toepassing. Vergelijk bij de eerste maandcheck ook de databasegrootte in het weekrapport met het dashboard.
+
+   Dependabot en Cloudflare: elke push naar een `dependabot/*`-branch (een nieuwe PR of een rebase) is een preview-build. Verwacht wordt hoogstens 15 per maand. Komt Builds boven 350, zet dan in Cloudflare Pages bij de automatische preview-deployments "Custom branches" met include `*` en exclude `dependabot/*`. CI bouwt de web-app toch al.
 9. **Open-Meteo-bevestiging.** Stuur een korte mail (Engels) aan info@open-meteo.com. Concept:
 
    > Hello, Shakka is a free public PWA for kitesurfers in the Netherlands, without ads or subscriptions. It reads Open-Meteo forecasts server-side only, caches them per spot, and makes about 40,000 API calls per month. Open-Meteo is credited in the app. We believe this falls under non-commercial use; could you confirm that this is fine?
 
    Open-Meteo-bevestiging: datum: nog in te vullen door Lars / uitkomst: nog in te vullen door Lars.
-10. **Dependency-audit** (maandelijks, met de hand; geen CI-stap, geen Dependabot).
-    - Web: `cd web && npm audit --omit=dev --audit-level=high`. Los een bevinding op met een minimale update (`npm update <pakket>` of `npm audit fix --omit=dev`, nooit `--force`) en draai daarna `npm run check && npm test && npm run build`.
-    - Ingest: `cd ingest && uv export --format requirements-txt --frozen --no-emit-project -o /tmp/shakka-req.txt && uvx pip-audit --require-hashes --disable-pip -r /tmp/shakka-req.txt`. Bij een bevinding: `uv lock --upgrade-package <pakket>` binnen de grenzen van `pyproject.toml`, dan de volledige test.
-    - GitHub Actions staan vastgezet op een commit-SHA (een test bewaakt dat). Bijwerken: zoek de SHA van de nieuwe release met `gh api repos/<eigenaar>/<repo>/git/ref/tags/<tag> --jq .object.sha` (is `object.type` "tag", dereferentieer dan met `gh api repos/<eigenaar>/<repo>/git/tags/<sha> --jq .object.sha`) en schrijf de versie als commentaar achter de SHA.
+10. **Dependency-updates en -audit** (Dependabot plus een handmatige terugval; geen CI-stap, niet automatisch mergen).
+    - `.github/dependabot.yml` kijkt op de eerste dag van de maand naar `github-actions` (`/`), `npm` (`/web`) en `uv` (`/ingest`). Minor- en patch-updates komen per ecosysteem als één PR naar `develop`; een major komt als losse PR (hoogstens 3 open PR's per ecosysteem). Een update binnen de grenzen van `package.json` of `pyproject.toml` wijzigt alleen de lockfile. Een PR die een grens in de manifest verruimt, verdient extra aandacht. Majors van `@types/node` worden overgeslagen; die horen bij een Node-upgrade.
+    - Aanzetten (eenmalig): Settings, Advanced Security: "Dependabot alerts" en "Dependabot security updates" op Enable. Security updates komen los en buiten de maandplanning, als PR naar `develop` (de default branch).
+    - Dependabot-PR's krijgen geen Actions-secrets en een `GITHUB_TOKEN` met alleen leesrechten. CI gebruikt geen secrets (§7) en draait dus gewoon. Een merge op `develop` komt pas in productie bij de promotie naar `main`.
+    - Reviewen: CI is groen; bij de `npm`-PR de preview kort openen (kaart, inloggen); bij een Actions-PR in de diff controleren dat elke `uses:` op een SHA van 40 tekens staat, met de nieuwe versie als `# vX.Y.Z` op dezelfde regel. Twee tests bewaken de SHA en de vorm van het commentaar, maar niet of het commentaar bij de SHA hoort.
+    - Een PR die CI breekt of die je niet wilt: niet mergen. Losse PR: `@dependabot ignore this major version` (of `minor version`, `this dependency`). Gegroepeerde PR: `@dependabot ignore <pakket> minor version` (of `major version`, of alleen `<pakket>`). Terugdraaien: `@dependabot unignore <pakket>`.
+    - Handmatig, als terugval of bij twijfel:
+      - Web: `cd web && npm audit --omit=dev --audit-level=high`. Los een bevinding op met een minimale update (`npm update <pakket>` of `npm audit fix --omit=dev`, nooit `--force`) en draai daarna `npm run check && npm test && npm run build`.
+      - Ingest: `cd ingest && uv export --format requirements-txt --frozen --no-emit-project -o /tmp/shakka-req.txt && uvx pip-audit --require-hashes --disable-pip -r /tmp/shakka-req.txt`. Bij een bevinding: `uv lock --upgrade-package <pakket>` binnen de grenzen van `pyproject.toml`, dan de volledige test.
+      - Een SHA-pin zelf bijwerken: zoek de SHA van de release met `gh api repos/<eigenaar>/<repo>/git/ref/tags/<tag> --jq .object.sha`. Is `object.type` "tag", dereferentieer dan met `gh api repos/<eigenaar>/<repo>/git/tags/<sha> --jq .object.sha`. Schrijf de versie als `# vX.Y.Z` op dezelfde regel achter de SHA.

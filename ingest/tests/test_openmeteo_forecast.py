@@ -17,6 +17,7 @@ import httpx
 import pytest
 
 from openmeteo_payloads import make_forecast_payload
+from shakka.domain.alerts import DAYS_AHEAD_RANGE
 from shakka.domain.forecast import ForecastHour, ModelKey, SpotLocation
 from shakka.openmeteo.forecast import (
     CELL_SELECTION,
@@ -30,12 +31,12 @@ from shakka.openmeteo.forecast import (
 )
 from shakka.openmeteo.models import OPEN_METEO_MODELS
 
-CAPTURE_DATE = "2026-10-14"
+CAPTURE_DATE = "2026-10-28"
 CAPTURE_URL = (
     "https://api.open-meteo.com/v1/forecast?latitude=52.4700,52.1000&longitude=4.5700,4.2700"
     "&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m"
     "&models=knmi_harmonie_arome_netherlands,dwd_icon_seamless,ecmwf_ifs,ncep_gfs_seamless"
-    "&wind_speed_unit=kn&timezone=GMT&timeformat=unixtime&forecast_days=7&cell_selection=sea"
+    "&wind_speed_unit=kn&timezone=GMT&timeformat=unixtime&forecast_days=8&cell_selection=sea"
 )
 FIXTURE = Path(__file__).parent / "fixtures" / "openmeteo" / "forecast_2loc_4models.json"
 FIXTURE_LOCATIONS = [
@@ -146,7 +147,7 @@ def test_fixture_sample_per_model(
         assert row.gust_kn == hourly[f"wind_gusts_10m_{model_id}"][i + 1]
 
 
-@pytest.mark.parametrize("model", [ModelKey.ICON, ModelKey.ECMWF, ModelKey.GFS])
+@pytest.mark.parametrize("model", [ModelKey.ECMWF, ModelKey.GFS])
 def test_fixture_last_hour_gust_is_none(
     raw: list[dict[str, Any]], parsed: list[ForecastHour], model: ModelKey
 ) -> None:
@@ -160,6 +161,30 @@ def test_fixture_last_hour_gust_is_none(
         ]
         assert row.gust_kn is None
         assert row.wind_kn == last
+
+
+def test_fixture_has_eight_days(raw: list[dict[str, Any]]) -> None:
+    for element in raw:
+        times = element["hourly"]["time"]
+        assert len(times) == 192
+        assert all(b - a == 3600 for a, b in zip(times, times[1:], strict=False))
+        assert times[0] % 86400 == 0
+        assert datetime.fromtimestamp(times[0], UTC).date().isoformat() == CAPTURE_DATE
+
+
+def test_fixture_covers_day_seven(raw: list[dict[str, Any]], parsed: list[ForecastHour]) -> None:
+    # ICON is not asserted: its latest run may end before UTC day +7 (capture-time dependent).
+    for loc_idx, location in enumerate(FIXTURE_LOCATIONS):
+        hourly = raw[loc_idx]["hourly"]
+        day7 = datetime.fromtimestamp(hourly["time"][0], UTC) + timedelta(days=7)
+        for model in (ModelKey.ECMWF, ModelKey.GFS):
+            speeds = hourly[f"wind_speed_10m_{OPEN_METEO_MODELS[model]}"]
+            assert all(v is not None for v in speeds[168:192])
+            assert any(r.valid_at >= day7 for r in by_model(parsed, location.spot_id, model))
+
+
+def test_forecast_days_cover_max_days_ahead() -> None:
+    assert DAYS_AHEAD_RANGE[1] + 1 == DEFAULT_FORECAST_DAYS
 
 
 def test_fixture_no_all_none_rows(parsed: list[ForecastHour]) -> None:
@@ -200,7 +225,7 @@ def test_build_params_exact() -> None:
         "wind_speed_unit": "kn",
         "timezone": "GMT",
         "timeformat": "unixtime",
-        "forecast_days": "7",
+        "forecast_days": "8",
         "cell_selection": "sea",
     }
     assert list(params) == [
@@ -214,7 +239,7 @@ def test_build_params_exact() -> None:
         "forecast_days",
         "cell_selection",
     ]
-    assert DEFAULT_FORECAST_DAYS == 7 and CELL_SELECTION == "sea"
+    assert DEFAULT_FORECAST_DAYS == 8 and CELL_SELECTION == "sea"
     assert HOURLY_VARIABLES == ("wind_speed_10m", "wind_direction_10m", "wind_gusts_10m")
 
 

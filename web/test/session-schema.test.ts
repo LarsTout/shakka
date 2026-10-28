@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import {
 	DEPARTURE_POINT_MAX,
@@ -13,10 +13,10 @@ import {
 	TIKKIE_URL_MAX
 } from '../src/lib/session-model.js';
 
-const SQL = readFileSync(
-	new URL('../../supabase/migrations/20261015200000_sessions.sql', import.meta.url),
-	'utf8'
-);
+const MIGRATIONS = new URL('../../supabase/migrations/', import.meta.url);
+const SESSIONS_FILE = '20261015200000_sessions.sql';
+const MODERATION_FILE = '20261028090000_organizer_moderation.sql';
+const SQL = readFileSync(new URL(SESSIONS_FILE, MIGRATIONS), 'utf8');
 
 function columns(table: string): string[] {
 	const lines = SQL.split('\n');
@@ -76,5 +76,35 @@ describe('sessions schema drift (AC-4)', () => {
 		expect(after('sessions_window_max_16h')).toContain(`interval '${SESSION_MAX_HOURS} hours'`);
 		expect(after('sessions_slug_format')).toContain('{10,64}');
 		expect(SESSION_SLUG_RE.source).toContain('{10,64}');
+	});
+});
+
+describe('later migrations on public.sessions (WP-25)', () => {
+	it('later migrations change public.sessions only by adding rsvps_closed_at', () => {
+		const found: string[] = [];
+		const alter = /alter\s+table\s+(?:if\s+exists\s+)?(?:only\s+)?public\.sessions\b([^;]*);/gi;
+		const clause = /\b(add|drop|rename)\s+(?:column\s+)?(?:if\s+(?:not\s+)?exists\s+)?(\w+)/gi;
+		const later = readdirSync(MIGRATIONS)
+			.filter((f) => f.endsWith('.sql') && f > SESSIONS_FILE)
+			.sort();
+		for (const file of later) {
+			const t = readFileSync(new URL(file, MIGRATIONS), 'utf8');
+			for (const a of t.matchAll(alter)) {
+				// Match per comma-separated clause; a comma inside parentheses (types, defaults) never starts one.
+				const clauses = a[1]!.split(/,(?![^(]*\))/);
+				for (const c of clauses) {
+					for (const m of c.matchAll(clause)) {
+						// "add constraint", "add primary key" etc. are not columns: report them too.
+						found.push(`${file}:${m[1]!.toLowerCase()}:${m[2]}`);
+					}
+				}
+			}
+		}
+		expect(found).toEqual([`${MODERATION_FILE}:add:rsvps_closed_at`]);
+	});
+	it('the WP-25 migration grants update on rsvps_closed_at and SESSION_COLUMNS leaves it out', () => {
+		const t = readFileSync(new URL(MODERATION_FILE, MIGRATIONS), 'utf8');
+		expect(t).toContain('grant update (rsvps_closed_at) on table public.sessions to authenticated');
+		expect(SESSION_COLUMNS as readonly string[]).not.toContain('rsvps_closed_at');
 	});
 });

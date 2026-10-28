@@ -55,6 +55,7 @@ STATS_OK = UsageStats(
     step_issues={"tides": 3, "marine": 5},
     push_sent=12,
     push_failed=1,
+    rws_requests_7d=12,
 )
 STATS_WARN = dataclasses.replace(
     STATS_OK,
@@ -68,6 +69,7 @@ GOLDEN = "\n".join(
         "Shakka gebruiksrapport tot 2026-07-20 08:17 (Europe/Amsterdam)",
         "Waarschuwingen: geen",
         "Open-Meteo: vandaag 1.400 calls, hoogste dag (7 dagen) 1.421, limiet 10.000 per dag; deze maand 26.000, limiet 300.000",  # noqa: E501
+        "Rijkswaterstaat (7 dagen): 12 requests",
         "Database: 42 MB van 500 MB",
         "Rijen: alert_rules 3, alert_state 2, api_usage 40, evaluations 4.800, favorites 3, forecast_hours 14.500, ingest_runs 1.000, marine_hours 4.000, profiles 2, push_subscriptions 2, rsvps 0, sessions 0, spots 25, tide_extremes 300",  # noqa: E501
         "Runs (7 dagen): 168, waarvan 160 ok, 7 partial, 1 failed (95% ok)",
@@ -93,7 +95,8 @@ def test_build_usage_report_with_warnings_golden():
         "Open-Meteo: vandaag 7.100 calls, hoogste dag (7 dagen) 7.100, limiet 10.000 per dag; "
         "deze maand 26.000, limiet 300.000"
     )
-    assert lines[5] == "Database: 310 MB van 500 MB"
+    assert lines[5] == "Rijkswaterstaat (7 dagen): 12 requests"
+    assert lines[6] == "Database: 310 MB van 500 MB"
 
 
 def test_build_usage_report_unknown():
@@ -101,6 +104,7 @@ def test_build_usage_report_unknown():
     assert lines[1:] == [
         "Waarschuwingen: geen",
         "Open-Meteo: onbekend",
+        "Rijkswaterstaat (7 dagen): onbekend",
         "Database: onbekend",
         "Rijen: onbekend",
         "Runs (7 dagen): onbekend",
@@ -240,6 +244,9 @@ def test_time_helpers():
         {"runs_ok": 1},
         {"table_rows": {"spots": -1}},
         {"step_issues": {"tides": 1.5}},
+        {"rws_requests_7d": -1},
+        {"rws_requests_7d": 1.5},
+        {"rws_requests_7d": True},
     ],
 )
 def test_usage_stats_validation(kwargs):
@@ -251,3 +258,8 @@ def test_usage_stats_validation(kwargs):
 def test_limits_match_budget():
     assert OPEN_METEO_DAILY_LIMIT == BUDGET_DAILY
     assert OPEN_METEO_MONTHLY_LIMIT == BUDGET_MONTHLY
+
+
+def test_rws_requests_thousands():
+    stats = dataclasses.replace(STATS_OK, rws_requests_7d=1234)
+    assert "Rijkswaterstaat (7 dagen): 1.234 requests" in build_usage_report(stats).split("\n")

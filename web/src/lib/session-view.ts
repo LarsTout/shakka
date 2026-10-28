@@ -56,10 +56,12 @@ export function rsvpErrorKind(error: unknown, status?: number): RsvpErrorKind {
 	return 'unknown';
 }
 
+export const RSVPS_CLOSED_MESSAGE = 'De organisator heeft het aanmelden gesloten.';
+
 export const RSVP_MESSAGES: Record<RsvpErrorKind, string> = {
 	rate_limited: 'Er melden zich nu veel mensen tegelijk aan. Probeer het over een paar minuten opnieuw.',
 	session_full: 'Deze sessie zit vol: naast de organisator kunnen hoogstens 30 mensen zich aanmelden.',
-	session_closed: 'Dit kan niet meer: de sessie is geannuleerd of al voorbij.',
+	session_closed: 'Dit kan niet meer: de sessie is geannuleerd of voorbij, of het aanmelden is gesloten.',
 	invalid_input:
 		'Dat ging niet goed. Controleer je voornaam (1 tot 30 tekens) en je vervoerskeuze, en probeer het opnieuw.',
 	invalid_token: 'Je aanmelding is niet meer gevonden. Meld je opnieuw aan als je nog mee wilt.',
@@ -139,7 +141,8 @@ export function parsePublicSession(json: unknown): PublicSession {
 		!isStrOrNull(s.departure_point) ||
 		!isStrOrNull(s.tikkie_url) ||
 		!isIntOrNull(s.seats_free) ||
-		typeof s.cancelled !== 'boolean'
+		typeof s.cancelled !== 'boolean' ||
+		(s.rsvps_closed !== undefined && typeof s.rsvps_closed !== 'boolean')
 	) {
 		throw new RsvpError('unknown', op);
 	}
@@ -157,7 +160,9 @@ export function parsePublicSession(json: unknown): PublicSession {
 		seats_free: s.seats_free,
 		departure_point: s.departure_point,
 		tikkie_url: s.tikkie_url,
-		cancelled: s.cancelled
+		cancelled: s.cancelled,
+		// A database without the WP-25 migration omits the key: open.
+		rsvps_closed: s.rsvps_closed === true
 	};
 	return { session, rsvps: json.rsvps.map((item) => parsePublicRsvp(item, op)) };
 }

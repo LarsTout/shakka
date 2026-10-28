@@ -15,7 +15,7 @@ from shakka.openmeteo.models import OPEN_METEO_MODELS
 
 FORECAST_URL: Final = "https://api.open-meteo.com/v1/forecast"
 HOURLY_VARIABLES: Final = ("wind_speed_10m", "wind_direction_10m", "wind_gusts_10m")
-DEFAULT_FORECAST_DAYS: Final = 7
+DEFAULT_FORECAST_DAYS: Final = 8
 MAX_LOCATIONS_PER_REQUEST: Final = 50
 CELL_SELECTION: Final = "sea"  # A2, choice for Lars
 SPEED_UNIT: Final = "kn"

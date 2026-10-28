@@ -33,7 +33,7 @@ set local role anon;
 select is(public.get_public_session('pgtap-unknown-01'), null::jsonb, 'unknown slug gives null');
 select is(public.get_public_session('bad slug!'), null::jsonb, 'malformed slug gives null');
 select set_eq($$select k from jsonb_object_keys(public.get_public_session('pgtap-open-0001')) k$$, $$values ('session'), ('rsvps')$$, 'top-level keys');
-select set_eq($$select k from jsonb_object_keys(public.get_public_session('pgtap-open-0001')->'session') k$$, $$values ('slug'), ('spot_id'), ('spot_name'), ('organizer_name'), ('starts_at'), ('ends_at'), ('note'), ('seats_free'), ('departure_point'), ('tikkie_url'), ('cancelled')$$, 'session keys');
+select set_eq($$select k from jsonb_object_keys(public.get_public_session('pgtap-open-0001')->'session') k$$, $$values ('slug'), ('spot_id'), ('spot_name'), ('organizer_name'), ('starts_at'), ('ends_at'), ('note'), ('seats_free'), ('departure_point'), ('tikkie_url'), ('cancelled'), ('rsvps_closed')$$, 'session keys');
 select set_eq($$select k from jsonb_object_keys(public.get_public_session('pgtap-open-0001')->'rsvps'->0) k$$, $$values ('id'), ('first_name'), ('ride'), ('seats_offered'), ('rides_with'), ('created_at')$$, 'rsvp keys');
 select ok(public.get_public_session('pgtap-open-0001')::text !~ '(organizer_id|edit_token|email|user_id|recent_rsvp_creates)', 'no private keys in the public view');
 select is(public.get_public_session('pgtap-open-0001')->'session'->>'spot_name', 'Pgtap Spot', 'spot name is included');
