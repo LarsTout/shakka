@@ -7,6 +7,7 @@ import {
 	FAVORITE_COLUMNS,
 	PROFILE_COLUMNS,
 	PROFILE_EDITABLE_COLUMNS,
+	QUIET_HOURS_COLUMNS,
 	RULE_FIELDS,
 	SPOT_COLUMNS,
 	SUMMARY_COLUMNS,
@@ -19,6 +20,11 @@ const m1Security = readFileSync(new URL('20261015090100_m1_security.sql', MIGRAT
 
 // WP-22 drops the unused legacy profiles column; that migration is the one allowed exception.
 const DROP_LEGACY_MIGRATION = '20261015220000_drop_profiles_telegram_chat_id.sql';
+
+// Migrations that only add columns to public.profiles (WP-30; WP-24 appends its own). Their
+// columns are appended to PROFILE_COLUMNS in this order.
+const PROFILE_ADD_MIGRATIONS = ['20261028120000_quiet_hours.sql'];
+const QUIET_MIGRATION = '20261028120000_quiet_hours.sql';
 
 function columns(table: string): string[] {
 	const lines = m1.split('\n');
@@ -53,7 +59,14 @@ describe('schema columns (A1)', () => {
 
 	it('PROFILE_COLUMNS equals public.profiles without the unused legacy column', () => {
 		const legacy = ['telegram', 'chat_id'].join('_');
-		expect([...PROFILE_COLUMNS]).toEqual(columns('profiles').filter((c) => c !== legacy));
+		const added = PROFILE_ADD_MIGRATIONS.flatMap((f) => {
+			const sql = readFileSync(new URL(f, MIGRATIONS), 'utf8');
+			return [...sql.matchAll(/alter table public\.profiles add column (\w+)/g)].map((m) => m[1]!);
+		});
+		expect([...PROFILE_COLUMNS]).toEqual([
+			...columns('profiles').filter((c) => c !== legacy),
+			...added
+		]);
 	});
 	it('FAVORITE_COLUMNS equals public.favorites', () => {
 		expect([...FAVORITE_COLUMNS]).toEqual(columns('favorites'));
@@ -79,9 +92,21 @@ describe('schema columns (A1)', () => {
 		for (const f of readdirSync(MIGRATIONS).filter(
 			(n) => n.endsWith('.sql') && n !== DROP_LEGACY_MIGRATION
 		)) {
-			const sql = readFileSync(new URL(f, MIGRATIONS), 'utf8');
+			let sql = readFileSync(new URL(f, MIGRATIONS), 'utf8');
+			// Profile-add migrations may only add columns to profiles; other tables stay checked.
+			if (PROFILE_ADD_MIGRATIONS.includes(f)) {
+				sql = sql.replace(/alter table public\.profiles add column \w+ [^;]*;/g, '');
+			}
 			expect(re.test(sql), `${f}: update types.ts and this test`).toBe(false);
 		}
+	});
+
+	it('the WP-30 migration grants update on exactly QUIET_HOURS_COLUMNS', () => {
+		const sql = readFileSync(new URL(QUIET_MIGRATION, MIGRATIONS), 'utf8');
+		const m = /grant update \(([^)]*)\)\s+on table public\.profiles to authenticated/.exec(sql);
+		expect(m).not.toBeNull();
+		const granted = m![1]!.split(',').map((c) => c.trim());
+		expect(granted).toEqual([...QUIET_HOURS_COLUMNS]);
 	});
 
 	it('the WP-22 migration drops exactly the legacy profiles column', () => {

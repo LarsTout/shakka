@@ -687,7 +687,7 @@ def test_alert_counts_shape():
         "users", "events", "favorites", "ineligible", "disabled", "skipped", "write_errors",
         "deleted", "new", "improved", "worsened", "cancelled", "errors",
         "sent", "failed", "no_target", "deferred", "removed", "push_enabled", "push_failures",
-        "blocked_targets", "push_non_retryable",
+        "blocked_targets", "push_non_retryable", "quiet",
     }  # fmt: skip
     assert "messages" not in counts
 
@@ -864,6 +864,20 @@ def test_hourly_deferred_warning(tmp_path):
     seed_subs(ok_db, USER_A, 1)
     ok_report = run_real(tmp_path, ok_db, notifiers={"webpush": FakeNotifier()})
     assert not any(a.startswith("::warning::alerts:") for a in ok_report.annotations)
+
+
+def test_hourly_quiet_is_ok_not_partial(tmp_path):
+    db = FakeSupabase()
+    seed_profile(
+        db, USER_A, level="intermediate", quiet_from="08:00:00", quiet_until="09:00:00"
+    )  # NOW is 08:17 local
+    seed_favorite(db, USER_A, "test-strand", min_kn=12)
+    seed_subs(db, USER_A, 1)
+    report = run_real(tmp_path, db, notifiers={"webpush": FakeNotifier()})
+    alerts = step(report, "alerts")
+    assert alerts.status == "ok" and alerts.warnings == ()
+    assert alerts.counts["quiet"] == 1 and alerts.counts["events"] == 0
+    assert not any(a.startswith("::warning::alerts:") for a in report.annotations)
 
 
 def test_non_retryable_push_is_partial_with_warning(tmp_path):

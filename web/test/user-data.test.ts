@@ -28,12 +28,14 @@ import {
 	removeFavorite,
 	resetAlertRule,
 	saveAlertRule,
-	updateProfile
+	updateProfile,
+	updateQuietHours
 } from '../src/lib/user-data.js';
 import {
 	ALERT_RULE_COLUMNS,
 	PROFILE_COLUMNS,
 	PROFILE_EDITABLE_COLUMNS,
+	QUIET_HOURS_COLUMNS,
 	RULE_FIELDS,
 	type AlertRuleValues,
 	type ProfileUpdate
@@ -102,6 +104,27 @@ describe('profiles', () => {
 	it('updateProfile reports PGRST116', async () => {
 		fake.current.respond('profiles', { data: null, error: { code: 'PGRST116' } });
 		await expect(updateProfile(USER_ID, VALUES)).rejects.toMatchObject({ code: 'PGRST116' });
+	});
+	it('updateQuietHours writes exactly quiet_from and quiet_until', async () => {
+		const saved = { ...PROFILE_FULL, quiet_from: '22:00:00', quiet_until: '07:00:00' };
+		fake.current.respond('profiles', { data: saved, error: null });
+		const values = { quiet_from: '22:00:00', quiet_until: '07:00:00' };
+		const withExtra = { ...values, weight_kg: 1, user_id: 'y' };
+		expect(await updateQuietHours(USER_ID, withExtra)).toEqual(saved);
+		const call = fake.current.calls[0]!;
+		expect(call.ops).toEqual([
+			['update', values],
+			['eq', 'user_id', USER_ID],
+			['select', PROFILE_COLUMNS.join(',')],
+			['single']
+		]);
+		expect(Object.keys(call.ops[0]![1] as object).sort()).toEqual([...QUIET_HOURS_COLUMNS].sort());
+	});
+	it('updateQuietHours reports PGRST116', async () => {
+		fake.current.respond('profiles', { data: null, error: { code: 'PGRST116' } });
+		await expect(
+			updateQuietHours(USER_ID, { quiet_from: null, quiet_until: null })
+		).rejects.toMatchObject({ code: 'PGRST116' });
 	});
 	it('selects never mention the legacy column', () => {
 		expect(PROFILE_COLUMNS.join(',')).not.toMatch(/telegram/);

@@ -55,6 +55,7 @@ from shakka.domain.evaluation import evaluate_spot
 from shakka.domain.kite import KiteAdvice, RiderProfile, recommend_for_window
 from shakka.domain.messages import AlertMessage, build_go_url, render_alert
 from shakka.domain.push import push_tag
+from shakka.domain.quiet import in_quiet_hours, quiet_hours_from_row
 from shakka.domain.spot import SpotProfile
 from shakka.jobs import runtime
 from shakka.jobs.inputs import (
@@ -78,7 +79,9 @@ from shakka.notify.webpush import notifiers_from_settings
 logger = logging.getLogger(__name__)
 
 ALERT_STATE_RETENTION: Final = timedelta(hours=48)
-PROFILE_COLUMNS: Final = "user_id,weight_kg,level,quiver_m2,default_min_kn,default_max_kn"
+PROFILE_COLUMNS: Final = (
+    "user_id,weight_kg,level,quiver_m2,default_min_kn,default_max_kn,quiet_from,quiet_until"
+)
 RULE_COLUMNS: Final = "user_id,spot_id," + ",".join(RULE_FIELDS)
 STATE_COLUMNS: Final = "user_id," + ",".join(ALERT_STATE_COLUMNS)
 PROBE_START: Final = datetime(2026, 1, 1, tzinfo=UTC)
@@ -113,6 +116,7 @@ class AlertJobResult:
     push_failures: Mapping[str, int] = field(default_factory=dict)  # detail -> count
     blocked_targets: int = 0  # subscriptions skipped: push service host not allowed
     push_non_retryable: int = 0  # deliveries that failed without retry; event lost for the device
+    quiet: int = 0  # users with >= 1 planned favorite held back by quiet hours (WP-30)
 
 
 @dataclass(frozen=True, slots=True)
@@ -440,6 +444,11 @@ def deliver_plan(
     )
 
 
+def quiet_now(fav: FavoriteRows, *, now: datetime) -> bool:
+    """True if `now` falls in the quiet hours of fav's user. ValueError for an invalid value."""
+    return in_quiet_hours(now, quiet_hours_from_row(fav.profile_row or {}))
+
+
 def run_alerts(
     db: SupabaseRest,
     *,
@@ -471,6 +480,7 @@ def run_alerts(
     failures: Counter[str] = Counter()
     gone_all: set[str] = set()
     ok_all: set[str] = set()
+    quiet_users: set[str] = set()
     for fav in ctx.favorites:
         plan = plan_favorite(fav, ctx.inputs.get(fav.spot_id), now=now, base_url=base)
         if plan.outcome == "skipped":
@@ -482,6 +492,18 @@ def run_alerts(
             counts[plan.outcome] += 1
             continue
         assert plan.diff is not None
+        # Quiet hours (WP-30): nothing is delivered or stored, so the next run after the quiet
+        # hours diffs the current windows against the last reported state.
+        try:
+            held = quiet_now(fav, now=now)
+        except ValueError:
+            counts["skipped"] += 1
+            errors.append(f"spot {fav.spot_id}: ValueError: invalid quiet hours")
+            logger.warning("alerts: skipped a favorite (ValueError)")
+            continue
+        if held:
+            quiet_users.add(fav.user_id)
+            continue
         if dry_run:
             ids: list[str | None] = [e.id for e in plan.diff.new_state]
         else:
@@ -528,7 +550,8 @@ def run_alerts(
     logger.info(
         "alerts: users=%d favorites=%d events=%d new=%d improved=%d worsened=%d cancelled=%d "
         "ineligible=%d disabled=%d skipped=%d write_errors=%d deleted=%d dry_run=%s "
-        "sent=%d failed=%d no_target=%d deferred=%d removed=%d blocked=%d non_retryable=%d push=%s",
+        "sent=%d failed=%d no_target=%d deferred=%d removed=%d blocked=%d non_retryable=%d push=%s "
+        "quiet=%d",
         users,
         len(ctx.favorites),
         len(messages),
@@ -550,6 +573,7 @@ def run_alerts(
         loaded.blocked,
         counts["push_non_retryable"],
         push is not None,
+        len(quiet_users),
     )
     return AlertJobResult(
         users=users,
@@ -571,6 +595,7 @@ def run_alerts(
         push_failures=dict(failures),
         blocked_targets=loaded.blocked,
         push_non_retryable=counts["push_non_retryable"],
+        quiet=len(quiet_users),
     )
 
 
@@ -626,7 +651,7 @@ def run_alerts_cli(*, dry_run: bool, echo: Callable[[str], None]) -> int:
         f"(new={kinds[AlertEventKind.NEW]} improved={kinds[AlertEventKind.IMPROVED]} "
         f"worsened={kinds[AlertEventKind.WORSENED]} cancelled={kinds[AlertEventKind.CANCELLED]}) "
         f"ineligible={result.ineligible} disabled={result.disabled} skipped={result.skipped} "
-        f"write_errors={result.write_errors} deleted={result.deleted}"
+        f"write_errors={result.write_errors} deleted={result.deleted} quiet={result.quiet}"
     )
     if dry_run:
         echo("alerts: dry run, nothing stored")

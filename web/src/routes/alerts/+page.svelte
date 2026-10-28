@@ -2,6 +2,7 @@
 	import AlertRuleForm from '#lib/components/AlertRuleForm.svelte';
 	import LoginPrompt from '#lib/components/LoginPrompt.svelte';
 	import PushSettings from '#lib/components/PushSettings.svelte';
+	import QuietHoursSettings from '#lib/components/QuietHoursSettings.svelte';
 	import { session } from '#lib/auth.js';
 	import { ALERT_DEFAULTS } from '#lib/contracts.js';
 	import { ruleSummary, storedRuleStatus } from '#lib/forms.js';
@@ -52,6 +53,13 @@
 		<button type="button" onclick={retry}>Opnieuw proberen</button>
 	</div>
 {:else if page.kind === 'ok' && userId !== null}
+	<QuietHoursSettings
+		{userId}
+		profile={page.profile}
+		onsaved={(p) => {
+			if (page.kind === 'ok') page.profile = p;
+		}}
+	/>
 	<p class="muted">
 		Voor elke favoriete spot staat een alert standaard aan, met de standaardinstellingen. Lege
 		velden volgen de standaard. Je eigen windgrenzen voor alle spots stel je in bij je

@@ -9,7 +9,7 @@ Bijgewerkt in WP-23; wijzig dit bestand samen met `/privacy` en `#lib/privacy.ts
 | Account | `auth.users` (o.a. `email`, `created_at`, `last_sign_in_at`), `auth.identities` | Inloggen | Gebruiker zelf, beheerder | Tot het account wordt verwijderd | `delete_my_account()`, of Lars in het dashboard |
 | Inlogsessies | `auth.sessions` (o.a. tijdstip, IP-adres, user agent), `auth.refresh_tokens` | Ingelogd blijven | Beheerder | Tot uitloggen of verlopen; met het account | Supabase Auth; cascade |
 | Auth-auditlog | `auth.audit_log_entries` | Beveiliging | Beheerder | Leeg als "Write audit logs to the database" uit staat (A13); anders onbeperkt | n.v.t. bij uit |
-| Profiel | `public.profiles` (`weight_kg`, `level`, `quiver_m2`, `default_min_kn`, `default_max_kn`); plus een ongebruikte, altijd lege legacy-kolom die WP-22 verwijdert | Kite-advies, alerts | Gebruiker (RLS), ingest | Tot het account wordt verwijderd | cascade |
+| Profiel | `public.profiles` (`weight_kg`, `level`, `quiver_m2`, `default_min_kn`, `default_max_kn`, `quiet_from`, `quiet_until`); plus een ongebruikte, altijd lege legacy-kolom die WP-22 verwijdert | Kite-advies, alerts | Gebruiker (RLS), ingest | Tot het account wordt verwijderd | cascade |
 | Favorieten | `public.favorites` | Alerts, ster | Gebruiker (RLS), ingest | Tot ontfavorieten of het account wordt verwijderd | gebruiker; cascade |
 | Alertregels | `public.alert_rules` | Alerts | Gebruiker (RLS), ingest | Idem | gebruiker; cascade via `favorites` |
 | Alertstatus | `public.alert_state` (`window_*`, `status`, `snapshot`, `last_*`) | Deduplicatie | Gebruiker (lezen), ingest | 48 uur na `window_end` | `jobs/alerts.py` (`ALERT_STATE_RETENTION`); cascade |

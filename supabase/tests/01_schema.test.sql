@@ -10,7 +10,7 @@ select columns_are('public'::name, 'spots'::name, array['id', 'name', 'region', 
 select columns_are('public'::name, 'forecast_hours'::name, array['spot_id', 'model', 'valid_at', 'wind_kn', 'gust_kn', 'dir_deg', 'fetched_at']::name[], 'forecast_hours columns');
 select columns_are('public'::name, 'tide_extremes'::name, array['station', 'at', 'kind', 'level_cm', 'fetched_at']::name[], 'tide_extremes columns');
 select columns_are('public'::name, 'evaluations'::name, array['spot_id', 'valid_at', 'verdict', 'reasons', 'wind_kn', 'gust_kn', 'dir_deg', 'dir_class', 'confidence', 'tide_level_cm', 'evaluated_at']::name[], 'evaluations columns');
-select columns_are('public'::name, 'profiles'::name, array['user_id', 'weight_kg', 'level', 'quiver_m2', 'default_min_kn', 'default_max_kn', 'created_at', 'updated_at']::name[], 'profiles columns');
+select columns_are('public'::name, 'profiles'::name, array['user_id', 'weight_kg', 'level', 'quiver_m2', 'default_min_kn', 'default_max_kn', 'created_at', 'updated_at', 'quiet_from', 'quiet_until']::name[], 'profiles columns');
 select columns_are('public'::name, 'favorites'::name, array['user_id', 'spot_id', 'created_at']::name[], 'favorites columns');
 select columns_are('public'::name, 'alert_rules'::name, array['user_id', 'spot_id', 'enabled', 'min_kn', 'max_kn', 'dir_classes', 'weekdays', 'earliest_local', 'latest_local', 'min_go_hours', 'days_ahead', 'updated_at']::name[], 'alert_rules columns');
 select columns_are('public'::name, 'alert_state'::name, array['id', 'user_id', 'spot_id', 'window_start', 'window_end', 'status', 'snapshot', 'last_event', 'last_notified_at', 'created_at', 'updated_at']::name[], 'alert_state columns');
@@ -80,6 +80,8 @@ select set_eq(
     ('profiles', 'default_max_kn', 'smallint', true),
     ('profiles', 'created_at', 'timestamp with time zone', false),
     ('profiles', 'updated_at', 'timestamp with time zone', false),
+    ('profiles', 'quiet_from', 'time without time zone', true),
+    ('profiles', 'quiet_until', 'time without time zone', true),
     ('favorites', 'user_id', 'uuid', false),
     ('favorites', 'spot_id', 'text', false),
     ('favorites', 'created_at', 'timestamp with time zone', false),

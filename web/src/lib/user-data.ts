@@ -15,6 +15,7 @@ import {
 	type OwnPushSubscription,
 	type Profile,
 	type ProfileUpdate,
+	type QuietHoursUpdate,
 	type PushSubscriptionKeys
 } from './types.js';
 
@@ -46,6 +47,22 @@ export async function updateProfile(userId: string, values: ProfileUpdate): Prom
 		.select(PROFILE_COLUMNS.join(','))
 		.single();
 	if (error) throw new DataError('updateProfile', error.code ?? null);
+	return data as unknown as Profile;
+}
+
+/** Writes exactly quiet_from and quiet_until (column grant, WP-30). */
+export async function updateQuietHours(
+	userId: string,
+	values: QuietHoursUpdate
+): Promise<Profile> {
+	const payload = { quiet_from: values.quiet_from, quiet_until: values.quiet_until };
+	const { data, error } = await supabase
+		.from('profiles')
+		.update(payload)
+		.eq('user_id', userId)
+		.select(PROFILE_COLUMNS.join(','))
+		.single();
+	if (error) throw new DataError('updateQuietHours', error.code ?? null);
 	return data as unknown as Profile;
 }
 

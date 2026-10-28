@@ -38,6 +38,16 @@ describe('/privacy', () => {
 			expect(text).toContain(w);
 		}
 	});
+	it('names quiet hours as profile data', () => {
+		render(Page);
+		expect(bodyText().toLowerCase()).toContain('stille uren');
+	});
+	it('PRIVACY.md profile row lists the quiet columns', () => {
+		const row = PRIVACY_MD.split('\n').find((l) => l.startsWith('| Profiel |'));
+		expect(row).toBeDefined();
+		expect(row).toContain('`quiet_from`');
+		expect(row).toContain('`quiet_until`');
+	});
 	it('shows the retention periods from the constants', () => {
 		render(Page);
 		const text = bodyText();
