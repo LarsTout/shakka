@@ -2,7 +2,13 @@ import pytest
 from pydantic import ValidationError
 
 import shakka.config
-from shakka.config import DEFAULT_SPOTS_PATH, REPO_ROOT, Settings, get_settings
+from shakka.config import (
+    DEFAULT_SPOTS_PATH,
+    OPTIONAL_ENV_VARS,
+    REPO_ROOT,
+    Settings,
+    get_settings,
+)
 
 
 def _required(monkeypatch, url="https://testref.supabase.co"):
@@ -84,6 +90,10 @@ def test_secrets_not_in_repr(monkeypatch):
         ("https://testref.supabase.co/#frag", None),
         ("https://", None),
         ("testref.supabase.co", None),
+        ("http://exa mple", None),
+        ("https://exa mple", None),
+        ("https://tëst.supabase.co", None),
+        ("https://testref.supabase.co ", None),
     ],
 )
 def test_supabase_url_validation(raw, expected):
@@ -93,6 +103,11 @@ def test_supabase_url_validation(raw, expected):
             Settings(**kwargs)
     else:
         assert Settings(**kwargs).supabase_url == expected
+
+
+def test_optional_env_vars_are_settings_fields():
+    for name in OPTIONAL_ENV_VARS:
+        assert name.lower() in Settings.model_fields, name
 
 
 def test_no_telegram_fields():
