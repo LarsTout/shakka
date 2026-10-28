@@ -1,5 +1,5 @@
 # Blueprint WP-27: Ingest-hygiëne: RWS-verbruik, stationvolgorde, `doctor`, puurheidscheck
-Status: DRAFT
+Status: APPROVED
 Revisie: 1
 
 ## Doel
