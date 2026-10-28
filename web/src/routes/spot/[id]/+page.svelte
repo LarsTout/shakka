@@ -81,7 +81,7 @@
 	</div>
 {:else}
 	{@const spot = data.spot}
-	<p><a href="/">Alle spots</a></p>
+	<p><a class="back-link" href="/">Alle spots</a></p>
 	<div class="title-row">
 		<h1>{spot.name}</h1>
 		<FavoriteStar spotId={spot.id} spotName={spot.name} />
@@ -186,25 +186,3 @@
 		<Attribution />
 	</section>
 {/if}
-
-<style>
-	.go-runs {
-		list-style: none;
-		padding: 0;
-		margin: 0.25rem 0;
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
-	}
-	.go-run {
-		display: inline-flex;
-		align-items: center;
-		min-height: 2.75rem;
-		padding: 0.4rem 0.75rem;
-		border-radius: 0.25rem;
-		background: #1b7f3b;
-		color: #fff;
-		font-weight: 600;
-		text-decoration: none;
-	}
-</style>

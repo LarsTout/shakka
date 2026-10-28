@@ -134,23 +134,3 @@
 		</section>
 	{/each}
 {/if}
-
-<style>
-	.share-button {
-		display: inline-flex;
-		align-items: center;
-		min-height: 2.75rem;
-		padding: 0.4rem 0.75rem;
-		border-radius: 0.25rem;
-		background: #0b5e8a;
-		color: #fff;
-		font-weight: 600;
-		text-decoration: none;
-	}
-	.my-session button {
-		min-height: 2.75rem;
-	}
-	.my-session {
-		margin: 1.25rem 0;
-	}
-</style>

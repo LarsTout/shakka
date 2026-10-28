@@ -38,15 +38,3 @@
 </div>
 {#if notice}<p class="banner map-notice" role="status">{notice}</p>{/if}
 {#if view === 'map'}<MapView {spots} {summaries} onfail={fail} />{/if}
-
-<style>
-	.view-toggle {
-		display: flex;
-		gap: 0.5rem;
-		margin: 0.75rem 0;
-	}
-	.view-toggle button[aria-pressed='true'] {
-		font-weight: 700;
-		text-decoration: underline;
-	}
-</style>

@@ -162,18 +162,3 @@
 	</section>
 	<p><a href={sessionPath(s.slug)}>Sessiepagina</a> · <a href="/mijn-sessies">Mijn sessies</a></p>
 {/if}
-
-<style>
-	.manage-list {
-		list-style: none;
-		padding: 0;
-	}
-	.manage-list li {
-		padding: 0.5rem 0;
-		border-bottom: 1px solid currentcolor;
-	}
-	.manage-list button,
-	section > button {
-		min-height: 2.75rem;
-	}
-</style>

@@ -214,9 +214,3 @@
 	{#if status === 'saved' && mode === 'edit'}<p role="status">Opgeslagen.</p>{/if}
 	{#if status === 'failed'}<p role="alert" class="error">{failMessage}</p>{/if}
 </form>
-
-<style>
-	.session-form button[type='submit'] {
-		min-height: 2.75rem;
-	}
-</style>

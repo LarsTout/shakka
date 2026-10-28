@@ -108,26 +108,3 @@
 	{/if}
 	<p><a href={sessionPath(s.slug)}>Bekijk de sessiepagina</a> · <a href="/mijn-sessies">Mijn sessies</a></p>
 {/if}
-
-<style>
-	.share-actions {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
-		margin: 0.75rem 0;
-	}
-	.share-button {
-		display: inline-flex;
-		align-items: center;
-		min-height: 2.75rem;
-		padding: 0.4rem 0.75rem;
-		border-radius: 0.25rem;
-		background: #0b5e8a;
-		color: #fff;
-		font-weight: 600;
-		text-decoration: none;
-	}
-	.share-actions button {
-		min-height: 2.75rem;
-	}
-</style>

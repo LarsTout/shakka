@@ -44,20 +44,24 @@
 		{#each data.spots as spot (spot.id)}
 			{@const summary = data.summaries[spot.id]}
 			<li class="spot-item" data-spot={spot.id}>
-				<a class="spot-link" href="/spot/{spot.id}">{spot.name}</a>
-				<FavoriteStar spotId={spot.id} spotName={spot.name} />
-				{#if spot.region}<span class="muted"> · {spot.region}</span>{/if}
-				{#if !spot.verified}<span class="badge-unverified">niet geverifieerd</span>{/if}
+				<div class="spot-head">
+					<div class="spot-title">
+						<a class="spot-link" href="/spot/{spot.id}">{spot.name}</a>
+						{#if spot.region}<span class="muted"> · {spot.region}</span>{/if}
+						{#if !spot.verified}<span class="badge-unverified">niet geverifieerd</span>{/if}
+					</div>
+					<FavoriteStar spotId={spot.id} spotName={spot.name} />
+				</div>
 				{#if summary}
-					<p class="day-summary">
-						Vandaag:
-						{#if summary.today.best}<VerdictBadge verdict={summary.today.best} />{/if}
-						{daySummaryText(summary.today, true)}
+					<p class="day-summary day-today">
+						<span class="day-label">Vandaag:</span>
+						{#if summary.today.best}<VerdictBadge verdict={summary.today.best} size="lg" />{/if}
+						<span class="day-text">{daySummaryText(summary.today, true)}</span>
 					</p>
 					<p class="day-summary">
-						Morgen:
+						<span class="day-label">Morgen:</span>
 						{#if summary.tomorrow.best}<VerdictBadge verdict={summary.tomorrow.best} />{/if}
-						{daySummaryText(summary.tomorrow, false)}
+						<span class="day-text">{daySummaryText(summary.tomorrow, false)}</span>
 					</p>
 				{:else}
 					<p class="no-data muted">Nog geen data</p>
