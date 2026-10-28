@@ -399,3 +399,7 @@ Werk op `wp/WP-30` in `/Users/larst/Dev/Shakka/.claude/worktrees/WP-30`. Lees of
 
    Commit `docs(WP-30): record scope approval in the plan`.
 8. **Eindcontrole.** Draai alles uit de inleiding, plus `cd web && npm run build && npm run verify:build`.
+
+## Bevestiging Lars (28 oktober 2026)
+- A1: bevestigd, bouwen zoals beschreven (na afloop alleen de actuele stand, geen inhaalreeks).
+- A7: akkoord, de preview negeert stille uren en er komt geen admin-CLI.
