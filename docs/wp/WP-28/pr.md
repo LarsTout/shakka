@@ -6,3 +6,5 @@ Maandelijkse, gegroepeerde Dependabot-PR's naar `develop` voor `github-actions`,
 - Na de merge naar `develop`: Settings, Advanced Security, "Dependabot alerts" en "Dependabot security updates" op Enable.
 - Daarna AC-3: Insights, Dependency graph, Dependabot, per ecosysteem een geslaagde controle; bij de eerste Actions-PR SHA plus commentaar controleren (E1, E2).
 - Eventueel nu al "Check for updates" per ecosysteem in die tab.
+
+🤖 Generated with [Claude Code](https://claude.com/claude-code)
