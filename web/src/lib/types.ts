@@ -113,11 +113,15 @@ export interface DaySummary {
 	first_go_at: string | null; // valid_at of the first go hour
 }
 
+/** Daylight row kept by summarizeSpots for the list timeline (WP-34). */
+export type SummaryHour = Pick<SummaryRow, 'valid_at' | 'verdict' | 'reasons'>;
+
 export interface SpotSummary {
 	spot_id: string;
 	today: DaySummary;
 	tomorrow: DaySummary;
 	latest_evaluated_at: string; // max evaluated_at of the summarised rows
+	hours?: SummaryHour[]; // daylight rows of today and tomorrow, sorted by valid_at (WP-34)
 }
 
 export const SPOT_COLUMNS = [

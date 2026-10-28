@@ -4,7 +4,9 @@
 	import FavoriteStar from '#lib/components/FavoriteStar.svelte';
 	import Freshness from '#lib/components/Freshness.svelte';
 	import MapSwitch from '#lib/components/MapSwitch.svelte';
+	import DayTimeline from '#lib/components/DayTimeline.svelte';
 	import VerdictBadge from '#lib/components/VerdictBadge.svelte';
+	import { dayTimeline, hoursOnDay } from '#lib/timeline.js';
 	import { daySummaryText, latestOfSummaries, shouldRefreshOnResume } from '#lib/view.js';
 	import type { PageProps } from './$types';
 
@@ -43,6 +45,8 @@
 	<ul class="spot-list" hidden={view === 'map'}>
 		{#each data.spots as spot (spot.id)}
 			{@const summary = data.summaries[spot.id]}
+			{@const tl = summary?.hours ? dayTimeline(hoursOnDay(summary.hours, summary.today.date)) : null}
+			{@const tm = summary?.hours ? dayTimeline(hoursOnDay(summary.hours, summary.tomorrow.date)) : null}
 			<li class="spot-item" data-spot={spot.id}>
 				<div class="spot-head">
 					<div class="spot-title">
@@ -53,6 +57,7 @@
 					<FavoriteStar spotId={spot.id} spotName={spot.name} />
 				</div>
 				{#if summary}
+					{#if tl}<DayTimeline timeline={tl} />{/if}
 					<p class="day-summary day-today">
 						<span class="day-label">Vandaag:</span>
 						{#if summary.today.best}<VerdictBadge verdict={summary.today.best} size="lg" />{/if}
@@ -63,6 +68,7 @@
 						{#if summary.tomorrow.best}<VerdictBadge verdict={summary.tomorrow.best} />{/if}
 						<span class="day-text">{daySummaryText(summary.tomorrow, false)}</span>
 					</p>
+					{#if tm}<DayTimeline timeline={tm} size="sm" />{/if}
 				{:else}
 					<p class="no-data muted">Nog geen data</p>
 				{/if}

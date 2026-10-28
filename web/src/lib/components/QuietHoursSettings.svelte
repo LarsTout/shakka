@@ -1,5 +1,7 @@
 <script lang="ts">
 	import { untrack } from 'svelte';
+	import DayTimeline from '#lib/components/DayTimeline.svelte';
+	import { quietTimeline } from '#lib/timeline.js';
 	import {
 		parseQuietHours,
 		quietHourOptions,
@@ -24,6 +26,8 @@
 	let form = $state<QuietHoursForm>(untrack(() => quietToForm(profile)));
 	let status = $state<'idle' | 'saving' | 'saved' | 'off' | 'failed'>('idle');
 	let problem = $state('');
+
+	const quiet = $derived(quietTimeline(profile?.quiet_from ?? null, profile?.quiet_until ?? null));
 
 	const GENERIC_FAILURE = 'Opslaan is niet gelukt. Probeer het opnieuw.';
 
@@ -67,6 +71,7 @@
 			meldingen.
 		</p>
 		<p class="quiet-summary">{quietHoursSummary(profile)}</p>
+		{#if quiet}<DayTimeline timeline={quiet} />{/if}
 		<form novalidate onsubmit={submit} class="quiet-form">
 			<div class="form-field">
 				<label for="quiet-from">Van</label>
