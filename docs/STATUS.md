@@ -36,7 +36,7 @@ Opdeling: goedgekeurd.
 | WP-27 | Ingest-hygiëne: RWS-verbruik, stationvolgorde, `doctor`, puurheidscheck | done | M5 |
 | WP-28 | Dependabot | done | AC-3 open: Dependabot aanzetten en Insights-controle per ecosysteem door Lars (RUNBOOK §18.10) |
 | WP-29 | Inloggen met een code | todo | M5; na eigen SMTP (WP-22) |
-| WP-30 | Stille uren voor meldingen | verifying | M5; scopewijziging, akkoord Lars 28 oktober 2026; niet parallel met WP-24 |
+| WP-30 | Stille uren voor meldingen | done | akkoord Lars 28 oktober 2026; supabase db push (quiet_hours) door Lars na merge |
 | WP-31 | Open aanmelden: crew organiseert zelf | todo | M5; scopewijziging, akkoord Lars nodig |
 | WP-32 | `cell_selection` per spot | todo | M5; voorwaardelijk: Lars wijst een spot aan |
 | WP-33 | Eigen app-icoon en installeerbaarheid | todo | M5; voorwaardelijk: icoon of bevindingen WP-23 AC-6 |
