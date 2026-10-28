@@ -25,16 +25,26 @@ import { NEW_ID, SLUG, TOKEN } from './fixtures/public-session.js';
 
 const MIGRATIONS = new URL('../../supabase/migrations/', import.meta.url);
 const SESSIONS_FILE = '20261015200000_sessions.sql';
-const sql = readFileSync(new URL(SESSIONS_FILE, MIGRATIONS), 'utf8');
+const MODERATION_FILE = '20261028090000_organizer_moderation.sql';
+// Migrations that define or replace the session RPCs, oldest first. A later WP that touches
+// them adds its file here and extends (0b) for its own file.
+const CONTRACT_FILES = [SESSIONS_FILE, MODERATION_FILE] as const;
+const SESSION_NAMES = ['get_public_session', 'rsvp_create', 'rsvp_update', 'rsvp_delete', 'purge_expired_sessions'];
+const read = (file: string) => readFileSync(new URL(file, MIGRATIONS), 'utf8');
+const sql = CONTRACT_FILES.map(read).join('\n');
 
+/** The last definition of the function across CONTRACT_FILES. */
 function fnBlock(name: string): string {
-	const start = sql.indexOf(`create function public.${name}(`);
-	if (start < 0) throw new Error(`function ${name} not found`);
-	const end = sql.indexOf('$$;', start);
-	return sql.slice(start, end + 3);
+	const re = new RegExp(`create (?:or replace )?function public\\.${name}\\(`);
+	for (const file of [...CONTRACT_FILES].reverse()) {
+		const t = read(file);
+		const m = re.exec(t);
+		if (m) return t.slice(m.index, t.indexOf('$$;', m.index) + 3);
+	}
+	throw new Error(`function ${name} not found`);
 }
 function params(name: string): string[] {
-	const m = /create function public\.\w+\(([\s\S]*?)\)\s*returns/.exec(fnBlock(name));
+	const m = /create (?:or replace )?function public\.\w+\(([\s\S]*?)\)\s*returns/.exec(fnBlock(name));
 	return m![1]
 		.split(',')
 		.map((p) => p.trim().split(/\s+/)[0])
@@ -43,13 +53,13 @@ function params(name: string): string[] {
 const keysIn = (text: string) => [...text.matchAll(/'([a-z_]+)',/g)].map((m) => m[1]);
 
 describe('migration drift (0)', () => {
-	it('no later migration changes the session RPCs or rsvps', () => {
+	it('(0a) no other later migration changes the session RPCs or rsvps', () => {
 		const later = readdirSync(MIGRATIONS)
 			.filter((f) => f.endsWith('.sql'))
 			.sort()
-			.filter((f) => f > SESSIONS_FILE);
+			.filter((f) => f > SESSIONS_FILE && !(CONTRACT_FILES as readonly string[]).includes(f));
 		for (const file of later) {
-			const t = readFileSync(new URL(file, MIGRATIONS), 'utf8');
+			const t = read(file);
 			const msg = `${file} changes the session RPCs or rsvps: update rsvp-types.ts, session-view.ts and rsvp-contract.test.ts`;
 			expect(
 				/\b(get_public_session|rsvp_create|rsvp_update|rsvp_delete|purge_expired_sessions)\b/.test(t),
@@ -58,9 +68,15 @@ describe('migration drift (0)', () => {
 			expect(/alter\s+table\s+(if\s+exists\s+)?(only\s+)?public\.rsvps\b/i.test(t), msg).toBe(false);
 		}
 	});
+	it('(0b) the WP-25 migration only touches get_public_session and rsvp_create', () => {
+		const t = read(MODERATION_FILE);
+		const named = SESSION_NAMES.filter((n) => new RegExp(`\\b${n}\\b`).test(t));
+		expect(named.sort()).toEqual(['get_public_session', 'rsvp_create']);
+		expect(/alter\s+table\s+(if\s+exists\s+)?(only\s+)?public\.rsvps\b/i.test(t)).toBe(false);
+	});
 });
 
-describe('RPC contract (WP-19 migration)', () => {
+describe('RPC contract (WP-19 and WP-25 migrations)', () => {
 	it('(1) parameter names', () => {
 		expect(params('get_public_session')).toEqual(['p_slug']);
 		expect(params('rsvp_create')).toEqual(['p_slug', 'p_first_name', 'p_ride', 'p_seats_offered']);
@@ -122,6 +138,10 @@ describe('RPC contract (WP-19 migration)', () => {
 	it('(7) retention', () => {
 		const m = /ends_at < p_now - interval '(\d+) days'/.exec(sql);
 		expect(Number(m![1])).toBe(SESSION_RETENTION_DAYS);
+	});
+	it('(9) sign-ups can be closed', () => {
+		expect(fnBlock('get_public_session')).toContain("'rsvps_closed', s.rsvps_closed_at is not null");
+		expect(fnBlock('rsvp_create')).toContain('s.rsvps_closed_at is not null');
 	});
 	it('(8) limits', () => {
 		expect(sql).toContain(`between 0 and ${MAX_SEATS}`);
