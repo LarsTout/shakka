@@ -1,5 +1,6 @@
-// Shapes of the public session RPCs (WP-19 migration 20261015200000_sessions.sql).
-// rsvp-contract.test.ts reads that migration and checks these keys, limits and the retention.
+// Shapes of the public session RPCs (WP-19 migration 20261015200000_sessions.sql, extended by the
+// WP-25 migration 20261028090000_organizer_moderation.sql with rsvps_closed).
+// rsvp-contract.test.ts reads both migrations and checks these keys, limits and the retention.
 
 export const RIDES = ['own', 'needs_ride', 'offers_ride'] as const;
 export type Ride = (typeof RIDES)[number];
@@ -20,7 +21,8 @@ export const PUBLIC_SESSION_KEYS = [
 	'seats_free',
 	'departure_point',
 	'tikkie_url',
-	'cancelled'
+	'cancelled',
+	'rsvps_closed'
 ] as const;
 export const PUBLIC_RSVP_KEYS = [
 	'id',
@@ -43,6 +45,7 @@ export interface PublicSessionInfo {
 	departure_point: string | null;
 	tikkie_url: string | null;
 	cancelled: boolean;
+	rsvps_closed: boolean;
 }
 
 export interface PublicRsvp {

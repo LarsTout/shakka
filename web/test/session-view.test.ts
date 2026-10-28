@@ -89,6 +89,18 @@ describe('parsers', () => {
 	it('parsePublicSession round-trips the RPC shape', () => {
 		expect(parsePublicSession(SESSION_JSON)).toEqual(SESSION_JSON);
 	});
+	it('parsePublicSession reads rsvps_closed', () => {
+		const withFlag = (v: unknown) => ({ session: { ...SESSION_INFO, rsvps_closed: v }, rsvps: [] });
+		expect(parsePublicSession(withFlag(true)).session.rsvps_closed).toBe(true);
+		const { rsvps_closed: _omit, ...old } = SESSION_INFO;
+		expect(parsePublicSession({ session: old, rsvps: [] }).session.rsvps_closed).toBe(false);
+		expect(() => parsePublicSession(withFlag('yes'))).toThrow(RsvpError);
+		try {
+			parsePublicSession(withFlag('yes'));
+		} catch (e) {
+			expect((e as RsvpError).kind).toBe('unknown');
+		}
+	});
 	it('drops unknown keys', () => {
 		const dirty = {
 			session: { ...SESSION_INFO, edit_token_hash: 'x' },

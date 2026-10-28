@@ -135,6 +135,7 @@ select set_eq(
     ('sessions', 'departure_point', 'text', true),
     ('sessions', 'tikkie_url', 'text', true),
     ('sessions', 'cancelled_at', 'timestamp with time zone', true),
+    ('sessions', 'rsvps_closed_at', 'timestamp with time zone', true),
     ('sessions', 'recent_rsvp_creates', 'timestamp with time zone[]', false),
     ('sessions', 'created_at', 'timestamp with time zone', false),
     ('sessions', 'updated_at', 'timestamp with time zone', false),

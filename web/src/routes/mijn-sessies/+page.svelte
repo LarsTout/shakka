@@ -129,6 +129,7 @@
 					<button type="button" onclick={() => (confirmId = e.session.id)}>Sessie annuleren</button>
 				{/if}
 			{/if}
+			<p><a href="/sessie/{e.session.slug}/beheer">Aanmeldingen beheren</a></p>
 			{#if messages[e.session.id]}<p role="status">{messages[e.session.id]}</p>{/if}
 		</section>
 	{/each}

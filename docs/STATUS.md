@@ -31,7 +31,7 @@ Opdeling: goedgekeurd.
 | WP-22 | Hardening backend en kostenbewaking | done | AC-6 open: SMTP-keuze, Open-Meteo-mail, OPERATOR_USER_ID (RUNBOOK §18) |
 | WP-23 | Privacy, toegankelijkheid en performance | done | AC-6 + privacytekst + Supabase-instellingen (audit logs uit, EU) open voor Lars (RUNBOOK §17) |
 | WP-24 | E-mail als tweede meldingskanaal | todo | M5; scopewijziging, akkoord Lars nodig; niet parallel met WP-30 |
-| WP-25 | Moderatie voor organisatoren | todo | M5 |
+| WP-25 | Moderatie voor organisatoren | done | A1-bevestiging, supabase db push en AC-7 (RUNBOOK §16.10) door Lars |
 | WP-26 | Forecast-horizon 8 dagen (`days_ahead` 7 werkt) | done | AC-6 open: query op forecast_hours na promotie naar main en één uurlijkse run (verification.md) |
 | WP-27 | Ingest-hygiëne: RWS-verbruik, stationvolgorde, `doctor`, puurheidscheck | done | M5 |
 | WP-28 | Dependabot | done | AC-3 open: Dependabot aanzetten en Insights-controle per ecosysteem door Lars (RUNBOOK §18.10) |

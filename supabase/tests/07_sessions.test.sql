@@ -2,7 +2,7 @@
 begin;
 create extension if not exists pgtap with schema extensions;
 
-select plan(112);
+select plan(113);
 
 -- Fixture (postgres): users A and B, one spot, a session of B with one RSVP, and an old session of A.
 insert into auth.users (id, email) values
@@ -20,7 +20,7 @@ insert into public.rsvps (id, session_id, first_name, ride, seats_offered, edit_
    encode(sha256(convert_to(repeat('D', 43), 'UTF8')), 'hex'));
 
 -- Shape (1-11).
-select columns_are('public'::name, 'sessions'::name, array['id', 'slug', 'spot_id', 'organizer_id', 'organizer_name', 'starts_at', 'ends_at', 'note', 'seats_free', 'departure_point', 'tikkie_url', 'cancelled_at', 'recent_rsvp_creates', 'created_at', 'updated_at']::name[], 'sessions columns');
+select columns_are('public'::name, 'sessions'::name, array['id', 'slug', 'spot_id', 'organizer_id', 'organizer_name', 'starts_at', 'ends_at', 'note', 'seats_free', 'departure_point', 'tikkie_url', 'cancelled_at', 'rsvps_closed_at', 'recent_rsvp_creates', 'created_at', 'updated_at']::name[], 'sessions columns');
 select columns_are('public'::name, 'rsvps'::name, array['id', 'session_id', 'first_name', 'ride', 'seats_offered', 'rides_with', 'edit_token_hash', 'created_at', 'updated_at']::name[], 'rsvps columns');
 select col_is_pk('public'::name, 'sessions'::name, array['id']::name[], 'sessions primary key');
 select col_is_pk('public'::name, 'rsvps'::name, array['id']::name[], 'rsvps primary key');
@@ -51,6 +51,7 @@ select column_privs_are('public'::name, 'sessions'::name, 'seats_free'::name, 'a
 select column_privs_are('public'::name, 'sessions'::name, 'departure_point'::name, 'authenticated'::name, array['INSERT', 'SELECT', 'UPDATE']::name[], 'authenticated column privileges on sessions.departure_point');
 select column_privs_are('public'::name, 'sessions'::name, 'tikkie_url'::name, 'authenticated'::name, array['INSERT', 'SELECT', 'UPDATE']::name[], 'authenticated column privileges on sessions.tikkie_url');
 select column_privs_are('public'::name, 'sessions'::name, 'cancelled_at'::name, 'authenticated'::name, array['SELECT', 'UPDATE']::name[], 'authenticated column privileges on sessions.cancelled_at');
+select column_privs_are('public'::name, 'sessions'::name, 'rsvps_closed_at'::name, 'authenticated'::name, array['SELECT', 'UPDATE']::name[], 'authenticated column privileges on sessions.rsvps_closed_at');
 select column_privs_are('public'::name, 'sessions'::name, 'recent_rsvp_creates'::name, 'authenticated'::name, array['SELECT']::name[], 'authenticated column privileges on sessions.recent_rsvp_creates');
 select column_privs_are('public'::name, 'sessions'::name, 'created_at'::name, 'authenticated'::name, array['SELECT']::name[], 'authenticated column privileges on sessions.created_at');
 select column_privs_are('public'::name, 'sessions'::name, 'updated_at'::name, 'authenticated'::name, array['SELECT']::name[], 'authenticated column privileges on sessions.updated_at');
@@ -64,9 +65,9 @@ select has_function('public'::name, 'rsvp_update'::name, array['text','text','te
 select has_function('public'::name, 'rsvp_delete'::name, array['text']::name[], 'rsvp_delete exists');
 select has_function('public'::name, 'purge_expired_sessions'::name, array['timestamp with time zone']::name[], 'purge_expired_sessions exists');
 select set_eq($$select p.proname::text from pg_proc p where p.pronamespace = 'public'::regnamespace and has_function_privilege('anon', p.oid, 'EXECUTE')$$, $$values ('get_public_session'), ('rsvp_create'), ('rsvp_update'), ('rsvp_delete')$$, 'anon can execute exactly the four public RPCs');
-select set_eq($$select p.proname::text from pg_proc p where p.pronamespace = 'public'::regnamespace and has_function_privilege('authenticated', p.oid, 'EXECUTE')$$, $$values ('get_public_session'), ('rsvp_create'), ('rsvp_update'), ('rsvp_delete'), ('delete_my_account')$$, 'authenticated can execute exactly the four public RPCs and delete_my_account');
+select set_eq($$select p.proname::text from pg_proc p where p.pronamespace = 'public'::regnamespace and has_function_privilege('authenticated', p.oid, 'EXECUTE')$$, $$values ('get_public_session'), ('rsvp_create'), ('rsvp_update'), ('rsvp_delete'), ('delete_my_account'), ('organizer_delete_rsvp')$$, 'authenticated can execute exactly the four public RPCs, delete_my_account and organizer_delete_rsvp');
 select set_eq($$select p.proname::text from pg_proc p where p.pronamespace = 'public'::regnamespace and has_function_privilege('service_role', p.oid, 'EXECUTE')$$, $$values ('purge_expired_sessions'), ('db_usage')$$, 'service_role can execute exactly purge_expired_sessions and db_usage');
-select set_eq($$select p.proname::text from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prosecdef$$, $$values ('handle_new_user'), ('get_public_session'), ('rsvp_create'), ('rsvp_update'), ('rsvp_delete'), ('purge_expired_sessions'), ('delete_my_account'), ('db_usage')$$, 'security definer functions in public');
+select set_eq($$select p.proname::text from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prosecdef$$, $$values ('handle_new_user'), ('get_public_session'), ('rsvp_create'), ('rsvp_update'), ('rsvp_delete'), ('purge_expired_sessions'), ('delete_my_account'), ('db_usage'), ('organizer_delete_rsvp')$$, 'security definer functions in public');
 select is_empty($$select p.proname from pg_proc p where p.pronamespace = 'public'::regnamespace and p.prosecdef and not coalesce(p.proconfig @> array['search_path=""'], false)$$, 'every security definer function pins search_path');
 
 -- Constraints on sessions (45-61), as postgres.

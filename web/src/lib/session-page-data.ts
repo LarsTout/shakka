@@ -1,4 +1,6 @@
 import { getSpot, listSpots } from '#lib/data.js';
+import { getPublicSession } from './rsvp.js';
+import type { PublicRsvp } from './rsvp-types.js';
 import type { SessionRow } from './session-model.js';
 import { getMySession, listMySessions } from './sessions.js';
 import type { Spot } from './types.js';
@@ -29,6 +31,32 @@ export async function loadSharePage(slug: string): Promise<SharePageData> {
 		return { kind: 'ok', session, spotName: spot?.name ?? session.spot_id };
 	} catch {
 		console.warn('share page load failed');
+		return { kind: 'error' };
+	}
+}
+
+export type ManagePageData =
+	| { kind: 'ok'; session: SessionRow; spotName: string; rsvps: PublicRsvp[]; rsvpsClosed: boolean }
+	| { kind: 'not_found' }
+	| { kind: 'error' };
+
+/** getMySession(slug); null -> not_found (no RPC). Then getPublicSession(slug); null -> not_found.
+ *  spotName = public spot_name ?? session.spot_id. Throw -> console.warn('manage page load failed'), error. */
+export async function loadManagePage(slug: string): Promise<ManagePageData> {
+	try {
+		const session = await getMySession(slug);
+		if (session === null) return { kind: 'not_found' };
+		const pub = await getPublicSession(slug);
+		if (pub === null) return { kind: 'not_found' };
+		return {
+			kind: 'ok',
+			session,
+			spotName: pub.session.spot_name ?? session.spot_id,
+			rsvps: pub.rsvps,
+			rsvpsClosed: pub.session.rsvps_closed
+		};
+	} catch {
+		console.warn('manage page load failed');
 		return { kind: 'error' };
 	}
 }
