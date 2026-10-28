@@ -3,9 +3,14 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from fakes import FakeSupabase
-from shakka.db import iso_utc
+from shakka.db import DatabaseError, iso_utc
 from shakka.domain.tide import TideExtreme
-from shakka.jobs.tides import delete_old_tides, run_tide_ingest
+from shakka.jobs.tides import (
+    TideBudgetExhausted,
+    _parse_fetched_at,
+    delete_old_tides,
+    run_tide_ingest,
+)
 from shakka.rws.tides import TideFetchError
 
 NOW = datetime(2026, 10, 14, 12, 0, tzinfo=UTC)
@@ -34,6 +39,26 @@ class FakeFetch:
         if isinstance(result, Exception):
             raise result
         return result
+
+
+class BudgetFetch:
+    """First call returns extremes, every next call raises TideBudgetExhausted."""
+
+    def __init__(self):
+        self.calls = []
+
+    def __call__(self, station, start, end):
+        self.calls.append((station, start, end))
+        if len(self.calls) > 1:
+            raise TideBudgetExhausted("tide step time budget of 240 s reached")
+        return default_extremes(station)
+
+
+class FailingUsageDb(FakeSupabase):
+    def upsert(self, table, rows, *, on_conflict):
+        if table == "api_usage":
+            raise DatabaseError("boom", status=500)
+        return super().upsert(table, rows, on_conflict=on_conflict)
 
 
 class SpyDb(FakeSupabase):
@@ -216,3 +241,149 @@ def test_naive_now_rejected():
         run_tide_ingest(make_db([]), now=naive, fetch=FakeFetch())
     with pytest.raises(ValueError):
         delete_old_tides(make_db([]), now=naive)
+
+
+def usage_rows(db):
+    return [r for r in db.rows("api_usage") if r["source"] == "rws"]
+
+
+def test_rws_usage_booked_per_request():
+    db = make_db(["hoekvanholland", "vlissingen", "delfzijl"])
+    fetch = FakeFetch({"vlissingen": TideFetchError("down")})
+    run_tide_ingest(db, now=NOW, fetch=fetch)
+    (row,) = usage_rows(db)
+    assert str(row["day"]) == "2026-10-14"
+    assert row["requests"] == 3
+    assert float(row["calls"]) == 3
+
+
+def test_rws_usage_nothing_when_all_fresh():
+    db = make_db(["a", "b", "c"])
+    for s in "abc":
+        seed_row(db, s, NOW + 2 * H, NOW - 1 * H)
+    run_tide_ingest(db, now=NOW, fetch=FakeFetch())
+    assert db.rows("api_usage") == []
+    assert ("api_usage", "day,source") not in db.upserts
+
+
+def test_rws_usage_nothing_for_invalid_code_only():
+    db = make_db(["Bad Code!"])
+    fetch = FakeFetch()
+    run_tide_ingest(db, now=NOW, fetch=fetch)
+    assert fetch.calls == []
+    assert db.rows("api_usage") == []
+
+
+def test_rws_usage_adds_to_existing_day():
+    db = make_db(["a", "b", "c"])
+    db.seed(
+        "api_usage",
+        [{"day": NOW.date(), "source": "rws", "calls": 2.0, "requests": 2}],
+    )
+    run_tide_ingest(db, now=NOW, fetch=FakeFetch())
+    (row,) = usage_rows(db)
+    assert row["requests"] == 5
+    assert float(row["calls"]) == 5
+
+
+def test_rws_usage_excludes_budget_exhausted():
+    db = make_db(["a", "b", "c"])
+    result = run_tide_ingest(db, now=NOW, fetch=BudgetFetch())
+    (row,) = usage_rows(db)
+    assert row["requests"] == 1
+    assert result.failed == ["b", "c"]
+
+
+def test_rws_usage_nothing_when_budget_gone_before_first():
+    db = make_db(["a"])
+
+    def exhausted(station, start, end):
+        raise TideBudgetExhausted("x")
+
+    result = run_tide_ingest(db, now=NOW, fetch=exhausted)
+    assert result.failed == ["a"]
+    assert db.rows("api_usage") == []
+
+
+def test_rws_usage_booking_failure_is_not_fatal():
+    db = make_db(["a"], cls=FailingUsageDb)
+    result = run_tide_ingest(db, now=NOW, fetch=FakeFetch())
+    assert result.stations == 1
+    assert result.failed == []
+    assert result.errors == ["api_usage: DatabaseError (HTTP 500)"]
+    assert len(stored(db, "a")) == 2
+
+
+def seed_station(db, station, age_h):
+    seed_row(db, station, NOW + 2 * H, NOW - age_h * H)
+
+
+def test_stations_ordered_oldest_first():
+    db = make_db(["a", "b", "c", "d"])
+    seed_station(db, "a", 30)
+    seed_station(db, "b", 25)
+    seed_station(db, "d", 40)
+    fetch = FakeFetch()
+    run_tide_ingest(db, now=NOW, fetch=fetch)
+    assert [c[0] for c in fetch.calls] == ["c", "d", "a", "b"]
+
+
+def test_budget_after_one_station_serves_oldest():
+    db = make_db(["a", "b", "c", "d"])
+    seed_station(db, "a", 30)
+    seed_station(db, "b", 25)
+    seed_station(db, "d", 40)
+    result = run_tide_ingest(db, now=NOW, fetch=BudgetFetch())
+    assert len(stored(db, "c")) == 2
+    assert result.failed == ["a", "b", "d"]
+    assert all("TideBudgetExhausted" in e for e in result.errors)
+
+
+def test_last_fetch_uses_newest_row():
+    db = make_db(["a", "b"])
+    seed_row(db, "a", NOW + 2 * H, NOW - 50 * H)
+    seed_row(db, "a", NOW + 3 * H, NOW - 21 * H)
+    seed_station(db, "b", 22)
+    fetch = FakeFetch()
+    run_tide_ingest(db, now=NOW, fetch=fetch)
+    assert [c[0] for c in fetch.calls] == ["b", "a"]
+
+
+def test_station_order_tie_alphabetical():
+    db = make_db(["b", "a", "c"])
+    for s in "abc":
+        seed_station(db, s, 30)
+    fetch = FakeFetch()
+    run_tide_ingest(db, now=NOW, fetch=fetch)
+    assert [c[0] for c in fetch.calls] == ["a", "b", "c"]
+
+
+def test_force_keeps_order_fresh_last():
+    db = make_db(["a", "b"])
+    seed_station(db, "a", 1)
+    seed_station(db, "b", 30)
+    fetch = FakeFetch()
+    result = run_tide_ingest(db, now=NOW, force=True, fetch=fetch)
+    assert [c[0] for c in fetch.calls] == ["b", "a"]
+    assert result.skipped == []
+
+
+def test_fetched_at_iso_string():
+    db = make_db(["a", "b", "c"])
+    seed_row(db, "a", NOW + 2 * H, iso_utc(NOW - 25 * H))
+    seed_row(db, "b", NOW + 2 * H, iso_utc(NOW - 30 * H))
+    seed_row(db, "c", NOW + 2 * H, iso_utc(NOW - 1 * H))
+    fetch = FakeFetch()
+    result = run_tide_ingest(db, now=NOW, fetch=fetch)
+    assert [c[0] for c in fetch.calls] == ["b", "a"]
+    assert result.skipped == ["c"]
+
+
+def test_parse_fetched_at():
+    assert _parse_fetched_at(NOW) == NOW
+    assert _parse_fetched_at("2026-10-14T14:00:00+02:00") == NOW
+    assert _parse_fetched_at("2026-10-14T12:00:00Z") == NOW
+    assert _parse_fetched_at(NOW.replace(tzinfo=None)) is None
+    assert _parse_fetched_at("2026-10-14T12:00:00") is None
+    assert _parse_fetched_at("garbage") is None
+    assert _parse_fetched_at(None) is None

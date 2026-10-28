@@ -35,7 +35,7 @@ from shakka.jobs.forecast import FetchForecast, run_forecast_ingest
 from shakka.jobs.inputs import db_error_summary, require_aware, short_error
 from shakka.jobs.marine import FetchMarine, run_marine_ingest
 from shakka.jobs.sessions import purge_expired_sessions
-from shakka.jobs.tides import TideFetcher, run_tide_ingest
+from shakka.jobs.tides import TideBudgetExhausted, TideFetcher, run_tide_ingest
 from shakka.jobs.usage import UsageReportResult, run_usage_report, usage_stats_json
 from shakka.logsetup import configure_logging, github_annotation, redact, secret_values
 from shakka.notify.base import WEBPUSH_CHANNEL, Notifier
@@ -208,7 +208,7 @@ def step_tides(ctx: PipelineContext) -> StepOutcome:
         nonlocal budget_skipped
         if _monotonic() >= deadline:
             budget_skipped += 1
-            raise TimeoutError(f"tide step time budget of {budget_s:.0f} s reached")
+            raise TideBudgetExhausted(f"tide step time budget of {budget_s:.0f} s reached")
         return ctx.tide_fetch(station, start, end)
 
     result = run_tide_ingest(ctx.db, now=ctx.now, fetch=bounded_fetch)
