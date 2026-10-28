@@ -125,16 +125,27 @@ describe('AlertRuleForm', () => {
 		expect(screen.getByText('standaard: 14 kn (je profiel)')).toBeInTheDocument();
 	});
 
-	it('offers no 00:00 or 24:00 and no day 7 by default', () => {
+	it('offers no 00:00 or 24:00', () => {
 		draw();
 		expect(optionValues(field('Tot (lokale tijd)'))).not.toContain('00:00');
 		expect(optionValues(field('Tot (lokale tijd)'))).not.toContain('24:00');
-		expect(optionValues(field('Dagen vooruit (na vandaag)'))).toEqual(['', '0', '1', '2', '3', '4', '5', '6']);
+	});
+
+	it('offers day 7 with a Dutch label and no warning', () => {
+		const { container } = draw();
+		const select = field('Dagen vooruit (na vandaag)');
+		expect(optionValues(select)).toEqual(['', '0', '1', '2', '3', '4', '5', '6', '7']);
+		const opt = Array.from(select.querySelectorAll('option')).find((o) => o.value === '7');
+		expect(opt?.textContent?.trim()).toBe('7 (vandaag plus 7 dagen)');
+		expect(container.textContent).not.toContain('geen data');
+		expect(screen.getByText(/^standaard: vandaag plus 3 dagen/)).toBeInTheDocument();
 	});
 
 	it('offers day 7 when the row already has it', () => {
 		draw(ruleRow('test-meer', { days_ahead: 7 }));
-		expect(optionValues(field('Dagen vooruit (na vandaag)'))).toContain('7');
+		const select = field('Dagen vooruit (na vandaag)');
+		expect(optionValues(select).filter((v) => v === '7')).toHaveLength(1);
+		expect(select.value).toBe('7');
 	});
 
 	it('reset deletes the rule', async () => {

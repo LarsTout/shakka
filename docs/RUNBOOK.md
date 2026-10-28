@@ -103,6 +103,8 @@ Elk uur haalt de ingest per spot met coördinaten de windverwachting op bij Open
 
 **Modellen en cel.** KNMI HARMONIE, DWD ICON, ECMWF IFS en GFS, met `cell_selection=sea` (zie blueprint WP-03, A1 en A2).
 
+**Horizon.** 8 dagen (`forecast_days=8`, 192 uur vanaf vandaag 00:00 UTC), zodat een alertregel met `days_ahead` 7 de hele lokale dag vandaag+7 heeft. Het gewicht is gelijk aan dat van 7 dagen. KNMI dekt ca. 2,5 dag en ICON 7,5 dag, dus aan het eind van dag 7 rekenen soms alleen ECMWF en GFS (lagere zekerheid).
+
 **Tijdsemantiek.** `gust_kn` op `valid_at` T is de maximale vlaag in [T, T+1h) (de ruwe Open-Meteo-waarde van T+1h); het laatste uur van een respons heeft geen vlaag (A14).
 
 **Lokale test met de stack**
@@ -116,7 +118,7 @@ Elk uur haalt de ingest per spot met coördinaten de windverwachting op bij Open
 
 ```
 curl -sS --fail -o ingest/tests/fixtures/openmeteo/forecast_2loc_4models.json \
- "https://api.open-meteo.com/v1/forecast?latitude=52.4700,52.1000&longitude=4.5700,4.2700&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m&models=knmi_harmonie_arome_netherlands,dwd_icon_seamless,ecmwf_ifs,ncep_gfs_seamless&wind_speed_unit=kn&timezone=GMT&timeformat=unixtime&forecast_days=7&cell_selection=sea"
+ "https://api.open-meteo.com/v1/forecast?latitude=52.4700,52.1000&longitude=4.5700,4.2700&hourly=wind_speed_10m,wind_direction_10m,wind_gusts_10m&models=knmi_harmonie_arome_netherlands,dwd_icon_seamless,ecmwf_ifs,ncep_gfs_seamless&wind_speed_unit=kn&timezone=GMT&timeformat=unixtime&forecast_days=8&cell_selection=sea"
 ```
 
 Pas daarna `CAPTURE_URL` en `CAPTURE_DATE` in `ingest/tests/test_openmeteo_forecast.py` aan. `ingest/tests/fixtures/openmeteo/README.md` bevat de CC BY 4.0-vermelding van Open-Meteo; werk de opnamedatum (en URL) daar ook bij.

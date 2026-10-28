@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { ALERT_DEFAULTS } from '../src/lib/contracts.js';
 import {
 	FORM_MESSAGES,
+	DAYS_AHEAD_UI_MAX,
 	HOUR_OPTIONS,
 	daysAheadOptions,
 	parseAlertRuleForm,
@@ -393,8 +394,12 @@ describe('options', () => {
 		expect(timeOptions('00:00')[0]).toBe('00:00');
 	});
 	it('daysAheadOptions', () => {
-		expect(daysAheadOptions('')).toEqual(['0', '1', '2', '3', '4', '5', '6']);
-		expect(daysAheadOptions('7').at(-1)).toBe('7');
-		expect(daysAheadOptions('3')).toHaveLength(7);
+		expect(daysAheadOptions('')).toEqual(['0', '1', '2', '3', '4', '5', '6', '7']);
+		expect(daysAheadOptions('3')).toHaveLength(8);
+		expect(daysAheadOptions('7')).toHaveLength(8);
+		expect(daysAheadOptions('7').filter((o) => o === '7')).toHaveLength(1);
+	});
+	it('DAYS_AHEAD_UI_MAX matches the contract max', () => {
+		expect(DAYS_AHEAD_UI_MAX).toBe(ALERT_DEFAULTS.days_ahead.max);
 	});
 });

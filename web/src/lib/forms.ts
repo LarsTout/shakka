@@ -24,7 +24,7 @@ import {
 export const WEIGHT_RANGE_KG = [30, 200] as const; // profiles_weight_range
 export const QUIVER_SIZE_RANGE_M2 = [3, 21] as const; // profiles_quiver_valid
 export const MAX_QUIVER_KITES = 10; // profiles_quiver_valid
-export const DAYS_AHEAD_UI_MAX = 6; // WP-07/WP-03 A10: offered in the UI
+export const DAYS_AHEAD_UI_MAX = 7; // WP-26: equals the CHECK max; forecast covers local today+7
 /** '01:00', '02:00', ..., '23:00' (never 00:00 or 24:00). */
 export const HOUR_OPTIONS: readonly string[] = Array.from(
 	{ length: 23 },
