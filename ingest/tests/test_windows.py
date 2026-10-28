@@ -303,3 +303,10 @@ def test_disabled_skips_input_checks() -> None:
     assert find_windows(evs, rule(enabled=False), now=NOW) == []
     with pytest.raises(ValueError):
         find_windows(evs, rule(enabled=False), now=datetime(2026, 7, 15, 6))  # noqa: DTZ001
+
+
+def test_days_ahead_seven_reaches_local_today_plus_seven() -> None:
+    evs = go_run(utc(2026, 7, 22, 10), 3)
+    ws = find_windows(evs, rule(min_go_hours=1, days_ahead=7), now=NOW)
+    assert spans(ws) == [(utc(2026, 7, 22, 10), utc(2026, 7, 22, 13))]
+    assert find_windows(evs, rule(min_go_hours=1, days_ahead=6), now=NOW) == []

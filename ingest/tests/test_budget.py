@@ -231,3 +231,7 @@ def test_budget_rejects_naive_now() -> None:
         guard.can_spend(1, now=naive)
     with pytest.raises(ValueError):
         guard.record(SOURCE_OPEN_METEO_FORECAST, 1, now=naive)
+
+
+def test_weight_eight_days_equals_seven() -> None:
+    assert estimate_call_weight(25, 3, 4, 8) == estimate_call_weight(25, 3, 4, 7) == 30.0
