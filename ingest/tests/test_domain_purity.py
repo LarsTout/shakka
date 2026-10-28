@@ -46,6 +46,9 @@ ALLOWED_THIRD_PARTY = frozenset({"pydantic", "astral"})
 DOMAIN_PACKAGE = "shakka.domain"
 FORBIDDEN_BUILTIN_CALLS = frozenset({"open", "__import__", "eval", "exec"})
 FORBIDDEN_CALL_ATTRS = frozenset({"now", "today", "utcnow"})
+CLOCK_ATTRS = frozenset({"now", "today"})
+GETATTR_CLOCK = frozenset({"now", "today", "utcnow"})
+CLOCK_CLASSES = frozenset({"datetime", "date"})
 
 
 @dataclass(frozen=True)
@@ -93,6 +96,8 @@ def check_source(
         return [Violation(path, exc.lineno or 0, "syntax_error", exc.msg)]
 
     violations: list[Violation] = []
+    class_aliases, module_aliases = _datetime_aliases(tree)
+    call_funcs = {id(n.func) for n in ast.walk(tree) if isinstance(n, ast.Call)}
 
     def bad_import(line: int, name: str) -> None:
         violations.append(Violation(path, line, "forbidden_import", name))
@@ -123,7 +128,23 @@ def check_source(
                 violations.append(Violation(path, node.lineno, "forbidden_call", func.id))
             elif isinstance(func, ast.Attribute) and func.attr in FORBIDDEN_CALL_ATTRS:
                 violations.append(Violation(path, node.lineno, "forbidden_call", func.attr))
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "getattr"
+            and len(node.args) >= 2
+            and isinstance(node.args[1], ast.Constant)
+            and node.args[1].value in GETATTR_CLOCK
+        ):
+            violations.append(
+                Violation(path, node.lineno, "forbidden_call", f"getattr {node.args[1].value}")
+            )
         if isinstance(node, ast.Attribute):
+            owner = _clock_owner(node, class_aliases, module_aliases)
+            if owner and id(node) not in call_funcs:
+                violations.append(
+                    Violation(path, node.lineno, "forbidden_call", f"{owner}.{node.attr}")
+                )
             if node.attr == "utcnow" and not _is_call_func(tree, node):
                 violations.append(Violation(path, node.lineno, "forbidden_call", "utcnow"))
             elif (
@@ -131,6 +152,41 @@ def check_source(
             ):
                 violations.append(Violation(path, node.lineno, "forbidden_call", "time.time"))
     return violations
+
+
+def _datetime_aliases(tree: ast.AST) -> tuple[dict[str, str], set[str]]:
+    """Names bound to the datetime/date classes, and names bound to the datetime module."""
+    classes = {c: c for c in CLOCK_CLASSES}
+    modules = {"datetime"}
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module == "datetime" and not node.level:
+            for alias in node.names:
+                if alias.name in CLOCK_CLASSES:
+                    classes[alias.asname or alias.name] = alias.name
+        elif isinstance(node, ast.Import):
+            for alias in node.names:
+                if alias.name == "datetime" and alias.asname:
+                    modules.add(alias.asname)
+    return classes, modules
+
+
+def _clock_owner(
+    node: ast.Attribute, class_aliases: dict[str, str], module_aliases: set[str]
+) -> str | None:
+    """'datetime' or 'date' if node is <class>.now/today, else None."""
+    if node.attr not in CLOCK_ATTRS:
+        return None
+    value = node.value
+    if isinstance(value, ast.Name) and value.id in class_aliases:
+        return class_aliases[value.id]
+    if (
+        isinstance(value, ast.Attribute)
+        and value.attr in CLOCK_CLASSES
+        and isinstance(value.value, ast.Name)
+        and value.value.id in module_aliases
+    ):
+        return value.attr
+    return None
 
 
 def _is_call_func(tree: ast.AST, attr: ast.Attribute) -> bool:
@@ -186,6 +242,15 @@ def test_domain_package_is_pure() -> None:
         "import time\nt = time.time()\n",
         '__import__("os")',
         "def f(:",
+        "from datetime import datetime\nfrom pydantic import Field\n"
+        "x = Field(default_factory=datetime.now)\n",
+        "x = date.today\n",
+        "f = datetime.today\n",
+        "from datetime import datetime as dt\nf = dt.now\n",
+        "from datetime import date as d\nf = d.today\n",
+        "import datetime\nf = datetime.datetime.now\n",
+        "import datetime as m\nf = m.date.today\n",
+        "f = getattr(datetime, 'now')\n",
     ],
 )
 def test_checker_flags(source: str) -> None:
@@ -205,7 +270,15 @@ def test_checker_flags(source: str) -> None:
         "from . import spot",
         "from .spot import Level",
         "def f(now):\n    return now\n",
+        "from datetime import datetime\n",
+        "def f(stats):\n    return stats.now\n",
+        "def f(self):\n    return self.now.tzinfo\n",
+        "def f(x, name):\n    return getattr(x, name)\n",
     ],
 )
 def test_checker_allows(source: str) -> None:
     assert check_source(source) == [], source
+
+
+def test_checker_reports_reference_once() -> None:
+    assert len(check_source("x = datetime.now()\n")) == 1
