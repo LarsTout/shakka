@@ -15,7 +15,7 @@ const files = walk(SRC).filter((p) => /\.(ts|svelte)$/.test(p));
 const text = new Map(files.map((p) => [relative(SRC, p), readFileSync(p, 'utf8')]));
 
 // Anonymous session RPCs live only in lib/rsvp.ts (WP-21). A later module that needs an RPC is added here.
-const RPC_FILES = ['lib/rsvp.ts', 'lib/account.ts'];
+const RPC_FILES = ['lib/rsvp.ts', 'lib/account.ts', 'lib/moderation.ts'];
 
 describe('only data.ts and user-data.ts talk to tables', () => {
 	it(".from(' occurs in exactly lib/data.ts and lib/user-data.ts", () => {

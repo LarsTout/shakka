@@ -48,7 +48,7 @@ export interface SessionRow extends NewSession {
 	updated_at: string; // also changes on a new RSVP (WP-19 A4): never "last edited"
 }
 /** Payload of updateOwnSession: editable columns plus cancelled_at. */
-export type SessionUpdate = Partial<NewSession> & { cancelled_at?: string };
+export type SessionUpdate = Partial<NewSession> & { cancelled_at?: string; rsvps_closed_at?: string | null };
 
 export const ORGANIZER_NAME_MAX = 30; // sessions_organizer_name_valid
 export const NOTE_MAX = 280; // sessions_note_length
