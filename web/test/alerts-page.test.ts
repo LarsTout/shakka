@@ -63,6 +63,14 @@ describe('alerts page', () => {
 		expect(fake.current.calls).toHaveLength(0);
 	});
 
+	it('shows the quiet hours section, also without favorites', async () => {
+		serve({ favorites: [], rules: [] });
+		sessionStore.set(SESSION);
+		render(Page);
+		expect(await screen.findByRole('heading', { name: 'Stille uren' })).toBeInTheDocument();
+		expect(screen.getByText('Stille uren staan uit.')).toBeInTheDocument();
+	});
+
 	it('shows a section per favorite with its summary', async () => {
 		serve({});
 		sessionStore.set(SESSION);
