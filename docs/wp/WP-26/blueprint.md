@@ -1,5 +1,5 @@
 # Blueprint WP-26: Forecast-horizon 8 dagen (`days_ahead` 7 werkt)
-Status: DRAFT
+Status: APPROVED
 Revisie: 1
 
 ## Doel
