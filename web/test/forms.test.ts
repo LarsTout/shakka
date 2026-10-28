@@ -5,12 +5,17 @@ import {
 	FORM_MESSAGES,
 	DAYS_AHEAD_UI_MAX,
 	HOUR_OPTIONS,
+	QUIET_HOUR_OPTIONS,
 	daysAheadOptions,
 	parseAlertRuleForm,
 	parseProfileForm,
 	parseRuleFields,
 	profileKnHints,
+	parseQuietHours,
 	profileToForm,
+	quietHourOptions,
+	quietHoursSummary,
+	quietToForm,
 	ruleHints,
 	ruleSummary,
 	ruleToForm,
@@ -401,5 +406,81 @@ describe('options', () => {
 	});
 	it('DAYS_AHEAD_UI_MAX matches the contract max', () => {
 		expect(DAYS_AHEAD_UI_MAX).toBe(ALERT_DEFAULTS.days_ahead.max);
+	});
+});
+
+describe('quiet hours forms (WP-30)', () => {
+	it('parseQuietHours: both empty switches off', () => {
+		expect(parseQuietHours('', '')).toEqual({ quiet_from: null, quiet_until: null });
+		expect(parseQuietHours(' ', ' ')).toEqual({ quiet_from: null, quiet_until: null });
+	});
+	it('parseQuietHours: one empty is incomplete, in both orders', () => {
+		expect(parseQuietHours('22:00', '')).toEqual({ error: FORM_MESSAGES.quietIncomplete });
+		expect(parseQuietHours('', '07:00')).toEqual({ error: FORM_MESSAGES.quietIncomplete });
+	});
+	it('parseQuietHours: rejects values outside HH:MM', () => {
+		for (const bad of ['24:00', '7:00', '22:00:00', 'abc', '22:60']) {
+			expect(parseQuietHours(bad, '07:00')).toEqual({ error: FORM_MESSAGES.time });
+			expect(parseQuietHours('22:00', bad)).toEqual({ error: FORM_MESSAGES.time });
+		}
+	});
+	it('parseQuietHours: equal times are rejected', () => {
+		expect(parseQuietHours('22:00', '22:00')).toEqual({ error: FORM_MESSAGES.quietEqual });
+	});
+	it('parseQuietHours: a valid pair gets seconds', () => {
+		expect(parseQuietHours('22:00', '07:00')).toEqual({
+			quiet_from: '22:00:00',
+			quiet_until: '07:00:00'
+		});
+		expect(parseQuietHours(' 13:00 ', '14:00')).toEqual({
+			quiet_from: '13:00:00',
+			quiet_until: '14:00:00'
+		});
+	});
+	it('quiet messages are Dutch', () => {
+		expect(FORM_MESSAGES.quietIncomplete).toBe(
+			'Kies een begin- én een eindtijd, of zet stille uren uit.'
+		);
+		expect(FORM_MESSAGES.quietEqual).toBe(
+			'Begin en einde van de stille uren mogen niet gelijk zijn.'
+		);
+	});
+	it('quietToForm', () => {
+		expect(quietToForm(null)).toEqual({ from: '', until: '' });
+		expect(quietToForm({ quiet_from: null, quiet_until: null })).toEqual({ from: '', until: '' });
+		expect(quietToForm({ quiet_from: '22:00:00', quiet_until: '07:00' })).toEqual({
+			from: '22:00',
+			until: '07:00'
+		});
+		expect(quietToForm({ quiet_from: 'kapot', quiet_until: '07:00:00' })).toEqual({
+			from: '',
+			until: '07:00'
+		});
+	});
+	it('quietHourOptions', () => {
+		expect(QUIET_HOUR_OPTIONS).toHaveLength(24);
+		expect(QUIET_HOUR_OPTIONS[0]).toBe('00:00');
+		expect(QUIET_HOUR_OPTIONS[23]).toBe('23:00');
+		expect(quietHourOptions('22:00')).toEqual([...QUIET_HOUR_OPTIONS]);
+		expect(quietHourOptions('')).toEqual([...QUIET_HOUR_OPTIONS]);
+		const extra = quietHourOptions('22:30');
+		expect(extra).toHaveLength(25);
+		expect(extra.indexOf('22:30')).toBe(extra.indexOf('22:00') + 1);
+	});
+	it('quietHoursSummary', () => {
+		expect(quietHoursSummary(null)).toBe('Stille uren staan uit.');
+		expect(quietHoursSummary({ quiet_from: null, quiet_until: null })).toBe(
+			'Stille uren staan uit.'
+		);
+		expect(quietHoursSummary({ quiet_from: '13:00:00', quiet_until: '14:00:00' })).toBe(
+			'Elke dag van 13:00 tot 14:00 geen alerts.'
+		);
+		expect(quietHoursSummary({ quiet_from: '22:00:00', quiet_until: '07:00:00' })).toBe(
+			'Elke dag van 22:00 tot 07:00 (de volgende dag) geen alerts.'
+		);
+		const invalid = 'De opgeslagen stille uren zijn ongeldig. Stel ze opnieuw in.';
+		expect(quietHoursSummary({ quiet_from: '22:00:00', quiet_until: null })).toBe(invalid);
+		expect(quietHoursSummary({ quiet_from: 'x', quiet_until: '07:00:00' })).toBe(invalid);
+		expect(quietHoursSummary({ quiet_from: '22:00:00', quiet_until: '22:00:00' })).toBe(invalid);
 	});
 });

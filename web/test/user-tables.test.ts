@@ -35,8 +35,8 @@ describe('only data.ts and user-data.ts talk to tables', () => {
 	});
 	it('user-data.ts writes only where allowed', () => {
 		const t = text.get('lib/user-data.ts')!;
-		expect(t.match(/\.update\(/g)).toHaveLength(2);
-		expect(t).toMatch(/\.from\('profiles'\)\s*\.update\(/);
+		expect(t.match(/\.update\(/g)).toHaveLength(3);
+		expect(t.match(/\.from\('profiles'\)\s*\.update\(/g)).toHaveLength(2);
 		expect(t).toMatch(/\.from\('sessions'\)\s*\.update\(/);
 		for (const m of t.matchAll(/\.insert\(/g)) {
 			expect(t.slice(Math.max(0, m.index! - 40), m.index! + m[0].length)).toMatch(

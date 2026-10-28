@@ -45,6 +45,8 @@ export const FORM_MESSAGES = {
 	weekdaysEmpty: 'Kies minstens één dag.',
 	weekdaysInvalid: 'Kies dagen uit de lijst.',
 	time: 'Kies een tijd uit de lijst.',
+	quietIncomplete: 'Kies een begin- én een eindtijd, of zet stille uren uit.',
+	quietEqual: 'Begin en einde van de stille uren mogen niet gelijk zijn.',
 	latestMidnight:
 		'"Tot 00:00" telt geen enkel uur. Kies een later tijdstip of geen bovengrens.',
 	timeOrder: '"Tot" moet later zijn dan "Vanaf".',
@@ -460,4 +462,67 @@ export function daysAheadOptions(current: string): string[] {
 	const out = Array.from({ length: DAYS_AHEAD_UI_MAX + 1 }, (_, i) => String(i));
 	if (current !== '' && !out.includes(current)) out.push(current);
 	return out.sort((a, b) => Number(a) - Number(b));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Quiet hours (WP-30)
+
+/** '00:00' .. '23:00': the whole hours the UI offers. */
+export const QUIET_HOUR_OPTIONS: readonly string[] = Array.from(
+	{ length: 24 },
+	(_, i) => `${String(i).padStart(2, '0')}:00`
+);
+
+/** The whole hours plus `current` if it is non-empty and not a whole hour, sorted. */
+export function quietHourOptions(current: string): string[] {
+	const out = [...QUIET_HOUR_OPTIONS];
+	if (current !== '' && !out.includes(current)) out.push(current);
+	return out.sort();
+}
+
+export interface QuietHoursForm {
+	from: string; // 'HH:MM' or ''
+	until: string;
+}
+
+const QUIET_STORED_TIME = /^([01]\d|2[0-3]):[0-5]\d(:[0-5]\d)?$/;
+const QUIET_FORM_TIME = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+function storedToForm(v: string | null): string {
+	return v !== null && QUIET_STORED_TIME.test(v) ? v.slice(0, 5) : '';
+}
+
+export function quietToForm(
+	p: Pick<Profile, 'quiet_from' | 'quiet_until'> | null
+): QuietHoursForm {
+	return {
+		from: storedToForm(p?.quiet_from ?? null),
+		until: storedToForm(p?.quiet_until ?? null)
+	};
+}
+
+export function parseQuietHours(
+	from: string,
+	until: string
+): { quiet_from: string | null; quiet_until: string | null } | { error: string } {
+	const f = from.trim();
+	const u = until.trim();
+	if (f === '' && u === '') return { quiet_from: null, quiet_until: null };
+	if (f === '' || u === '') return { error: FORM_MESSAGES.quietIncomplete };
+	if (!QUIET_FORM_TIME.test(f) || !QUIET_FORM_TIME.test(u)) return { error: FORM_MESSAGES.time };
+	if (f === u) return { error: FORM_MESSAGES.quietEqual };
+	return { quiet_from: `${f}:00`, quiet_until: `${u}:00` };
+}
+
+export function quietHoursSummary(p: Pick<Profile, 'quiet_from' | 'quiet_until'> | null): string {
+	if ((p?.quiet_from ?? null) === null && (p?.quiet_until ?? null) === null) {
+		return 'Stille uren staan uit.';
+	}
+	const { from, until } = quietToForm(p);
+	if (from === '' || until === '' || from === until) {
+		return 'De opgeslagen stille uren zijn ongeldig. Stel ze opnieuw in.';
+	}
+	return from < until
+		? `Elke dag van ${from} tot ${until} geen alerts.`
+		: `Elke dag van ${from} tot ${until} (de volgende dag) geen alerts.`;
 }
