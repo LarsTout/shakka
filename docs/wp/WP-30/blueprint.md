@@ -1,5 +1,5 @@
 # Blueprint WP-30: Stille uren voor meldingen
-Status: DRAFT
+Status: APPROVED
 Revisie: 1
 
 ## Doel
