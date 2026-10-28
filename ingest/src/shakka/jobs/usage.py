@@ -16,7 +16,7 @@ from typing import Any, Final, Literal
 
 from pydantic import ValidationError
 
-from shakka.budget import OPEN_METEO_PREFIX
+from shakka.budget import OPEN_METEO_PREFIX, SOURCE_RWS
 from shakka.config import get_settings
 from shakka.db import DatabaseError, SupabaseRest, iso_utc
 from shakka.domain.push import PushPayload
@@ -143,6 +143,22 @@ def read_open_meteo_usage(db: SupabaseRest, *, now: datetime) -> OpenMeteoUsage:
         max_day=float(max(week, default=0.0)),
         month=float(sum(calls for day, calls in per_day.items() if day >= first)),
     )
+
+
+def read_rws_requests(db: SupabaseRest, *, now: datetime) -> int:
+    """Sum of api_usage.requests for source rws over the UTC days [today - 6, today]."""
+    require_aware(now)
+    today = _utc_date(now)
+    week_first = today - timedelta(days=REPORT_DAYS - 1)
+    rows = db.select(
+        "api_usage",
+        columns="day,requests",
+        filters={
+            "source": f"eq.{SOURCE_RWS}",
+            "day": [f"gte.{week_first.isoformat()}", f"lte.{today.isoformat()}"],
+        },
+    )
+    return sum(_count(row.get("requests")) for row in rows)
 
 
 def _is_count(value: object) -> bool:
@@ -302,6 +318,31 @@ def delete_old_ingest_runs(db: SupabaseRest, *, now: datetime) -> int:
 # -- orchestration ---------------------------------------------------------------------------
 
 
+def _report_fields(db: SupabaseRest, *, now: datetime, errors: list[str]) -> dict[str, Any]:
+    """Fields only needed for the full report: run history and RWS requests.
+
+    A source that fails is left out and adds an error.
+    """
+    fields: dict[str, Any] = {}
+    try:
+        history = read_run_history(db, now=now)
+        fields.update(
+            runs_ok=history.ok,
+            runs_partial=history.partial,
+            runs_failed=history.failed,
+            step_issues=history.step_issues,
+            push_sent=history.push_sent,
+            push_failed=history.push_failed,
+        )
+    except DatabaseError as exc:
+        errors.append(f"ingest_runs: {db_error_summary(exc)}")
+    try:
+        fields["rws_requests_7d"] = read_rws_requests(db, now=now)
+    except DatabaseError as exc:
+        errors.append(f"api_usage (rws): {db_error_summary(exc)}")
+    return fields
+
+
 def collect_usage_stats(
     db: SupabaseRest, *, now: datetime, with_history: bool
 ) -> tuple[UsageStats, list[str]]:
@@ -324,18 +365,7 @@ def collect_usage_stats(
     except ValueError:
         errors.append("db_usage: unexpected response")
     if with_history:
-        try:
-            history = read_run_history(db, now=now)
-            fields.update(
-                runs_ok=history.ok,
-                runs_partial=history.partial,
-                runs_failed=history.failed,
-                step_issues=history.step_issues,
-                push_sent=history.push_sent,
-                push_failed=history.push_failed,
-            )
-        except DatabaseError as exc:
-            errors.append(f"ingest_runs: {db_error_summary(exc)}")
+        fields.update(_report_fields(db, now=now, errors=errors))
     return UsageStats(now=now, **fields), errors
 
 
@@ -353,6 +383,7 @@ def usage_stats_json(stats: UsageStats) -> dict[str, Any]:
         "step_issues": dict(stats.step_issues),
         "push_sent": stats.push_sent,
         "push_failed": stats.push_failed,
+        "rws_requests_7d": stats.rws_requests_7d,
     }
 
 
@@ -421,19 +452,7 @@ def run_usage_report(
     runs_deleted = 0
 
     if report_due:
-        try:
-            history = read_run_history(db, now=now)
-            stats = replace(
-                stats,
-                runs_ok=history.ok,
-                runs_partial=history.partial,
-                runs_failed=history.failed,
-                step_issues=history.step_issues,
-                push_sent=history.push_sent,
-                push_failed=history.push_failed,
-            )
-        except DatabaseError as exc:
-            errors.append(f"ingest_runs: {db_error_summary(exc)}")
+        stats = replace(stats, **_report_fields(db, now=now, errors=errors))
         report = build_usage_report(stats)
         text = usage_push_text(stats)
         payload = PushPayload(**text.model_dump(), url=OPERATOR_PUSH_URL, tag=REPORT_TAG)

@@ -20,6 +20,7 @@ from shakka.jobs.usage import (
     read_db_usage,
     read_open_meteo_usage,
     read_run_history,
+    read_rws_requests,
     resolve_operator,
     run_usage_report,
 )
@@ -95,6 +96,24 @@ def test_read_open_meteo_usage_month_boundary():
     assert usage.max_day == 900.0  # the week reaches into July
     assert usage.month == 40.0  # the month is August only
     assert usage.today == 40.0
+
+
+def test_read_rws_requests_sums_last_7_days():
+    db = FakeSupabase()
+    db.seed(
+        "api_usage",
+        [
+            {"day": "2026-07-14", "source": "rws", "calls": 2.0, "requests": 2},
+            {"day": "2026-07-20", "source": "rws", "calls": 3.0, "requests": 3},
+            {"day": "2026-07-13", "source": "rws", "calls": 9.0, "requests": 9},
+            {"day": "2026-07-20", "source": "open_meteo_forecast", "calls": 5.0, "requests": 5},
+        ],
+    )
+    assert read_rws_requests(db, now=MONDAY) == 5
+
+
+def test_read_rws_requests_empty():
+    assert read_rws_requests(FakeSupabase(), now=MONDAY) == 0
 
 
 def test_read_open_meteo_usage_empty():
@@ -274,6 +293,7 @@ def test_quiet_hour_reads_little_and_writes_nothing():  # E29
     assert result.delivery is None and notifier.payload_calls == []
     assert db.writes == []
     assert "ingest_runs" not in db.selected
+    assert db.selected.count("api_usage") == 1  # E12: RWS is only read for the report
 
 
 def test_monday_before_window_is_not_due():  # E30
@@ -456,3 +476,34 @@ def test_delete_old_ingest_runs_boundary():
     store_run(db, MONDAY - timedelta(days=89))
     assert delete_old_ingest_runs(db, now=MONDAY) == 1
     assert len(db.rows("ingest_runs")) == 1
+
+
+def test_collect_with_history_fills_rws():
+    db = FakeSupabase()
+    db.seed("api_usage", [{"day": "2026-07-20", "source": "rws", "calls": 4.0, "requests": 4}])
+    stats, errors = collect_usage_stats(db, now=MONDAY, with_history=True)
+    assert errors == [] and stats.rws_requests_7d == 4
+    stats, _ = collect_usage_stats(db, now=MONDAY, with_history=False)
+    assert stats.rws_requests_7d is None
+
+
+def test_report_contains_rws_line():
+    db = FakeSupabase()
+    db.seed("api_usage", [{"day": "2026-07-20", "source": "rws", "calls": 3.0, "requests": 3}])
+    result = run(db, MONDAY, FakeNotifier())
+    assert result.report_due is True
+    assert "Rijkswaterstaat (7 dagen): 3 requests" in result.report.split("\n")
+
+
+def test_rws_unreadable_on_monday():  # E13
+    class Broken(FakeSupabase):
+        def select(self, table, **kwargs):
+            if table == "api_usage" and kwargs.get("columns") == "day,requests":
+                raise DatabaseError("x", status=500)
+            return super().select(table, **kwargs)
+
+    result = run(Broken(), MONDAY, FakeNotifier())
+    assert result.status == "partial"
+    assert result.errors == ("api_usage (rws): DatabaseError (HTTP 500)",)
+    assert result.stats.rws_requests_7d is None
+    assert "Rijkswaterstaat (7 dagen): onbekend" in result.report.split("\n")
