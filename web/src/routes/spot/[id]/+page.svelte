@@ -112,9 +112,6 @@
 	{#if groups.length === 0}
 		<p class="no-data">Nog geen data voor deze spot.</p>
 	{:else}
-		<button type="button" aria-pressed={showDark} onclick={() => (showDark = !showDark)}>
-			{showDark ? 'Verberg donkere uren' : 'Toon ook donkere uren'}
-		</button>
 		<div class="day-tabs" role="group" aria-label="Dag">
 			{#each groups as g (g.dateKey)}
 				<button
@@ -125,6 +122,9 @@
 				>
 			{/each}
 		</div>
+		<button type="button" aria-pressed={showDark} onclick={() => (showDark = !showDark)}>
+			{showDark ? 'Verberg donkere uren' : 'Toon ook donkere uren'}
+		</button>
 		{#each groups as g (g.dateKey)}
 			{@const dayTides = tidesForDay(data.tides, g.dateKey)}
 			{@const hours = visibleHours(g.hours, showDark)}
