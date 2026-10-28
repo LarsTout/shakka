@@ -34,7 +34,7 @@ Opdeling: goedgekeurd.
 | WP-25 | Moderatie voor organisatoren | todo | M5 |
 | WP-26 | Forecast-horizon 8 dagen (`days_ahead` 7 werkt) | todo | M5 |
 | WP-27 | Ingest-hygiëne: RWS-verbruik, stationvolgorde, `doctor`, puurheidscheck | todo | M5 |
-| WP-28 | Dependabot | building | M5; besluit Lars (draait WP-22 A17 terug) |
+| WP-28 | Dependabot | verifying | M5; besluit Lars (draait WP-22 A17 terug) |
 | WP-29 | Inloggen met een code | todo | M5; na eigen SMTP (WP-22) |
 | WP-30 | Stille uren voor meldingen | todo | M5; scopewijziging, akkoord Lars nodig; niet parallel met WP-24 |
 | WP-31 | Open aanmelden: crew organiseert zelf | todo | M5; scopewijziging, akkoord Lars nodig |
