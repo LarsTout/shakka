@@ -112,6 +112,7 @@ Uitkomst per uur: `go`, `marginal`, `no_go`, plus redenen. Regels:
 - Alert gaat af op een **window** (aaneengesloten uren), niet op een los uur.
 - **Deduplicatie**: één melding per window. Nieuwe melding alleen bij een wezenlijke verandering (beter, slechter, of geannuleerd). Status wordt bijgehouden per gebruiker, spot en window.
 - Bericht bevat: spot, tijdvenster, wind en richting, richtingsklasse, getij indien relevant, kite-advies, betrouwbaarheid, en een knop "ik ga".
+- **Stille uren** (scopewijziging WP-30, akkoord Lars 28 oktober 2026): per gebruiker één dagelijkse periode in Nederlandse tijd zonder alerts. Wat in die periode verandert, komt na afloop als actuele stand binnen, niet als een reeks oude meldingen.
 
 ### Kite-advies
 Op basis van gewicht, niveau en quiver van de gebruiker en de windkracht per uur. Advies is altijd een maat uit de eigen quiver. Formule en tabellen worden vastgelegd in de blueprint en getest tegen een set handmatig gecontroleerde voorbeelden.
@@ -205,7 +206,7 @@ Na M4 volgt mijlpaal **M5 "v2"**. M5 bevat alles wat tijdens v1 (WP-00 t/m WP-23
 
 - **Geen scopewijziging zonder akkoord.** Deze sectie verandert de scope, de non-goals en de harde randvoorwaarden niet. Drie v2-WP's zijn een scopewijziging en worden pas gebouwd nadat Lars ze expliciet goedkeurt. Dat akkoord wordt dan hier vastgelegd:
   - **WP-24, e-mail als tweede meldingskanaal.** Wijkt af van het besluit van 15 oktober 2026 dat Web Push het enige kanaal is.
-  - **WP-30, stille uren voor meldingen.** Eerder besloten: niet in v1.
+  - **WP-30, stille uren voor meldingen.** Eerder besloten: niet in v1. Akkoord Lars: 28 oktober 2026.
   - **WP-31, open aanmelden.** Crewleden maken zelf een account en organiseren sessies.
 - **Opruimen en afmaken.** De andere WP's zijn opruimen en afmaken (moderatie voor organisatoren, een forecast-horizon van 8 dagen, ingest-hygiëne, inloggen met een code), of een besluit van Lars (Dependabot, `cell_selection` per spot, eigen app-icoon).
 - **Volgorde.** Drie sporen (opruimen, crew en sessies, meldingen), in golven. Alle v2-WP's starten pas als WP-22 en WP-23 `done` zijn.

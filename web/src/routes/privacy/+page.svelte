@@ -45,7 +45,7 @@
 		IP-adres en je browser. Tot je je account verwijdert.
 	</li>
 	<li>
-		<strong>Profiel</strong>, alles optioneel: je gewicht, niveau, kitematen en standaard windgrenzen.
+		<strong>Profiel</strong>, alles optioneel: je gewicht, niveau, kitematen, standaard windgrenzen en stille uren.
 		Voor het kite-advies en je alerts. Tot je het aanpast of je account verwijdert.
 	</li>
 	<li>
