@@ -40,7 +40,7 @@ Opdeling: goedgekeurd.
 | WP-31 | Open aanmelden: crew organiseert zelf | todo | M5; scopewijziging, akkoord Lars nodig |
 | WP-32 | `cell_selection` per spot | todo | M5; voorwaardelijk: Lars wijst een spot aan |
 | WP-33 | Eigen app-icoon en installeerbaarheid | todo | M5; voorwaardelijk: icoon of bevindingen WP-23 AC-6 |
-| WP-34 | Visueel ontwerp: strak, licht en donker | in_review | M5; verzoek Lars 28 oktober 2026; bouwen na WP-30 (raakt ook /web) |
+| WP-34 | Visueel ontwerp: strak, licht en donker | building | M5; verzoek Lars 28 oktober 2026; bouwen na WP-30 (raakt ook /web) |
 
 Statussen: `todo`, `blueprint`, `in_review`, `approved`, `building`, `verifying`, `done`, `blocked`, `dropped` (vervallen door een scopebesluit van Lars; wordt niet gebouwd).
 

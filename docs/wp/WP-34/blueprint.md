@@ -1,5 +1,5 @@
 # Blueprint WP-34: Visueel ontwerp: strak, licht en donker
-Status: DRAFT
+Status: APPROVED
 Revisie: 2
 
 ## Doel
