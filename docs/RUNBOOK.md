@@ -258,13 +258,13 @@ Laatste activiteitscommit: 2026-10-15
 2. Na de merge: `supabase db push` (§8.3), en wel vóór de promotie naar `main`, want de schedule draait de code van `main` (§13.1) en de stap `sessions_cleanup` faalt zolang de RPC ontbreekt (`PGRST202`, elk uur een `::error::`-annotatie, geen mail). Controleer eerst in de SQL-editor dat pgcrypto in het schema `extensions` staat: `select extnamespace::regnamespace from pg_extension where extname = 'pgcrypto';` moet `extensions` geven. De migratie zelf stopt met een fout als dat niet zo is; push dan niet verder en meld het, want `rsvp_create` gebruikt `extensions.gen_random_bytes`.
 3. Geeft een RPC direct na de push `PGRST202` (functie niet gevonden), voer dan in de SQL-editor `notify pgrst, 'reload schema';` uit.
 4. Limieten: hoogstens 30 RSVP's per sessie, hoogstens 10 nieuwe RSVP's per sessie per 10 minuten, hoogstens 10 nieuwe sessies per organisator per 24 uur. Er wordt geen IP-adres opgeslagen.
-5. Een sessie handmatig verwijderen (bijv. bij misbruik): in de SQL-editor `delete from public.sessions where slug = '<slug>';`. De RSVP's gaan mee. Eén RSVP verwijderen: `delete from public.rsvps where id = '<id>';`.
+5. Een aanmelding verwijderen doet de organisator zelf op `/sessie/<slug>/beheer` (vanaf WP-25). Terugvaloptie, of bij misbruik over meerdere sessies: de SQL-editor, met `delete from public.sessions where slug = '<slug>';` (de RSVP's gaan mee) of `delete from public.rsvps where id = '<id>';`.
 6. Geen enkele API-rol mag `rsvps` direct lezen, ook de ingest niet. Ook `sessions` is niet leesbaar voor `service_role` (bewust, zie §8.2). Kijken kan alleen via de SQL-editor (rol `postgres`).
 7. De edit-token van een RSVP gaat alleen in de body van een POST-verzoek (de standaard van supabase-js voor `rpc()`), nooit in een URL, querystring of link: URL's komen in logs van de gateway terecht. In de database staat alleen de sha256-hash. Log de token ook nergens anders.
 8. **Publieke sessiepagina (vanaf WP-21).**
    - `/s/<slug>` werkt zonder account. Je ziet de sessie, de deelnemers, de carpool en het oordeel per uur, en je meldt je aan met alleen een voornaam.
    - De edit-token staat alleen in de browser van de bezoeker (`localStorage`, sleutel `shakka:rsvp:<slug>`). Wie een andere browser of de in-app-browser van WhatsApp gebruikt, of de websitedata wist, kan zich daar niet meer afmelden.
-   - Een RSVP verwijderen voor iemand gaat via de SQL-editor (punt 5): zoek eerst de id met `select r.id, r.first_name from public.rsvps r join public.sessions s on s.id = r.session_id where s.slug = '<slug>';`.
+   - Een RSVP voor iemand verwijderen: de organisator via 'Mijn sessies' → 'Aanmeldingen beheren'. Anders punt 5.
    - De pagina heeft `noindex`. Zoekmachines nemen hem niet op, maar iedereen met de link kan de voornamen zien.
 9. **Controle (WP-21 AC-7).**
    - Zonder WP-20 maak je een testsessie in de SQL-editor:
@@ -276,6 +276,11 @@ Laatste activiteitscommit: 2026-10-15
    - Open `https://<project>.pages.dev/s/<slug>` op een telefoon zonder in te loggen, bijvoorbeeld via een link in WhatsApp. Meld je aan, wijzig je aanmelding (bijvoorbeeld naar "Ik kan mensen meenemen") en meld je af.
    - Controleer in de SQL-editor dat de RSVP weg is.
    - Ruim de testsessie op met `delete from public.sessions where slug = '<slug>';`.
+10. **Moderatie (vanaf WP-25).**
+   - De organisator kan op `/sessie/<slug>/beheer` (via 'Mijn sessies' → 'Aanmeldingen beheren') een aanmelding verwijderen en het aanmelden sluiten of weer openen. Sluiten blokkeert alleen nieuwe aanmeldingen; wie al aangemeld is, kan nog wijzigen en afmelden.
+   - Na de merge: `supabase db push` voor `20261028090000_organizer_moderation.sql`, vóór de promotie naar `main`. Tot die tijd geeft 'Verwijderen' een foutmelding en lukt sluiten niet; `/s/<slug>` blijft gewoon werken, want de pagina leest een ontbrekende `rsvps_closed` als open.
+   - Geeft een RPC direct na de push `PGRST202`: punt 3.
+   - Controle (AC-7, door Lars): maak een testsessie en meld je er op `/s/<slug>` twee keer aan, met verschillende voornamen. Open `/sessie/<slug>/beheer` ingelogd als organisator. Verwijder één aanmelding en controleer dat die ook op `/s/<slug>` weg is. Sluit het aanmelden en controleer dat `/s/<slug>` de melding toont en geen formulier, en dat een bestaande aanmelding nog kan wijzigen en afmelden. Open het aanmelden weer en controleer dat het formulier terugkomt. Een tweede account kan de beheerpagina van deze sessie niet gebruiken (toont 'Sessie niet gevonden'). Ruim de testsessie op (punt 5).
 
 
 ## 17. Privacy, CSP en performance (vanaf WP-23)

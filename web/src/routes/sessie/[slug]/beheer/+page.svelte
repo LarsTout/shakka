@@ -170,7 +170,7 @@
 	}
 	.manage-list li {
 		padding: 0.5rem 0;
-		border-bottom: 1px solid #ccc;
+		border-bottom: 1px solid currentcolor;
 	}
 	.manage-list button,
 	section > button {

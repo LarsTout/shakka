@@ -106,6 +106,16 @@ describe('my sessions page (AC-5)', () => {
 		);
 		expect(payload.departure_point).toBe('Amersfoort');
 	});
+	it('(h) manage link, also for a cancelled session', async () => {
+		await draw();
+		for (const slug of [SLUG, SESSION_CANCELLED.slug]) {
+			const el = document.querySelector(`[data-slug="${slug}"]`) as HTMLElement;
+			expect(within(el).getByRole('link', { name: 'Aanmeldingen beheren' })).toHaveAttribute(
+				'href',
+				`/sessie/${slug}/beheer`
+			);
+		}
+	});
 	it('(g) empty list shows the explanation and the new-session link', async () => {
 		await draw([]);
 		expect(screen.getByRole('link', { name: 'Nieuwe sessie' })).toHaveAttribute('href', '/sessie/nieuw');

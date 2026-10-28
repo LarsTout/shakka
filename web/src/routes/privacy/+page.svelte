@@ -73,7 +73,7 @@
 <p>
 	Voor "Ik ook" heb je geen account nodig. Shakka bewaart dan alleen je <strong>voornaam</strong> en
 	je keuze voor vervoer: eigen vervoer, een lift zoeken of plekken aanbieden, en met wie je meerijdt.
-	Iedereen met de link kan dit zien. Het verdwijnt als je je afmeldt, en anders
+	Iedereen met de link kan dit zien. Het verdwijnt als je je afmeldt of als de organisator je aanmelding verwijdert, en anders
 	{SESSION_RETENTION_DAYS} dagen na het einde van de sessie. In de database van Shakka staat geen
 	e-mailadres of IP-adres bij je aanmelding.
 </p>
