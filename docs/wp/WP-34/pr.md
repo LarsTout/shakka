@@ -17,6 +17,6 @@
 
 **Verificatie:** automatisch PASS, AC-9 goedgekeurd door Lars op 29 oktober 2026 (`docs/wp/WP-34/verification.md`). Web 1248 tests groen.
 
-**Vervolg:** donkere kaartstijl, windkite-maat per uur op de spotpagina, tijdlijn op `/sessie/nieuw`.
+**Vervolg:** donkere kaartstijl, kitemaat per uur op de spotpagina, tijdlijn op `/sessie/nieuw`.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
