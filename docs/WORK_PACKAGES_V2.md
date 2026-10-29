@@ -691,14 +691,14 @@ Daarnaast WP-33 "Buiten scope" ("een nieuwe huisstijl of kleuren in de app").
 **Acceptatiecriteria:**
 - AC-1: `cd web && npm run check && npm test && npm run build && npm run verify:build` slaagt. `node scripts/check-bundle-size.mjs` blijft binnen het precachebudget.
 - AC-2: Er verandert geen gedrag.
-  - `git diff develop...wp/WP-34 --name-only -- web/src` toont alleen `.svelte`- en `.css`-bestanden en `app.html`.
+  - `git diff develop...wp/WP-34 --name-only -- web/src` toont alleen `.svelte`- en `.css`-bestanden en `app.html`, plus `lib/timeline.ts` (nieuw) en additieve wijzigingen in `lib/types.ts` en `lib/view.ts` (blueprint, "Niet-CSS-wijzigingen"; aangepast na ontwerpkeuze B, 28 oktober 2026).
   - Een uitzondering staat in de blueprint onder "Niet-CSS-wijzigingen", met reden, en verandert geen exportsignatuur.
   - Bestaande tests in `web/test/` worden niet inhoudelijk gewijzigd, met uitzondering van `contrast.test.ts`. Een andere aanpassing (bijv. een selector) staat met reden in de blueprint.
 - AC-3: `npm test -- contrast` is groen.
   - Elke kleurtoken staat in de lichte en de donkere set (de sets van tokennamen zijn gelijk).
   - Elk paar in `PAIRS` haalt in beide modi zijn minimum: 4.5 voor tekst, 3 voor niet-tekst. De paren omvatten minstens:
     - tekst, muted en accent op `--color-bg` en `--color-surface`;
-    - `--color-on-verdict` op go, marginal, no-go en none;
+    - go, marginal en no-go als niet-tekst (3:1) op bg en surface; `--color-on-verdict` op `--color-error`; `--color-none` is decoratief (ontwerp B: geen tekst op oordeelkleuren);
     - `--color-on-accent` op accent;
     - `--color-header-text` op `--color-header-bg`;
     - error op bg en op `--color-warning-bg`;
@@ -726,9 +726,11 @@ Daarnaast WP-33 "Buiten scope" ("een nieuwe huisstijl of kleuren in de app").
   De modus wordt geëmuleerd met `prefers-color-scheme` (bijv. Chrome DevTools "Rendering" of de preview-tool), dus niet met een schakelaar in de app. Bij elke pagina geldt `document.documentElement.scrollWidth <= 375`; de verifier noteert de waarde in `verification.md`. De planner legt in de blueprint vast waar de data voor ingelogde pagina's en de sessiepagina vandaan komt (lokale Supabase met seed of de preview-deploy).
 - AC-8: Op de screenshots van `home` en `spot` is in beide modi zichtbaar:
   - de footer met de bronvermelding (Open-Meteo, KNMI, Rijkswaterstaat, CC BY 4.0);
-  - op `home`: per spot een kaart met een groot label voor vandaag.
+  - op `home`: per spot een rij met een groot label voor vandaag en de tijdlijn.
 
   Op `home-map` is de kaartattributie (MapTiler, OpenStreetMap, MapLibre) zichtbaar als de kaart laadt.
+- AC-10 (34b): Op de spotpagina wisselen dagtabs de zichtbare dag, en de eerste dag is standaard gekozen. Een test toetst het wisselen.
+- AC-11 (34b): `DayTimeline` staat op vier plekken: de lijst (vandaag en morgen), de spotpagina (per dag, met LW/HW en nu), `/s/[slug]` (tijdvak omkaderd) en Stille uren (24 uur). De componenten zijn getest. `timeline.ts` is unit-getest.
 - AC-9: Lars bekijkt de screenshots en de app op zijn eigen telefoon in licht en donker. Hij keurt het ontwerp goed, of geeft punten terug. Dit is `NEEDS_LARS`.
 
 **Nodig van Lars:**
