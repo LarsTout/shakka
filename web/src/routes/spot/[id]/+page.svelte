@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { refreshAll } from '$app/navigation';
 	import { onMount } from 'svelte';
+	import DayTimeline from '#lib/components/DayTimeline.svelte';
 	import Attribution from '#lib/components/Attribution.svelte';
 	import FavoriteStar from '#lib/components/FavoriteStar.svelte';
 	import Freshness from '#lib/components/Freshness.svelte';
@@ -17,6 +18,7 @@
 	import { goHref, goRuns } from '#lib/go.js';
 	import { WAVES_NOTE_NL, marineByHour, waveText } from '#lib/marine.js';
 	import { formatLocal, localDateKey } from '#lib/time.js';
+	import { dayTabLabel, dayTimeline } from '#lib/timeline.js';
 	import type { MarineHour } from '#lib/types.js';
 	import {
 		dayHeading,
@@ -30,11 +32,15 @@
 
 	let { data }: PageProps = $props();
 	let showDark = $state(false);
+	let selectedDay = $state<string | null>(null);
 
 	// Narrowed on kind === 'ok' so the error and not_found states never touch these (review N-1).
 	const now = $derived(new Date(data.now));
 	const todayKey = $derived(localDateKey(now));
 	const groups = $derived(data.kind === 'ok' ? groupByLocalDay(data.evaluations) : []);
+	const activeDay = $derived(
+		groups.some((g) => g.dateKey === selectedDay) ? selectedDay : (groups[0]?.dateKey ?? null)
+	);
 	const latest = $derived(data.kind === 'ok' ? latestEvaluatedAt(data.evaluations) : null);
 	const station = $derived(data.kind === 'ok' ? data.spot.rws_station?.trim() || null : null);
 
@@ -81,7 +87,7 @@
 	</div>
 {:else}
 	{@const spot = data.spot}
-	<p><a href="/">Alle spots</a></p>
+	<p><a class="back-link" href="/">Alle spots</a></p>
 	<div class="title-row">
 		<h1>{spot.name}</h1>
 		<FavoriteStar spotId={spot.id} spotName={spot.name} />
@@ -106,6 +112,16 @@
 	{#if groups.length === 0}
 		<p class="no-data">Nog geen data voor deze spot.</p>
 	{:else}
+		<div class="day-tabs" role="group" aria-label="Dag">
+			{#each groups as g (g.dateKey)}
+				<button
+					type="button"
+					aria-pressed={g.dateKey === activeDay}
+					aria-controls="dagpaneel-{g.dateKey}"
+					onclick={() => (selectedDay = g.dateKey)}>{dayTabLabel(g.dateKey, todayKey)}</button
+				>
+			{/each}
+		</div>
 		<button type="button" aria-pressed={showDark} onclick={() => (showDark = !showDark)}>
 			{showDark ? 'Verberg donkere uren' : 'Toon ook donkere uren'}
 		</button>
@@ -113,8 +129,18 @@
 			{@const dayTides = tidesForDay(data.tides, g.dateKey)}
 			{@const hours = visibleHours(g.hours, showDark)}
 			{@const runs = goRuns(g.hours)}
-			<section class="day" aria-labelledby="dag-{g.dateKey}">
+			{@const tl = dayTimeline(g.hours, {
+				tides: dayTides,
+				now: g.dateKey === todayKey ? now : undefined
+			})}
+			<section
+				class="day"
+				class:day-inactive={g.dateKey !== activeDay}
+				id="dagpaneel-{g.dateKey}"
+				aria-labelledby="dag-{g.dateKey}"
+			>
 				<h2 id="dag-{g.dateKey}">{dayHeading(g.dateKey, todayKey)}</h2>
+				{#if tl}<DayTimeline timeline={tl} size="lg" />{/if}
 				{#if station}
 					<p class="tides">
 						Getij: {dayTides.length ? dayTides.map(tideText).join(' · ') : 'geen gegevens'}
@@ -186,25 +212,3 @@
 		<Attribution />
 	</section>
 {/if}
-
-<style>
-	.go-runs {
-		list-style: none;
-		padding: 0;
-		margin: 0.25rem 0;
-		display: flex;
-		flex-wrap: wrap;
-		gap: 0.5rem;
-	}
-	.go-run {
-		display: inline-flex;
-		align-items: center;
-		min-height: 2.75rem;
-		padding: 0.4rem 0.75rem;
-		border-radius: 0.25rem;
-		background: #1b7f3b;
-		color: #fff;
-		font-weight: 600;
-		text-decoration: none;
-	}
-</style>

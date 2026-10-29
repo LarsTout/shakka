@@ -99,6 +99,7 @@ export function summarizeSpots(rows: readonly SummaryRow[], now: Date): Record<s
 			tomorrow: emptyDay(tomorrowKey),
 			latest_evaluated_at: r.evaluated_at
 		});
+		(summary.hours ??= []).push({ valid_at: r.valid_at, verdict: r.verdict, reasons: r.reasons });
 		const day = key === todayKey ? summary.today : summary.tomorrow;
 		day[r.verdict] += 1;
 		if (r.verdict === 'go') {
@@ -117,6 +118,7 @@ export function summarizeSpots(rows: readonly SummaryRow[], now: Date): Record<s
 	for (const s of Object.values(out)) {
 		finishDay(s.today);
 		finishDay(s.tomorrow);
+		s.hours?.sort((a, b) => Date.parse(a.valid_at) - Date.parse(b.valid_at));
 	}
 	return out;
 }

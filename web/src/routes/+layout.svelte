@@ -46,9 +46,6 @@
 	<nav aria-label="Hoofdmenu">
 		<a href="/over">Over</a>
 		{#if $session}
-			<a href="/alerts">Alerts</a>
-			<a href="/profiel">Profiel</a>
-			<a href="/mijn-sessies">Mijn sessies</a>
 			<span class="who">{$session.user.email}</span>
 			<button type="button" disabled={signingOut} onclick={handleSignOut}>{signingOut ? 'Uitloggen…' : 'Uitloggen'}</button>
 		{:else if $session === null}
@@ -64,7 +61,27 @@
 	</div>
 {/if}
 <main id="main" tabindex="-1">{@render children()}</main>
-<footer class="site-footer">
+<footer class="site-footer" class:has-tab-bar={!!$session}>
 	<Attribution compact />
 	<p><a href="/over">Over Shakka en bronnen</a> · <a href="/privacy">Privacy</a></p>
 </footer>
+{#if $session}
+	<nav class="tab-bar" aria-label="Tabbalk">
+		<a href="/">
+			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 15c3 0 3-3 6-3s3 3 6 3 3-3 6-3M3 9c3 0 3-3 6-3s3 3 6 3 3-3 6-3" /></svg>
+			Spots
+		</a>
+		<a href="/alerts">
+			<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 16v-5a6 6 0 0 1 12 0v5l1.5 2h-15zM10 20.5h4" /></svg>
+			Alerts
+		</a>
+		<a href="/mijn-sessies">
+			<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="15" rx="1.5" /><path d="M4 10h16M9 3v4M15 3v4" /></svg>
+			Mijn sessies
+		</a>
+		<a href="/profiel">
+			<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8.5" r="3.5" /><path d="M5 20c1-4 4-5.5 7-5.5s6 1.5 7 5.5" /></svg>
+			Profiel
+		</a>
+	</nav>
+{/if}

@@ -1,6 +1,7 @@
 <script lang="ts">
 	import { refreshAll } from '$app/navigation';
 	import { onMount } from 'svelte';
+	import DayTimeline from '#lib/components/DayTimeline.svelte';
 	import Attribution from '#lib/components/Attribution.svelte';
 	import Freshness from '#lib/components/Freshness.svelte';
 	import HourVerdict from '#lib/components/HourVerdict.svelte';
@@ -14,6 +15,7 @@
 		optionalText,
 		RSVPS_CLOSED_MESSAGE, sessionWindowText, tikkieLink } from '#lib/session-view.js';
 	import { formatDateKey } from '#lib/time.js';
+	import { sessionTimeline } from '#lib/timeline.js';
 	import { groupByLocalDay, latestEvaluatedAt, shouldRefreshOnResume } from '#lib/view.js';
 	import type { PageProps } from './$types';
 
@@ -33,6 +35,11 @@
 	const ended = $derived(session !== null && !session.cancelled && closed);
 	const groups = $derived(data.kind === 'ok' && data.evaluations ? groupByLocalDay(data.evaluations) : []);
 	const latest = $derived(data.kind === 'ok' && data.evaluations ? latestEvaluatedAt(data.evaluations) : null);
+	const bar = $derived(
+		data.kind === 'ok' && data.evaluations && session
+			? sessionTimeline(data.evaluations, session.starts_at, session.ends_at)
+			: null
+	);
 	const spotName = $derived(session?.spot_name ?? 'Onbekende spot');
 	const tikkie = $derived(tikkieLink(session?.tikkie_url ?? null));
 	const note = $derived(optionalText(session?.note ?? null));
@@ -118,6 +125,7 @@
 	<h1>Kitesessie: {spotName}</h1>
 	<p class="session-when">{sessionWindowText(session.starts_at, session.ends_at)}</p>
 	<p class="session-organizer">Georganiseerd door <bdi>{session.organizer_name}</bdi></p>
+	{#if bar}<DayTimeline timeline={bar} size="lg" />{/if}
 	{#if session.cancelled}
 		<div class="banner warning" role="alert">
 			<p><strong>Deze sessie is geannuleerd.</strong> Aanmelden kan niet meer. Afmelden kan nog wel.</p>

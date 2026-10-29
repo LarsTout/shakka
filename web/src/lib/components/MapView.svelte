@@ -75,6 +75,9 @@
 <style>
 	.map-wrap {
 		position: relative;
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-lg);
+		overflow: hidden;
 	}
 	.map-canvas {
 		width: 100%;
@@ -86,7 +89,8 @@
 		margin: 0;
 		display: grid;
 		place-items: center;
-		background: #f4f4f4;
+		background: var(--color-surface-muted);
+		color: var(--color-text);
 	}
 	.maptiler-logo {
 		position: absolute;
@@ -99,20 +103,16 @@
 		align-items: center;
 		gap: 0.25rem;
 		padding: 0.15rem 0.35rem;
-		background: #fff;
-		color: #1a1a1a;
-		border: 1px solid #555;
-		border-radius: 0.25rem;
-		font-size: 0.8rem;
+		background: var(--color-surface);
+		color: var(--color-text);
+		border: 1px solid var(--color-border-strong);
+		border-radius: var(--radius);
+		font-size: var(--font-size-sm);
 		text-decoration: none;
 		white-space: nowrap;
-		box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
 	}
 	:global(.map-marker-unverified) {
 		border-style: dashed;
-	}
-	:global(.verdict-none) {
-		background: #555;
 	}
 	:global(.map-marker .sr-only) {
 		position: absolute;

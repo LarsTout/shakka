@@ -620,6 +620,128 @@ M5 is geen blok dat in één keer af moet. De WP's lopen in drie sporen, met twe
 - De installeerbaarheidsbevindingen uit WP-23 AC-6.
 **Omvang:** S
 
+## WP-34: Visueel ontwerp: strak, licht en donker
+**Mijlpaal:** M5
+**Soort:** besluit Lars. Het is een verzoek van Lars van 28 oktober 2026: "het is echt heel lelijk. ik wil dat je het er mooi en strak uit laat zien." De functionaliteit verandert niet. Alleen het uiterlijk verandert.
+**Afhankelijk van:** WP-13, WP-14, WP-15, WP-16, WP-20, WP-21, WP-23, WP-30. Bouwen na WP-30, want die raakt ook `/web` (profiel). Niet parallel met andere WP's die `/web` raken (WP-24, WP-29, WP-31, WP-33), omdat `app.css` en de pagina's anders conflicteren.
+**Bron:** het verzoek van Lars van 28 oktober 2026, met zijn stijlkeuze:
+- strak en licht als basis: wit en lichtgrijs, met één accentkleur zeeblauw;
+- kaarten met een zachte schaduw;
+- per spot een groot, duidelijk go/no-go-label, zoals in een moderne weer-app;
+- een donkere modus die automatisch `prefers-color-scheme` volgt.
+
+Daarnaast WP-33 "Buiten scope" ("een nieuwe huisstijl of kleuren in de app").
+**Doel:** Shakka ziet er op een telefoon strak en verzorgd uit, in een lichte en een donkere modus. Wat de app doet en toont blijft gelijk. Contrast en toegankelijkheid blijven in beide modi minstens WCAG AA.
+**In scope:**
+- **Design tokens** als CSS custom properties in `web/src/app.css`:
+  - kleuren, vlakken, randen, schaduw, radius, afstanden en een typografische schaal;
+  - een lichte set in `:root` en een donkere set in `@media (prefers-color-scheme: dark)`;
+  - `color-scheme: light dark`, zodat formulierelementen en scrollbars meegaan.
+- **Kleuren alleen via tokens.** Alle vaste kleuren in componenten en routes gaan naar tokens. Nu staan er hexwaarden in de `<style>`-blokken van `spot/[id]`, `sessie/[slug]/delen`, `mijn-sessies` en `MapView.svelte`.
+- **Typografie:** alleen de systeemfontstack, met een vaste schaal voor koppen, tekst en kleine tekst.
+- **Layout en navigatie:**
+  - mobile-first, met de huidige `max-width` of een betere;
+  - een header die op 375 px breed niet overloopt (inclusief e-mailadres en de knop "Uitloggen");
+  - aanraakdoelen voor navigatie en knoppen van minstens 44×44 px;
+  - het liefst zonder JavaScript-menu. Komt er toch een, dan staat het in de blueprint en verandert het geen route of link.
+- **Spotlijst (`/`):**
+  - elke spot is een kaart met een zachte schaduw;
+  - de kaart toont een groot go/no-go-label voor vandaag (`VerdictBadge`, met een groottevariant) en een kleiner label voor morgen;
+  - naam, regio, favorietster, "niet geverifieerd" en de dagtekst blijven staan.
+- **Overige pagina's in dezelfde stijl:**
+  - spotpagina (uren, golven, profiel);
+  - kaartweergave: `MapSwitch`, de laad- en foutmelding van `MapView` en de markers volgen de verdict-tokens;
+  - `/profiel`, `/alerts`, `/login`, `/mijn-sessies`, `/sessie/nieuw`, `/sessie/[slug]/beheer` en `/sessie/[slug]/delen`;
+  - de publieke sessiepagina `/s/[slug]`, `/go`, `/over` en `/privacy`;
+  - banners, foutmeldingen, formulieren, fieldsets en knoppen (primair, secundair, `danger`).
+- **Focus en toegankelijkheid:**
+  - een zichtbare focusring met minstens 3:1 contrast in beide modi;
+  - tekst minstens 4.5:1 en niet-tekst minstens 3:1;
+  - een oordeel nooit alleen via kleur: het label blijft tekst;
+  - animaties of transities alleen met `prefers-reduced-motion: reduce`-uitzondering.
+- **PWA-themakleur:**
+  - `app.html` krijgt twee `<meta name="theme-color">`, met `media="(prefers-color-scheme: light)"` en `media="(prefers-color-scheme: dark)"`;
+  - `theme_color` en `background_color` in `web/static/manifest.webmanifest` gaan naar de lichte waarden. Het manifest kent geen media query.
+- **Contrasttest:** `web/test/contrast.test.ts` wordt omgebouwd naar kleurparen per modus, met de waarden uit `app.css` gelezen (zie Contracten).
+- **Screenshots:** de hoofdpagina's in licht en donker op 375×812 in `docs/wp/WP-34/screens/` (zie AC-7).
+
+**Buiten scope:**
+- Een handmatige thema-schakelaar of een opgeslagen themavoorkeur. De app volgt alleen `prefers-color-scheme`. Een schakelaar zou nieuw gedrag en opslag zijn.
+- Een donkere kaartstijl van MapTiler. `MAPTILER_STYLE_ID` blijft `streets-v4`; zie de vraag aan Lars.
+- Een nieuw app-icoon of favicon (WP-33).
+- Andere teksten, labels (`labels.ts`), routes, volgorde of data, en alle domeinlogica.
+- Externe fonts, icon-fonts of CDN's.
+- Een CSS-framework dat bij de build of in de browser iets van het netwerk haalt.
+- Wijzigingen aan de CSP in `web/static/_headers`.
+
+**Contracten:**
+- **Tokennamen in `app.css`.** Elke token staat in `:root` én in het donkere blok.
+  - Kleuren: `--color-bg`, `--color-surface`, `--color-surface-muted`, `--color-text`, `--color-muted`, `--color-border`, `--color-accent`, `--color-on-accent`, `--color-focus`, `--color-header-bg`, `--color-header-text`, `--color-go`, `--color-marginal`, `--color-no-go`, `--color-none`, `--color-on-verdict`, `--color-error`, `--color-warning-bg`, `--color-notice-bg`.
+  - Overige tokens: `--shadow-card`, `--radius`, `--radius-lg`, `--space-1` t/m `--space-6` en `--font-size-sm`, `--font-size-base`, `--font-size-lg`, `--font-size-xl`, `--font-size-verdict`.
+  - De bestaande namen `--color-brand` (= `var(--color-accent)`), `--color-text`, `--color-muted`, `--color-bg` en `--color-error` blijven bestaan.
+- **Hexkleuren alleen in de tokenblokken.** Hexkleuren staan alleen in de twee tokenblokken van `app.css`, plus de theme-color-metatags in `app.html` en het manifest. `.svelte`-bestanden bevatten geen hexkleur.
+- **`VerdictBadge`.**
+  - Props: `{ verdict: Verdict; size?: 'sm' | 'lg' }`, met standaard `'sm'`.
+  - De klassen `verdict` en `verdict-{verdict}` en het attribuut `data-verdict` blijven.
+  - `size='lg'` voegt de klasse `verdict-lg` toe.
+- **DOM-haken blijven ongewijzigd:** `data-spot`, `data-verdict`, `.spot-list`, `.spot-item`, `.spot-link`, `.skip-link`, `#main` en `.site-header`. Bestaande tests selecteren erop.
+- **Contrasttest leest uit `app.css`.** `contrast.test.ts` leest de tokenwaarden per modus uit `app.css`, met een kleine parser in `web/test/helpers/tokens.ts`: `readTokens(css: string): { light: Record<string, string>; dark: Record<string, string> }`. Hij toetst `PAIRS` als tokenparen, bijv. `['--color-text', '--color-bg', 4.5]`, in beide modi.
+- **Geen nieuwe dependency in `web/package.json`.** Wil de planner toch een UI-library, dan alleen als die klein en gratis is (MIT/ISC of vergelijkbaar), geen netwerkverkeer doet en in de blueprint gemotiveerd wordt. Zelfgeschreven CSS heeft de voorkeur.
+
+**Acceptatiecriteria:**
+- AC-1: `cd web && npm run check && npm test && npm run build && npm run verify:build` slaagt. `node scripts/check-bundle-size.mjs` blijft binnen het precachebudget.
+- AC-2: Er verandert geen gedrag.
+  - `git diff develop...wp/WP-34 --name-only -- web/src` toont alleen `.svelte`- en `.css`-bestanden en `app.html`, plus `lib/timeline.ts` (nieuw) en additieve wijzigingen in `lib/types.ts` en `lib/view.ts` (blueprint, "Niet-CSS-wijzigingen"; aangepast na ontwerpkeuze B, 28 oktober 2026).
+  - Een uitzondering staat in de blueprint onder "Niet-CSS-wijzigingen", met reden, en verandert geen exportsignatuur.
+  - Bestaande tests in `web/test/` worden niet inhoudelijk gewijzigd, met uitzondering van `contrast.test.ts`. Een andere aanpassing (bijv. een selector) staat met reden in de blueprint.
+- AC-3: `npm test -- contrast` is groen.
+  - Elke kleurtoken staat in de lichte en de donkere set (de sets van tokennamen zijn gelijk).
+  - Elk paar in `PAIRS` haalt in beide modi zijn minimum: 4.5 voor tekst, 3 voor niet-tekst. De paren omvatten minstens:
+    - tekst, muted en accent op `--color-bg` en `--color-surface`;
+    - go, marginal en no-go als niet-tekst (3:1) op bg en surface; `--color-on-verdict` op `--color-error`; `--color-none` is decoratief (ontwerp B: geen tekst op oordeelkleuren);
+    - `--color-on-accent` op accent;
+    - `--color-header-text` op `--color-header-bg`;
+    - error op bg en op `--color-warning-bg`;
+    - `--color-focus` op bg en surface.
+  - De inventaristest faalt als een `.svelte`-bestand een hexkleur bevat.
+- AC-4: Een test leest `web/src/app.html` en vindt precies twee `theme-color`-metatags, één voor licht en één voor donker. Hun waarden zijn gelijk aan `--color-header-bg` van de modus in `app.css`. `theme_color` in het manifest is gelijk aan de lichte waarde.
+- AC-5: Geen externe bronnen.
+  - `rg -n "@import|@font-face|fonts\.googleapis|fonts\.gstatic|cdn\." web/src web/static` geeft geen treffers die naar een andere origin wijzen.
+  - `web/static/_headers` is ongewijzigd: `git diff develop...wp/WP-34 -- web/static/_headers` is leeg.
+  - Het build-artefact bevat geen `https://`-URL in CSS-bestanden.
+- AC-6: De bestaande a11y-tests (`web/test/a11y-*.test.ts`) zijn groen. Een nieuwe componenttest rendert `VerdictBadge` met `size="lg"` en controleert:
+  - de klassen `verdict`, `verdict-go` en `verdict-lg`;
+  - het attribuut `data-verdict="go"`;
+  - de tekst uit `verdictLabel('go')`.
+- AC-7: Screenshots in `docs/wp/WP-34/screens/` op 375×812 (DPR 1 of 2), elk als `<pagina>-light.png` en `<pagina>-dark.png`. Dat zijn 16 bestanden voor deze pagina's:
+  - `home` (lijst);
+  - `home-map` (kaart, of de foutmelding als er geen MapTiler-key is);
+  - `spot`;
+  - `login`;
+  - `profiel`;
+  - `alerts`;
+  - `mijn-sessies`;
+  - `sessie` (publieke `/s/[slug]`).
+
+  De modus wordt geëmuleerd met `prefers-color-scheme` (bijv. Chrome DevTools "Rendering" of de preview-tool), dus niet met een schakelaar in de app. Bij elke pagina geldt `document.documentElement.scrollWidth <= 375`; de verifier noteert de waarde in `verification.md`. De planner legt in de blueprint vast waar de data voor ingelogde pagina's en de sessiepagina vandaan komt (lokale Supabase met seed of de preview-deploy).
+- AC-8: Op de screenshots van `home` en `spot` is in beide modi zichtbaar:
+  - de footer met de bronvermelding (Open-Meteo, KNMI, Rijkswaterstaat, CC BY 4.0);
+  - op `home`: per spot een rij met een groot label voor vandaag en de tijdlijn.
+
+  Op `home-map` is de kaartattributie (MapTiler, OpenStreetMap, MapLibre) zichtbaar als de kaart laadt.
+- AC-10 (34b): Op de spotpagina wisselen dagtabs de zichtbare dag, en de eerste dag is standaard gekozen. Een test toetst het wisselen.
+- AC-11 (34b): `DayTimeline` staat op vier plekken: de lijst (vandaag en morgen), de spotpagina (per dag, met LW/HW en nu), `/s/[slug]` (tijdvak omkaderd) en Stille uren (24 uur). De componenten zijn getest. `timeline.ts` is unit-getest.
+- AC-9: Lars bekijkt de screenshots en de app op zijn eigen telefoon in licht en donker. Hij keurt het ontwerp goed, of geeft punten terug. Dit is `NEEDS_LARS`.
+
+**Nodig van Lars:**
+- Akkoord op het ontwerp via de screenshots (AC-9).
+- De keuze of de kaart in de donkere modus licht blijft (voorstel: ja, `streets-v4` ongewijzigd) of een donkere MapTiler-stijl krijgt. Dat laatste is een vervolg-WP: een extra stijl en markers op donkere tegels.
+- Optioneel: een voorkeur voor de exacte tint zeeblauw. Zonder voorkeur kiest de planner er een die in beide modi AA haalt.
+
+**Omvang:** M. Vrijwel alles is CSS, maar het raakt ongeveer 25 bestanden. Wordt de blueprint groter dan M, dan splitst de planner hem in WP-34a en WP-34b:
+- WP-34a: tokens, header, footer, spotlijst, spotpagina en kaartweergave;
+- WP-34b: profiel, alerts, login en sessiepagina's.
+
 ---
 
 ## Geoogst, maar niet als v2-WP opgenomen
@@ -696,3 +818,6 @@ Kalibratie: hier staat nog geen WP. Wordt er na een testweek iets gewijzigd, dan
 **Voorwaardelijk:**
 - WP-32: een spot waar `sea` aantoonbaar niet klopt.
 - WP-33: een icoonontwerp en/of de bevindingen van WP-23 AC-6.
+
+**Op verzoek (28 oktober 2026):**
+- WP-34: de keuze licht of donker voor de kaart in de donkere modus, en na de bouw het akkoord op de screenshots.

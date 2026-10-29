@@ -2,7 +2,7 @@
 	import { verdictLabel } from '#lib/labels.js';
 	import type { Verdict } from '#lib/types.js';
 
-	let { verdict }: { verdict: Verdict } = $props();
+	let { verdict, size = 'sm' }: { verdict: Verdict; size?: 'sm' | 'lg' } = $props();
 </script>
 
-<span class="verdict verdict-{verdict}" data-verdict={verdict}>{verdictLabel(verdict)}</span>
+<span class={['verdict', `verdict-${verdict}`, size === 'lg' && 'verdict-lg']} data-verdict={verdict}>{verdictLabel(verdict)}</span>

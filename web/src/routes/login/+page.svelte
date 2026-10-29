@@ -67,16 +67,18 @@
 		</p>
 	{/if}
 	<form novalidate onsubmit={submit}>
-		<label for="email">E-mailadres</label>
-		<input
-			id="email"
-			name="email"
-			type="email"
-			autocomplete="email"
-			inputmode="email"
-			required
-			bind:value={email}
-		/>
+		<div class="form-field">
+			<label for="email">E-mailadres</label>
+			<input
+				id="email"
+				name="email"
+				type="email"
+				autocomplete="email"
+				inputmode="email"
+				required
+				bind:value={email}
+			/>
+		</div>
 		<button type="submit" disabled={status === 'sending'}>
 			{status === 'sending' ? 'Bezig met versturen…' : 'Stuur inloglink'}
 		</button>
@@ -103,16 +105,18 @@
 			laden ook een voorvertoning).
 		</p>
 		<form novalidate onsubmit={submitLink}>
-			<label for="magic-link">Inloglink</label>
-			<input
-				id="magic-link"
-				name="magic-link"
-				type="url"
-				inputmode="url"
-				autocomplete="off"
-				aria-describedby="paste-link-preview"
-				bind:value={link}
-			/>
+			<div class="form-field">
+				<label for="magic-link">Inloglink</label>
+				<input
+					id="magic-link"
+					name="magic-link"
+					type="url"
+					inputmode="url"
+					autocomplete="off"
+					aria-describedby="paste-link-preview"
+					bind:value={link}
+				/>
+			</div>
 			<button type="submit" disabled={linkBusy}>Inloggen met link</button>
 			{#if linkError}<p role="alert" class="error">{linkError}</p>{/if}
 		</form>
