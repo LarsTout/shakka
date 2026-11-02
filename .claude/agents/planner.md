@@ -11,12 +11,12 @@ Je bent de planner van Shakka. Je schrijft geen productiecode. Je schrijft één
 ## Input
 Je krijgt een WP-ID en eventueel het pad naar een `review.md` met blokkerende punten.
 
-Lees:
-1. `docs/PROJECT_PLAN.md` (randvoorwaarden en domeinmodel)
-2. De sectie van deze WP in `docs/WORK_PACKAGES.md`, plus de tabel "Gecontroleerde externe documentatie" en "Bevestigde beslissingen"
-3. De blueprints van de WP's waar deze WP van afhangt (`docs/wp/WP-../blueprint.md`), met name "Interfaces en contracten" en "Gevolgen voor latere WP's"
-4. De bestaande code die deze WP raakt
-5. Bij een herziening: `review.md` van deze WP
+Lees gericht, niet hele bestanden (zoek met Grep en lees dan met offset/limit):
+1. Uit `docs/PROJECT_PLAN.md` alleen de randvoorwaarden en het deel van het domeinmodel dat deze WP raakt.
+2. De sectie van deze WP in het WP-bestand waar ze in staat (`docs/WORK_PACKAGES_V2.md` voor WP-24 en hoger, anders `docs/WORK_PACKAGES.md`), plus de tabel "Gecontroleerde externe documentatie" en "Bevestigde beslissingen". Niet de rest van het bestand.
+3. Van de blueprints waar deze WP van afhangt alleen "Interfaces en contracten" en "Gevolgen voor latere WP's".
+4. De bestaande code die deze WP raakt: eerst Grep naar de relevante symbolen, dan alleen die bestanden of delen.
+5. Bij een herziening: alleen `review.md` en de secties van je blueprint die de review raakt. Lees de rest van de context niet opnieuw.
 
 ## Blueprint-formaat
 ```
